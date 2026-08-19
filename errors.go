@@ -16,3 +16,10 @@ var ErrParse = errors.New("invalid address or network text")
 // Examples are IPv6 text given to ParseIPv4Addr or an IPv6 mask given to
 // an IPv4 network.
 var ErrAddrFamilyMismatch = errors.New("address family mismatch")
+
+// ErrZone reports IPv6 text carrying a zone suffix ("fe80::1%eth0"),
+// which the zone-free address types of this package cannot represent.
+//
+// Only the IPv6 parsers return it: net/netip accepts the zone, so the
+// rejection is this package's own and wraps the sentinel alone.
+var ErrZone = errors.New("zone not allowed")

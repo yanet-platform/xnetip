@@ -88,3 +88,40 @@ func (m IPv6Addr) AppendTo(b []byte) []byte {
 func (m IPv6Addr) StringExpanded() string {
 	return netip.AddrFrom16(m.As16()).StringExpanded()
 }
+
+// ParseIPv6Addr parses s as an IPv6 address ("2001:db8::1",
+// "::ffff:1.2.3.4").
+//
+// The accepted grammar is the IPv6 grammar of net/netip without zones:
+// hex groups of up to four digits in either case, one optional "::" for
+// at least one zero group, an optional dotted IPv4 quad as the last two
+// groups, nothing else. Other text wraps ErrParse with the net/netip
+// error that explains the rejection. A zone suffix ("fe80::1%eth0")
+// wraps ErrZone and dotted-decimal IPv4 text wraps ErrAddrFamilyMismatch,
+// each alone. IPv4-mapped text stays its 16 bytes, never unmapped. Every
+// error names the parser and echoes s, so errors.Is works on the sentinels.
+func ParseIPv6Addr(s string) (IPv6Addr, error) {
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return IPv6Addr{}, wrapParseError("ParseIPv6Addr", s, ErrParse, err)
+	}
+	if addr.Zone() != "" {
+		return IPv6Addr{}, wrapParseError("ParseIPv6Addr", s, ErrZone, nil)
+	}
+	if !addr.Is6() {
+		return IPv6Addr{}, wrapParseError("ParseIPv6Addr", s, ErrAddrFamilyMismatch, nil)
+	}
+	return IPv6AddrFrom16(addr.As16()), nil
+}
+
+// MustParseIPv6Addr calls ParseIPv6Addr and panics on error.
+//
+// It is intended for tests and package-level variables with hard-coded
+// text, like netip.MustParseAddr.
+func MustParseIPv6Addr(s string) IPv6Addr {
+	addr, err := ParseIPv6Addr(s)
+	if err != nil {
+		panic(err)
+	}
+	return addr
+}

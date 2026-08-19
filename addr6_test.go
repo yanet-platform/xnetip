@@ -621,3 +621,425 @@ func BenchmarkIPv6Addr_StringExpanded(b *testing.B) {
 		stringSink = address.StringExpanded()
 	}
 }
+
+// verifies that the eight-group form parses to the address it spells,
+// at the two extremes and for a typical address.
+func Test_ParseIPv6Addr_AcceptsFullForm(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  xnetip.IPv6Addr
+	}{
+		{name: "typical address with explicit zero groups", input: "2001:db8:0:0:0:0:0:1", want: xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)},
+		{name: "unspecified address spelled out", input: "0:0:0:0:0:0:0:0", want: xnetip.IPv6AddrFrom8(0, 0, 0, 0, 0, 0, 0, 0)},
+		{name: "all ones", input: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", want: xnetip.IPv6AddrFrom8(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := xnetip.ParseIPv6Addr(tc.input)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// verifies that one "::" stands for the run of zero groups that brings
+// the count to eight, wherever it sits.
+//
+// The cases put the compression alone, in front, in the middle and at
+// the end, standing for one group and for seven.
+func Test_ParseIPv6Addr_AcceptsCompressedForms(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  xnetip.IPv6Addr
+	}{
+		{name: "only the compression is the unspecified address", input: "::", want: xnetip.IPv6AddrFrom8(0, 0, 0, 0, 0, 0, 0, 0)},
+		{name: "leading compression before one group", input: "::1", want: xnetip.IPv6AddrFrom8(0, 0, 0, 0, 0, 0, 0, 1)},
+		{name: "trailing compression after two groups", input: "2001:db8::", want: xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0)},
+		{name: "compression between single groups", input: "2001::1", want: xnetip.IPv6AddrFrom8(0x2001, 0, 0, 0, 0, 0, 0, 1)},
+		{name: "compression between two groups and one", input: "2001:db8::1", want: xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)},
+		{name: "trailing compression standing for one group", input: "1:2:3:4:5:6:7::", want: xnetip.IPv6AddrFrom8(1, 2, 3, 4, 5, 6, 7, 0)},
+		{name: "leading compression standing for one group", input: "::1:2:3:4:5:6:7", want: xnetip.IPv6AddrFrom8(0, 1, 2, 3, 4, 5, 6, 7)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := xnetip.ParseIPv6Addr(tc.input)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// verifies that a second "::" is rejected as unparseable text, whether
+// separated by groups, glued together or wrapped around one group.
+func Test_ParseIPv6Addr_RejectsDoubleCompression(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "two compressions separated by a group", input: "1::2::3"},
+		{name: "three colons", input: ":::"},
+		{name: "compression on both sides of a group", input: "::1::"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv6Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that a "::" next to eight explicit groups is rejected as
+// unparseable text: the compression must stand for at least one group.
+func Test_ParseIPv6Addr_RejectsFullFormPlusCompression(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "eight groups then compression", input: "1:2:3:4:5:6:7:8::"},
+		{name: "compression then eight groups", input: "::1:2:3:4:5:6:7:8"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv6Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that without a compression exactly eight groups are required.
+//
+// Seven groups, nine groups, empty input and a lone colon are all
+// rejected as unparseable text.
+func Test_ParseIPv6Addr_RejectsWrongGroupCount(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "seven groups", input: "1:2:3:4:5:6:7"},
+		{name: "nine groups", input: "1:2:3:4:5:6:7:8:9"},
+		{name: "empty input", input: ""},
+		{name: "single colon", input: ":"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv6Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that a group of five hex digits is rejected as unparseable
+// text wherever it stands, even when its value would fit in a group.
+func Test_ParseIPv6Addr_RejectsTooManyHexDigits(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "five digits in the first group", input: "12345::"},
+		{name: "five digits in the last group", input: "::12345"},
+		{name: "five digits in a middle group", input: "1:22222:3::"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv6Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that uppercase hex digits are accepted and denote the same
+// address as their lowercase spelling.
+func Test_ParseIPv6Addr_AcceptsUppercaseHex(t *testing.T) {
+	upper, err := xnetip.ParseIPv6Addr("ABCD:EF01::")
+	require.NoError(t, err)
+	require.Equal(t, xnetip.IPv6AddrFrom8(0xABCD, 0xEF01, 0, 0, 0, 0, 0, 0), upper)
+	lower, err := xnetip.ParseIPv6Addr("abcd:ef01::")
+	require.NoError(t, err)
+	require.Equal(t, lower, upper)
+}
+
+// verifies that a dotted IPv4 quad in place of the last two groups is
+// accepted and fills those two groups.
+//
+// The quad is tested after a compression and after six explicit groups
+// alike.
+func Test_ParseIPv6Addr_AcceptsEmbeddedIPv4InLastPosition(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  xnetip.IPv6Addr
+	}{
+		{name: "IPv4-mapped address", input: "::ffff:1.2.3.4", want: xnetip.IPv6AddrFrom8(0, 0, 0, 0, 0, 0xffff, 0x0102, 0x0304)},
+		{name: "six groups then the quad", input: "1:2:3:4:5:6:1.2.3.4", want: xnetip.IPv6AddrFrom8(1, 2, 3, 4, 5, 6, 0x0102, 0x0304)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := xnetip.ParseIPv6Addr(tc.input)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// verifies that an embedded IPv4 quad is rejected as unparseable text
+// when it is malformed or stands anywhere but in the last two groups.
+func Test_ParseIPv6Addr_RejectsEmbeddedIPv4NotInLastPosition(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "quad with an octet above 255", input: "64:ff9b::1.2.3.300"},
+		{name: "quad before the compression", input: "1.2.3.4::"},
+		{name: "quad in the second position", input: "1:1.2.3.4:2:3:4:5:6"},
+		{name: "quad followed by a group", input: "::1.2.3.4:5"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv6Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that the whole input must be the address, so any surrounding
+// or trailing byte is rejected as unparseable text.
+//
+// The cases cover whitespace, non-hex letters, a CIDR suffix, a
+// multibyte character and a zone marker with no address in front of it.
+func Test_ParseIPv6Addr_RejectsGarbageAndWhitespace(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "leading space", input: " ::1"},
+		{name: "trailing space", input: "::1 "},
+		{name: "trailing newline", input: "::1\n"},
+		{name: "letters beyond the hex range", input: "gggg::"},
+		{name: "CIDR suffix", input: "2001:db8::1/32"},
+		{name: "multibyte character in the last group", input: "::é"},
+		{name: "bare zone without an address", input: "%eth0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv6Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that well-formed dotted-decimal IPv4 text is rejected as a
+// family mismatch, not as unparseable text.
+func Test_ParseIPv6Addr_RejectsIPv4AsFamilyMismatch(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "private IPv4 literal", input: "192.168.1.1"},
+		{name: "unspecified IPv4 address", input: "0.0.0.0"},
+		{name: "broadcast IPv4 address", input: "255.255.255.255"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv6Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+			require.NotErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that an otherwise valid address carrying a zone suffix is
+// rejected with the zone sentinel alone.
+//
+// The address type has no zone to keep it in. The cases cover a link-local address with an interface name, the
+// loopback with a numeric zone, the unspecified address with a
+// single-letter zone and an IPv4-mapped address with a zone.
+func Test_ParseIPv6Addr_RejectsZone(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "link-local with interface name", input: "fe80::1%eth0"},
+		{name: "loopback with numeric zone", input: "::1%0"},
+		{name: "unspecified with single-letter zone", input: "::%x"},
+		{name: "IPv4-mapped with zone", input: "::ffff:1.2.3.4%eth0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv6Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrZone)
+			require.NotErrorIs(t, err, xnetip.ErrParse)
+			require.NotErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+		})
+	}
+}
+
+// verifies that the error message names the parser, echoes the input in
+// quotes and carries the cause, so a log line identifies the failed text.
+func Test_ParseIPv6Addr_ErrorEchoesInput(t *testing.T) {
+	_, err := xnetip.ParseIPv6Addr(":::")
+	require.Error(t, err)
+	require.True(t, strings.HasPrefix(err.Error(), `xnetip.ParseIPv6Addr(":::"): `), err.Error())
+	require.Contains(t, err.Error(), xnetip.ErrParse.Error())
+	_, err = xnetip.ParseIPv6Addr("fe80::1%eth0")
+	require.Error(t, err)
+	require.Equal(t, `xnetip.ParseIPv6Addr("fe80::1%eth0"): `+xnetip.ErrZone.Error(), err.Error())
+	_, err = xnetip.ParseIPv6Addr("192.168.1.1")
+	require.Error(t, err)
+	require.Equal(t, `xnetip.ParseIPv6Addr("192.168.1.1"): `+xnetip.ErrAddrFamilyMismatch.Error(), err.Error())
+}
+
+// verifies that the panicking variant panics on unparseable text with the
+// parse error itself.
+func Test_MustParseIPv6Addr_PanicsOnError(t *testing.T) {
+	require.PanicsWithError(t, `xnetip.ParseIPv6Addr("x"): `+xnetip.ErrParse.Error()+`: ParseAddr("x"): unable to parse IP`, func() {
+		xnetip.MustParseIPv6Addr("x")
+	})
+}
+
+// verifies that the panicking variant returns the parsed address on valid
+// text.
+func Test_MustParseIPv6Addr_ReturnsOnSuccess(t *testing.T) {
+	require.Equal(t, xnetip.IPv6AddrFrom8(0, 0, 0, 0, 0, 0, 0, 1), xnetip.MustParseIPv6Addr("::1"))
+}
+
+// verifies that parsing the canonical text of an address yields the
+// address back, for every address including the IPv4-mapped ones.
+func Test_ParseIPv6Addr_RoundTripsThroughString(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		got, err := xnetip.ParseIPv6Addr(address.String())
+		require.NoError(t, err)
+		require.Equal(t, address, got)
+	})
+}
+
+// verifies that parsing the expanded text of an address yields the
+// address back, for every address.
+func Test_ParseIPv6Addr_RoundTripsThroughStringExpanded(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		got, err := xnetip.ParseIPv6Addr(address.StringExpanded())
+		require.NoError(t, err)
+		require.Equal(t, address, got)
+	})
+}
+
+// verifies accept/reject parity with net/netip on strings drawn from the
+// characters of the address grammar plus a few easy-to-confuse extras.
+//
+// Drawing from that alphabet rather than from arbitrary bytes exercises
+// the parity close to the accept boundary, the zone marker included.
+func Test_ParseIPv6Addr_NearMissParityWithNetip(t *testing.T) {
+	alphabet := []byte(".:/%+ x0123456789abcdefABCDEF")
+	rapid.Check(t, func(t *rapid.T) {
+		text := string(rapid.SliceOfN(rapid.SampledFrom(alphabet), 0, 48).Draw(t, "text"))
+		requireParseIPv6AddrMatchesNetip(t, text)
+	})
+}
+
+// verifies accept/reject parity with net/netip on the text of a valid
+// address with one byte deleted or replaced by an arbitrary byte.
+func Test_ParseIPv6Addr_MutationParityWithNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		text := []byte(genIPv6Addr.Draw(t, "address").String())
+		position := rapid.IntRange(0, len(text)-1).Draw(t, "position")
+		if rapid.Bool().Draw(t, "delete") {
+			text = slices.Delete(text, position, position+1)
+		} else {
+			text[position] = rapid.Byte().Draw(t, "replacement")
+		}
+		requireParseIPv6AddrMatchesNetip(t, string(text))
+	})
+}
+
+// verifies accept/reject parity and value agreement with net/netip on
+// arbitrary text, seeded with the unit tables and the benchmark shapes.
+func FuzzParseIPv6Addr(f *testing.F) {
+	seeds := []string{
+		"2001:db8:0:0:0:0:0:1", "0:0:0:0:0:0:0:0", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+		"::", "::1", "2001:db8::", "2001::1", "2001:db8::1", "1:2:3:4:5:6:7::", "::1:2:3:4:5:6:7",
+		"1::2::3", ":::", "::1::",
+		"1:2:3:4:5:6:7:8::", "::1:2:3:4:5:6:7:8",
+		"1:2:3:4:5:6:7", "1:2:3:4:5:6:7:8:9", "", ":",
+		"12345::", "::12345", "1:22222:3::",
+		"ABCD:EF01::", "abcd:ef01::",
+		"::ffff:1.2.3.4", "1:2:3:4:5:6:1.2.3.4",
+		"64:ff9b::1.2.3.300", "1.2.3.4::", "1:1.2.3.4:2:3:4:5:6", "::1.2.3.4:5",
+		" ::1", "::1 ", "::1\n", "gggg::", "2001:db8::1/32", "::é", "%eth0",
+		"192.168.1.1", "0.0.0.0", "255.255.255.255",
+		"fe80::1%eth0", "::1%0", "::%x", "::ffff:1.2.3.4%eth0", "::1%", "x",
+		"2001:db8:1:2:3:4:5:6", "2a02:6b8::c00:1", "::ffff:192.0.2.1",
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, text string) {
+		requireParseIPv6AddrMatchesNetip(t, text)
+	})
+}
+
+// requireParseIPv6AddrMatchesNetip asserts that the parser accepts text
+// exactly when net/netip parses it as zone-free IPv6, with the same bytes.
+func requireParseIPv6AddrMatchesNetip(t require.TestingT, text string) {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	got, err := xnetip.ParseIPv6Addr(text)
+	want, wantErr := netip.ParseAddr(text)
+	if wantErr != nil || !want.Is6() || want.Zone() != "" {
+		require.Error(t, err, "input %q", text)
+		return
+	}
+	require.NoError(t, err, "input %q", text)
+	require.Equal(t, want.As16(), got.As16(), "input %q", text)
+}
+
+// verifies that parsing valid text does not allocate in the compressed,
+// the full and the IPv4-mapped form: only the error wrapping allocates.
+func Test_ParseIPv6Addr_DoesNotAllocate(t *testing.T) {
+	for _, text := range []string{"2001:db8::1", "2001:db8:1:2:3:4:5:6", "::ffff:192.0.2.1"} {
+		requireNoAllocs(t, func() { ipv6AddrSink, errSink = xnetip.ParseIPv6Addr(text) })
+	}
+}
+
+func BenchmarkParseIPv6Addr_Compressed(b *testing.B) {
+	text := "2001:db8::1"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipv6AddrSink, errSink = xnetip.ParseIPv6Addr(text)
+	}
+}
+
+func BenchmarkParseIPv6Addr_Full(b *testing.B) {
+	text := "2001:db8:1:2:3:4:5:6"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipv6AddrSink, errSink = xnetip.ParseIPv6Addr(text)
+	}
+}
+
+func BenchmarkParseIPv6Addr_CompressedMiddle(b *testing.B) {
+	text := "2a02:6b8::c00:1"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipv6AddrSink, errSink = xnetip.ParseIPv6Addr(text)
+	}
+}
+
+func BenchmarkParseIPv6Addr_Mapped(b *testing.B) {
+	text := "::ffff:192.0.2.1"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipv6AddrSink, errSink = xnetip.ParseIPv6Addr(text)
+	}
+}
+
+func BenchmarkParseIPv6Addr_Reject(b *testing.B) {
+	text := "1::2::3"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipv6AddrSink, errSink = xnetip.ParseIPv6Addr(text)
+	}
+}

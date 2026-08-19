@@ -122,4 +122,5 @@ var (
 	stringSink   string
 	errSink      error
 	ipv4AddrSink xnetip.IPv4Addr
+	ipv6AddrSink xnetip.IPv6Addr
 )
