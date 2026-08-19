@@ -72,6 +72,36 @@ var genIPv4Addr = rapid.Custom(func(t *rapid.T) xnetip.IPv4Addr {
 	return xnetip.IPv4AddrFromBits(rapid.SampledFrom(boundaries).Draw(t, "boundary"))
 })
 
+// genIPv6Addr draws an IPv6 address: uniform over the 128-bit space, with
+// one draw in ten on a boundary pattern and one in ten IPv4-mapped.
+//
+// The fixed shapes are the two extremes, each half alone at its extreme,
+// the top bit alone, the bottom bit alone, and a mapped address with a
+// random IPv4 part — the patterns the IPv6 mask generators later build
+// from, including the masks straddling bit 64. They are drawn explicitly
+// because shrinking walks towards zero and rarely stops at the other
+// boundaries.
+var genIPv6Addr = rapid.Custom(func(t *rapid.T) xnetip.IPv6Addr {
+	switch rapid.IntRange(0, 9).Draw(t, "shape") {
+	case 0:
+		boundaries := [][2]uint64{
+			{0, 0},
+			{math.MaxUint64, math.MaxUint64},
+			{0, math.MaxUint64},
+			{math.MaxUint64, 0},
+			{1 << 63, 0},
+			{0, 1},
+		}
+		halves := rapid.SampledFrom(boundaries).Draw(t, "boundary")
+		return xnetip.IPv6AddrFromBits(halves[0], halves[1])
+	case 1:
+		mapped := 0x0000ffff00000000 | uint64(rapid.Uint32().Draw(t, "mapped"))
+		return xnetip.IPv6AddrFromBits(0, mapped)
+	default:
+		return xnetip.IPv6AddrFromBits(rapid.Uint64().Draw(t, "hi"), rapid.Uint64().Draw(t, "lo"))
+	}
+})
+
 // failRecorder is a require.TestingT that records failures instead of
 // stopping the test, so a helper's negative path can be asserted.
 type failRecorder struct {
