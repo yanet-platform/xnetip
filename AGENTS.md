@@ -35,7 +35,7 @@ parse.go format.go errors.go compact.go   parsing (net/netip based), String/Appe
 addrs.go difference.go range.go aggregate.go binary_split.go   heavy algorithms, one file each
 *_test.go          mirror of the source file, package xnetip_test; *_internal_test.go only for unexported code
 testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by the type's birth session
-.roadmap/          gitignored session plan: 00-overview.md (order, status, backlog) + NNN-slug.md per session
+.roadmap/          gitignored session plan: 00-overview.md (order, status, backlog) + NNN-slug.md per pending session (deleted once done)
 .agents/conventions/{go,comments,tests}.md   style rules (read the one you touch)
 ```
 
@@ -63,7 +63,7 @@ testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by t
 3. Implement the one function, keeping v4/v6 parity, and run `make test` until green.
 4. Benchmarks only where the session file says so (algorithms, parse/format/compare) — `b.Loop()`, `b.ReportAllocs()`. Trivial delegates are waived with the reason recorded.
 5. Gates: `make lint` (gofumpt, vet, golangci-lint, gocommentlint) and `make test` clean. Doc comment on every exported symbol, brief + blank + detailed shape.
-6. Update the session status in `.roadmap/00-overview.md` and the session file, then commit.
+6. Mark the row `done` in `.roadmap/00-overview.md`, commit, then delete the session file — a finished session leaves only its overview row and its commit.
 
 ## Commits
 
