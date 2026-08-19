@@ -12,7 +12,7 @@ Loaded on demand by the agent writing or reviewing tests. This is the single sou
 - **Construct networks via string notation** in tests — `MustParseIPv4Network("10.0.0.0/255.0.255.0")` — never raw integer literals, except in tests specifically about the `*FromBits` APIs or inside generators.
 - **Assertions are testify**: `require` by default (a table case stops at its first broken invariant, like `assert_eq!`), `assert` only when several independent checks on one result should all be reported. Argument order is `(t, expected, actual)`, enforced by `testifylint`. `require.Equal` for values, `require.True` for predicates, `require.ErrorIs` for sentinels, `require.NoError` for preconditions, `requireNoAllocs` for hot paths.
 - **Helpers are documented** with a one-line brief stating the shape they return and the invariant they assume. Shared helpers live in `testutil_test.go`, take `require.TestingT` (never `*testing.T`) so they also run inside `rapid.Check`, and are added only when testify and rapid lack the assertion: today `requireNoAllocs`. The rapid generators `gen<Type>` live there too.
-- Tests live in `package xnetip_test`. White-box tests for unexported code (`uint128`, kernels) go in `*_internal_test.go` with `package xnetip` and are the exception, not the default.
+- Tests live in `package xnetip_test`. The one white-box file is `uint128_test.go` in `package xnetip`, because the word type is unexported. No name suffix marks it — the package clause does — and no further white-box file is planned: unexported kernels are tested through the public API they serve.
 
 ## What every operation session must cover (both families where the operation exists)
 

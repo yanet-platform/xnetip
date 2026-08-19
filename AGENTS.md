@@ -33,7 +33,7 @@ addr4.go addr6.go addr.go        IPv4Addr{uint32}  IPv6Addr{uint128}  IPAddr{add
 network4.go network6.go network.go   IPv4Network  IPv6Network  IPNetwork{network IPv6Network; is4 bool}
 parse.go format.go errors.go compact.go   parsing (net/netip based), String/AppendTo/MarshalText, sentinels, Compact[T]
 addrs.go difference.go range.go aggregate.go binary_split.go   heavy algorithms, one file each
-*_test.go          mirror of the source file, package xnetip_test; *_internal_test.go only for unexported code
+*_test.go          mirror of the source file, package xnetip_test; uint128_test.go is the one white-box file (package xnetip)
 testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by the type's birth session
 .roadmap/          gitignored session plan: 00-overview.md (order, status, backlog) + NNN-slug.md per pending session (deleted once done)
 .agents/conventions/{go,comments,tests}.md   style rules (read the one you touch)
