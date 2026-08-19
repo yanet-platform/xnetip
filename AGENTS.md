@@ -31,8 +31,9 @@ CI (GitHub Actions, `.github/workflows/ci.yml`) runs `go test -race`, vet, gofum
 uint128.go         unexported 128-bit helper {hi, lo uint64}, exported methods, unexported constructors — every IPv6 bit trick goes through it
 addr4.go addr6.go addr.go        IPv4Addr{uint32}  IPv6Addr{uint128}  IPAddr{addr IPv6Addr; is4 bool}
 network4.go network6.go network.go   IPv4Network  IPv6Network  IPNetwork{network IPv6Network; is4 bool}
-parse.go format.go errors.go compact.go   parsing (net/netip based), String/AppendTo/MarshalText, sentinels, Compact[T]
-addrs.go difference.go range.go aggregate.go binary_split.go   heavy algorithms, one file each
+                   a type's whole API lives in its file (constructors, Parse*, formatters, marshalling, predicates, set algebra, Addrs, Difference)
+errors.go compact.go             sentinels, Compact[T]
+range.go aggregate.go binary_split.go   free functions over ranges and slices (RangeToNetworks*, Aggregate*, BinarySplit*), one file each
 *_test.go          mirror of the source file, package xnetip_test; uint128_test.go is the one white-box file (package xnetip)
 testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by the type's birth session
 .roadmap/          gitignored session plan: 00-overview.md (order, status, backlog) + NNN-slug.md per pending session (deleted once done)
@@ -68,6 +69,6 @@ testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by t
 ## Commits
 
 - Commit directly to `main`, one commit per session, only after all gates are green. Do not amend or rewrite existing commits. `gh` writes only when the task asks for them.
-- Subject: `feat|fix|perf|refactor|test|docs|chore(scope): brief` — lowercase brief, no trailing period, scope = file or type (`network4`, `uint128`, `parse`). Tests and benchmarks of the change go in the same commit.
+- Subject: `feat|fix|perf|refactor|test|docs|chore(scope): brief` — lowercase brief, no trailing period, scope = file or type (`network4`, `uint128`, `addr6`). Tests and benchmarks of the change go in the same commit.
 - **No AI attribution anywhere**: no `Co-Authored-By`, no "Generated with" footers, in commits or in any file.
 - Never edit `../netip`.
