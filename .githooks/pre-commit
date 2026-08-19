@@ -1,0 +1,54 @@
+#!/bin/sh
+# Reject a commit whose staged Go files are not gofumpt-formatted or whose
+# staged comments break the shape gocommentlint enforces.
+#
+# Each file is checked from its STAGED blob (`git show :path`), not the
+# working copy, so partially staged files are judged by what will actually
+# be committed and an unrelated dirty tree never blocks a commit. Activate
+# once per clone with `make hooks` (git config core.hooksPath .githooks).
+
+set -u
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# The lint binaries live in $GOPATH/bin, which may not be on PATH in the
+# environment git runs hooks from.
+if command -v go >/dev/null 2>&1; then
+    PATH="$(go env GOPATH)/bin:$PATH"
+    export PATH
+fi
+
+for tool in gofumpt gocommentlint; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        printf 'pre-commit: %s not found on PATH (see AGENTS.md, "Build, test, lint")\n' "$tool" >&2
+        exit 1
+    fi
+done
+
+staged_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
+
+status=0
+if [ -n "$staged_files" ]; then
+    newline='
+'
+    IFS=$newline
+    for staged_file in $staged_files; do
+        IFS=' '
+        if [ -n "$(git show ":$staged_file" | gofumpt -l)" ]; then
+            printf '%s: not gofumpt-formatted\n' "$staged_file" >&2
+            status=1
+        fi
+        IFS=$newline
+    done
+    unset IFS
+    if [ "$status" -ne 0 ]; then
+        printf "\nRun 'gofumpt -w .' and stage the result.\n" >&2
+    fi
+fi
+
+if ! gocommentlint; then
+    printf "\ngocommentlint failed: fix the violations above, or bypass with 'git commit --no-verify'.\n" >&2
+    status=1
+fi
+
+exit "$status"
