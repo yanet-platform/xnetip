@@ -45,3 +45,14 @@ func (m IPv6Addr) As16() [16]byte {
 func (m IPv6Addr) Bits() (hi, lo uint64) {
 	return m.bits.hi, m.bits.lo
 }
+
+// Compare returns -1, 0 or +1 as m sorts before, equal to or after other.
+//
+// The order is the numeric order of the 128-bit address, high half first
+// and low half on a tie, the same order netip.Addr.Compare gives two IPv6
+// addresses without zones. It is the order every sorting operation in
+// this package uses for IPv6 addresses, and the key the network order
+// packs together with the mask.
+func (m IPv6Addr) Compare(other IPv6Addr) int {
+	return m.bits.Compare(other.bits)
+}
