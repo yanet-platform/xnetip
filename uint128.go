@@ -1,6 +1,9 @@
 package xnetip
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"math/bits"
+)
 
 // uint128 is an unsigned 128-bit integer stored as two host-order
 // 64-bit halves, the same layout net/netip uses internally.
@@ -81,4 +84,87 @@ func (m uint128) Compare(other uint128) int {
 	default:
 		return 1
 	}
+}
+
+// Add returns the sum of the two values modulo 2^128.
+func (m uint128) Add(other uint128) uint128 {
+	lo, carry := bits.Add64(m.lo, other.lo, 0)
+	hi, _ := bits.Add64(m.hi, other.hi, carry)
+	return uint128{hi, lo}
+}
+
+// Sub returns the difference of the two values modulo 2^128.
+func (m uint128) Sub(other uint128) uint128 {
+	lo, borrow := bits.Sub64(m.lo, other.lo, 0)
+	hi, _ := bits.Sub64(m.hi, other.hi, borrow)
+	return uint128{hi, lo}
+}
+
+// AddOne returns the value plus one modulo 2^128.
+func (m uint128) AddOne() uint128 {
+	lo, carry := bits.Add64(m.lo, 1, 0)
+	return uint128{m.hi + carry, lo}
+}
+
+// SubOne returns the value minus one modulo 2^128.
+func (m uint128) SubOne() uint128 {
+	lo, borrow := bits.Sub64(m.lo, 1, 0)
+	return uint128{m.hi - borrow, lo}
+}
+
+// Neg returns the two's complement of the value, its negation modulo 2^128.
+//
+// A value and-ed with its negation keeps exactly its lowest set bit,
+// which is how the difference peel and the range decomposition find
+// their next block (../netip/src/net.rs:3918, ../netip/src/net.rs:4178).
+func (m uint128) Neg() uint128 {
+	return uint128{}.Sub(m)
+}
+
+// Shl returns the value shifted left by n bits, for n in 0 through 128.
+//
+// Bits shifted past the top are lost. A count of 64 or more moves the
+// low half into the high half, a count of 128 or more yields zero, so
+// the shift is total over the counts the prefix arithmetic produces (a
+// mask from a prefix length of 0 or 128, a block from a leading-zero
+// count), where the Rust reference guards with a checked shift.
+func (m uint128) Shl(n uint) uint128 {
+	switch {
+	case n == 0:
+		return m
+	case n < 64:
+		return uint128{m.hi<<n | m.lo>>(64-n), m.lo << n}
+	case n < 128:
+		return uint128{m.lo << (n - 64), 0}
+	default:
+		return uint128{}
+	}
+}
+
+// Shr returns the value shifted right by n bits, for n in 0 through 128.
+//
+// It mirrors Shl: bits shifted past the bottom are lost, a count of 64
+// or more moves the high half into the low half and a count of 128 or
+// more yields zero.
+func (m uint128) Shr(n uint) uint128 {
+	switch {
+	case n == 0:
+		return m
+	case n < 64:
+		return uint128{m.hi >> n, m.lo>>n | m.hi<<(64-n)}
+	case n < 128:
+		return uint128{0, m.hi >> (n - 64)}
+	default:
+		return uint128{}
+	}
+}
+
+// uint128FromUint64 widens a 64-bit value into the low half.
+func uint128FromUint64(value uint64) uint128 {
+	return uint128{0, value}
+}
+
+// uint128FromHalves assembles a value from its high and low halves.
+func uint128FromHalves(hi, lo uint64) uint128 {
+	return uint128{hi, lo}
 }
