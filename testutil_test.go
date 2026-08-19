@@ -11,10 +11,13 @@
 package xnetip_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
+
+	"github.com/yanet-platform/xnetip"
 )
 
 // requireNoAllocs stops the test when running the closure allocates.
@@ -53,6 +56,21 @@ func Test_RequireNoAllocs_ComposesWithRapid(t *testing.T) {
 		requireNoAllocs(t, func() { wordSink = word &^ 0x0f0f0f0f })
 	})
 }
+
+// genIPv4Addr draws an IPv4 address: uniform over the 32-bit space, with
+// one draw in ten landing on a boundary or half-word pattern.
+//
+// The fixed shapes are the two extremes, the sign-bit split, and the two
+// half-word masks, the patterns the network generators later build
+// masks from. They are drawn explicitly because shrinking walks towards
+// zero and rarely stops at the other boundaries.
+var genIPv4Addr = rapid.Custom(func(t *rapid.T) xnetip.IPv4Addr {
+	if rapid.IntRange(0, 9).Draw(t, "shape") > 0 {
+		return xnetip.IPv4AddrFromBits(rapid.Uint32().Draw(t, "bits"))
+	}
+	boundaries := []uint32{0, math.MaxUint32, 0x7FFFFFFF, 0x80000000, 0x0000FFFF, 0xFFFF0000}
+	return xnetip.IPv4AddrFromBits(rapid.SampledFrom(boundaries).Draw(t, "boundary"))
+})
 
 // failRecorder is a require.TestingT that records failures instead of
 // stopping the test, so a helper's negative path can be asserted.
