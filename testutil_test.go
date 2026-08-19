@@ -117,5 +117,6 @@ func (m *failRecorder) FailNow() { m.failedNow = true }
 // optimise the work under test away.
 var (
 	wordSink  uint32
+	intSink   int
 	bytesSink []byte
 )

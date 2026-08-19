@@ -1,9 +1,11 @@
 package xnetip_test
 
 import (
+	"cmp"
 	"encoding/binary"
 	"math"
 	"net/netip"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,4 +106,153 @@ func Test_IPv4Addr_Construction_DoesNotAllocate(t *testing.T) {
 		wordSink = xnetip.IPv4AddrFromBits(address.Bits()).Bits()
 		octets = address.As4()
 	})
+}
+
+// verifies that compare is the numeric order of the 32-bit pattern.
+//
+// The first octet dominates, lower octets break ties, the top bit is not
+// a sign bit, and swapping the operands mirrors the sign.
+func Test_IPv4Addr_Compare_OrdersNumerically(t *testing.T) {
+	cases := []struct {
+		name        string
+		left, right [4]byte
+		want        int
+	}{
+		{name: "equal addresses compare 0", left: [4]byte{10, 0, 0, 1}, right: [4]byte{10, 0, 0, 1}, want: 0},
+		{name: "lower octet chain sorts first", left: [4]byte{192, 168, 0, 1}, right: [4]byte{192, 168, 1, 0}, want: -1},
+		{name: "first octet dominates", left: [4]byte{9, 255, 255, 255}, right: [4]byte{10, 0, 0, 0}, want: -1},
+		{name: "minimum sorts before maximum", left: [4]byte{0, 0, 0, 0}, right: [4]byte{255, 255, 255, 255}, want: -1},
+		{name: "high-bit addresses are not negative", left: [4]byte{127, 255, 255, 255}, right: [4]byte{128, 0, 0, 0}, want: -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			left, right := xnetip.IPv4AddrFrom4(tc.left), xnetip.IPv4AddrFrom4(tc.right)
+			require.Equal(t, tc.want, left.Compare(right))
+			require.Equal(t, -tc.want, right.Compare(left))
+		})
+	}
+}
+
+// verifies that the method expression is a comparator the standard sort
+// accepts and that it yields ascending numeric order.
+func Test_IPv4Addr_Compare_SortsWithSliceSortFunc(t *testing.T) {
+	addrs := []xnetip.IPv4Addr{
+		xnetip.IPv4AddrFrom4([4]byte{255, 0, 0, 0}),
+		xnetip.IPv4AddrFrom4([4]byte{0, 0, 0, 1}),
+		xnetip.IPv4AddrFrom4([4]byte{10, 0, 0, 0}),
+	}
+	slices.SortFunc(addrs, xnetip.IPv4Addr.Compare)
+	require.Equal(t, []xnetip.IPv4Addr{
+		xnetip.IPv4AddrFrom4([4]byte{0, 0, 0, 1}),
+		xnetip.IPv4AddrFrom4([4]byte{10, 0, 0, 0}),
+		xnetip.IPv4AddrFrom4([4]byte{255, 0, 0, 0}),
+	}, addrs)
+}
+
+// verifies that compare is antisymmetric and that every address compares
+// equal to itself.
+func Test_IPv4Addr_Compare_AntisymmetricAndReflexive(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Addr.Draw(t, "left")
+		right := genIPv4Addr.Draw(t, "right")
+		require.Equal(t, -right.Compare(left), left.Compare(right))
+		require.Equal(t, 0, left.Compare(left))
+	})
+}
+
+// verifies that compare is transitive: once three addresses are sorted by
+// it, the first also sorts no later than the last.
+func Test_IPv4Addr_Compare_Transitive(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addrs := []xnetip.IPv4Addr{
+			genIPv4Addr.Draw(t, "first"),
+			genIPv4Addr.Draw(t, "second"),
+			genIPv4Addr.Draw(t, "third"),
+		}
+		slices.SortFunc(addrs, xnetip.IPv4Addr.Compare)
+		require.LessOrEqual(t, addrs[0].Compare(addrs[1]), 0)
+		require.LessOrEqual(t, addrs[1].Compare(addrs[2]), 0)
+		require.LessOrEqual(t, addrs[0].Compare(addrs[2]), 0)
+	})
+}
+
+// verifies that compare reports 0 exactly when the two addresses are equal
+// under ==, so order and structural equality never disagree.
+func Test_IPv4Addr_Compare_ZeroIffEqual(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Addr.Draw(t, "left")
+		right := genIPv4Addr.Draw(t, "right")
+		if rapid.Bool().Draw(t, "same") {
+			right = left
+		}
+		require.Equal(t, left == right, left.Compare(right) == 0)
+	})
+}
+
+// verifies that compare is the numeric order of the integer view, the
+// contract the network order and the slice algorithms build on.
+func Test_IPv4Addr_Compare_IsNumericOrderOfBits(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Addr.Draw(t, "left")
+		right := genIPv4Addr.Draw(t, "right")
+		require.Equal(t, cmp.Compare(left.Bits(), right.Bits()), left.Compare(right))
+	})
+}
+
+// verifies that compare agrees with net/netip on every pair of IPv4
+// addresses, pinning the order against the standard library.
+func Test_IPv4Addr_Compare_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Addr.Draw(t, "left")
+		right := genIPv4Addr.Draw(t, "right")
+		want := netip.AddrFrom4(left.As4()).Compare(netip.AddrFrom4(right.As4()))
+		require.Equal(t, want, left.Compare(right))
+	})
+}
+
+// verifies that compare does not allocate.
+func Test_IPv4Addr_Compare_DoesNotAllocate(t *testing.T) {
+	left := xnetip.IPv4AddrFrom4([4]byte{192, 168, 0, 1})
+	right := xnetip.IPv4AddrFrom4([4]byte{192, 168, 1, 0})
+	requireNoAllocs(t, func() { intSink = left.Compare(right) })
+}
+
+func BenchmarkIPv4Addr_Compare(b *testing.B) {
+	fixture := benchIPv4Addrs(2)
+	left, right := fixture[0], fixture[1]
+	b.ReportAllocs()
+	for b.Loop() {
+		intSink = left.Compare(right)
+	}
+}
+
+// Sorts a fresh copy of the fixture on every iteration, the refresh
+// included in the timed region.
+//
+// A 4 KiB copy is well under one percent of the sort, and pausing the
+// timer inside a b.Loop body keeps the loop from ever reaching its
+// benchtime on Go 1.24.
+func BenchmarkIPv4Addr_SortFunc_1024(b *testing.B) {
+	fixture := benchIPv4Addrs(1024)
+	scratch := make([]xnetip.IPv4Addr, len(fixture))
+	b.ReportAllocs()
+	for b.Loop() {
+		copy(scratch, fixture)
+		slices.SortFunc(scratch, xnetip.IPv4Addr.Compare)
+	}
+}
+
+// benchIPv4Addrs returns count addresses in a fixed, unsorted "random-ish"
+// order, the same fixture on every run.
+//
+// Each address is its index multiplied by Knuth's multiplicative hash
+// constant, the recipe of the Rust crate's sort benchmark
+// (../netip/benches/net.rs:2293), so the two sort benchmarks see the same
+// input shape.
+func benchIPv4Addrs(count int) []xnetip.IPv4Addr {
+	addrs := make([]xnetip.IPv4Addr, count)
+	for idx := range addrs {
+		addrs[idx] = xnetip.IPv4AddrFromBits(uint32(idx) * 2_654_435_761)
+	}
+	return addrs
 }

@@ -1,6 +1,9 @@
 package xnetip
 
-import "encoding/binary"
+import (
+	"cmp"
+	"encoding/binary"
+)
 
 // IPv4Addr is an IPv4 address stored as a host-order 32-bit integer.
 //
@@ -35,4 +38,14 @@ func (m IPv4Addr) As4() [4]byte {
 // Bits returns the address as a host-order 32-bit integer.
 func (m IPv4Addr) Bits() uint32 {
 	return m.bits
+}
+
+// Compare returns -1, 0 or +1 as m sorts before, equal to or after other.
+//
+// The order is the numeric order of the 32-bit address, the same order
+// netip.Addr.Compare gives two IPv4 addresses. It is the order every
+// sorting operation in this package uses for IPv4 addresses, and the
+// key the network order packs together with the mask.
+func (m IPv4Addr) Compare(other IPv4Addr) int {
+	return cmp.Compare(m.bits, other.bits)
 }
