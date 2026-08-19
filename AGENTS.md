@@ -28,7 +28,7 @@ CI (GitHub Actions, `.github/workflows/ci.yml`) runs `go test -race`, vet, gofum
 ## Layout
 
 ```
-uint128.go         unexported 128-bit helper {hi, lo uint64} — every IPv6 bit trick goes through it
+uint128.go         unexported 128-bit helper {hi, lo uint64}, exported methods, unexported constructors — every IPv6 bit trick goes through it
 addr4.go addr6.go addr.go        IPv4Addr{uint32}  IPv6Addr{uint128}  IPAddr{addr IPv6Addr; is4 bool}
 network4.go network6.go network.go   IPv4Network  IPv6Network  IPNetwork{network IPv6Network; is4 bool}
 parse.go format.go errors.go compact.go   parsing (net/netip based), String/AppendTo/MarshalText, sentinels, Compact[T]

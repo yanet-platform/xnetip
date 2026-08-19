@@ -30,7 +30,7 @@ func Test_Uint128_From16_RoundTripsExtremes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.value, uint128From16(tc.bytes))
-			require.Equal(t, tc.bytes, tc.value.as16())
+			require.Equal(t, tc.bytes, tc.value.As16())
 		})
 	}
 }
@@ -44,7 +44,7 @@ func Test_Uint128_From16_PlacesBytesBigEndian(t *testing.T) {
 	}
 	value := uint128From16(b)
 	require.Equal(t, uint128{0x0102030405060708, 0x090a0b0c0d0e0f10}, value)
-	require.Equal(t, b, value.as16())
+	require.Equal(t, b, value.As16())
 }
 
 // verifies that the bitwise operators act per bit across both halves.
@@ -54,21 +54,21 @@ func Test_Uint128_From16_PlacesBytesBigEndian(t *testing.T) {
 func Test_Uint128_Bitwise_DisjointHalves(t *testing.T) {
 	high := uint128{^uint64(0), 0}
 	low := uint128{0, ^uint64(0)}
-	require.Equal(t, uint128{}, high.and(low))
-	require.Equal(t, uint128Max, high.or(low))
-	require.Equal(t, uint128Max, high.xor(low))
+	require.Equal(t, uint128{}, high.And(low))
+	require.Equal(t, uint128Max, high.Or(low))
+	require.Equal(t, uint128Max, high.Xor(low))
 }
 
 // verifies that not maps the two extremes onto each other.
 func Test_Uint128_Not_SwapsExtremes(t *testing.T) {
-	require.Equal(t, uint128Max, uint128{}.not())
-	require.Equal(t, uint128{}, uint128Max.not())
+	require.Equal(t, uint128Max, uint128{}.Not())
+	require.Equal(t, uint128{}, uint128Max.Not())
 }
 
 // verifies that and-not clears exactly the bits of its argument and
 // leaves every other bit, including those of the other half, set.
 func Test_Uint128_AndNot_ClearsOnlyGivenBits(t *testing.T) {
-	require.Equal(t, uint128{^uint64(0), ^uint64(0) - 1}, uint128Max.andNot(uint128{0, 1}))
+	require.Equal(t, uint128{^uint64(0), ^uint64(0) - 1}, uint128Max.AndNot(uint128{0, 1}))
 }
 
 // verifies that the zero predicate holds for the zero value only and
@@ -85,7 +85,7 @@ func Test_Uint128_IsZero_TrueOnlyOnZero(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, tc.value.isZero())
+			require.Equal(t, tc.want, tc.value.IsZero())
 		})
 	}
 }
@@ -104,7 +104,7 @@ func Test_Uint128_IsMax_TrueOnlyOnMax(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, tc.value.isMax())
+			require.Equal(t, tc.want, tc.value.IsMax())
 		})
 	}
 }
@@ -125,8 +125,8 @@ func Test_Uint128_Compare_UnsignedOrder(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, tc.left.compare(tc.right))
-			require.Equal(t, -tc.want, tc.right.compare(tc.left))
+			require.Equal(t, tc.want, tc.left.Compare(tc.right))
+			require.Equal(t, -tc.want, tc.right.Compare(tc.left))
 		})
 	}
 }
@@ -139,8 +139,8 @@ func Test_Uint128_Compare_UnsignedOrder(t *testing.T) {
 func Test_Uint128_Not_AlternatingPattern(t *testing.T) {
 	pattern := uint128{0xAAAAAAAAAAAAAAAA, 0x5555555555555555}
 	inverse := uint128{0x5555555555555555, 0xAAAAAAAAAAAAAAAA}
-	require.Equal(t, inverse, pattern.not())
-	require.Equal(t, uint128{}, pattern.and(pattern.not()))
+	require.Equal(t, inverse, pattern.Not())
+	require.Equal(t, uint128{}, pattern.And(pattern.Not()))
 }
 
 // verifies that bits on both sides of the 64-bit half boundary combine
@@ -150,7 +150,7 @@ func Test_Uint128_Not_AlternatingPattern(t *testing.T) {
 func Test_Uint128_Or_BitsStraddlingHalfBoundary(t *testing.T) {
 	lowest := uint128{1, 1 << 63}
 	highest := uint128{1 << 63, 1}
-	require.Equal(t, uint128{1<<63 | 1, 1<<63 | 1}, lowest.or(highest))
+	require.Equal(t, uint128{1<<63 | 1, 1<<63 | 1}, lowest.Or(highest))
 }
 
 // verifies that the byte form of any value is the big-endian encoding of
@@ -160,8 +160,8 @@ func Test_Uint128_From16_RoundTripsAnyValue(t *testing.T) {
 		value := genUint128.Draw(t, "value")
 		var want [16]byte
 		bigOf(value).FillBytes(want[:])
-		require.Equal(t, want, value.as16())
-		require.Equal(t, value, uint128From16(value.as16()))
+		require.Equal(t, want, value.As16())
+		require.Equal(t, value, uint128From16(value.As16()))
 	})
 }
 
@@ -172,11 +172,11 @@ func Test_Uint128_Bitwise_AgreesWithBigInt(t *testing.T) {
 		left := genUint128.Draw(t, "left")
 		right := genUint128.Draw(t, "right")
 		leftBig, rightBig := bigOf(left), bigOf(right)
-		require.Equal(t, uint128FromBig(new(big.Int).And(leftBig, rightBig)), left.and(right))
-		require.Equal(t, uint128FromBig(new(big.Int).Or(leftBig, rightBig)), left.or(right))
-		require.Equal(t, uint128FromBig(new(big.Int).Xor(leftBig, rightBig)), left.xor(right))
-		require.Equal(t, uint128FromBig(new(big.Int).AndNot(leftBig, rightBig)), left.andNot(right))
-		require.Equal(t, uint128FromBig(new(big.Int).Not(leftBig)), left.not())
+		require.Equal(t, uint128FromBig(new(big.Int).And(leftBig, rightBig)), left.And(right))
+		require.Equal(t, uint128FromBig(new(big.Int).Or(leftBig, rightBig)), left.Or(right))
+		require.Equal(t, uint128FromBig(new(big.Int).Xor(leftBig, rightBig)), left.Xor(right))
+		require.Equal(t, uint128FromBig(new(big.Int).AndNot(leftBig, rightBig)), left.AndNot(right))
+		require.Equal(t, uint128FromBig(new(big.Int).Not(leftBig)), left.Not())
 	})
 }
 
@@ -186,9 +186,9 @@ func Test_Uint128_Compare_AgreesWithBytesAndBigInt(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		left := genUint128.Draw(t, "left")
 		right := genUint128.Draw(t, "right")
-		leftBytes, rightBytes := left.as16(), right.as16()
-		require.Equal(t, bytes.Compare(leftBytes[:], rightBytes[:]), left.compare(right))
-		require.Equal(t, bigOf(left).Cmp(bigOf(right)), left.compare(right))
+		leftBytes, rightBytes := left.As16(), right.As16()
+		require.Equal(t, bytes.Compare(leftBytes[:], rightBytes[:]), left.Compare(right))
+		require.Equal(t, bigOf(left).Cmp(bigOf(right)), left.Compare(right))
 	})
 }
 
@@ -198,8 +198,8 @@ func Test_Uint128_Compare_AntisymmetricAndReflexive(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		left := genUint128.Draw(t, "left")
 		right := genUint128.Draw(t, "right")
-		require.Equal(t, -right.compare(left), left.compare(right))
-		require.Equal(t, 0, left.compare(left))
+		require.Equal(t, -right.Compare(left), left.Compare(right))
+		require.Equal(t, 0, left.Compare(left))
 	})
 }
 
@@ -208,8 +208,8 @@ func Test_Uint128_Compare_AntisymmetricAndReflexive(t *testing.T) {
 func Test_Uint128_Predicates_AgreeWithStructEquality(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		value := genUint128.Draw(t, "value")
-		require.Equal(t, value == uint128{}, value.isZero())
-		require.Equal(t, value == uint128Max, value.isMax())
+		require.Equal(t, value == uint128{}, value.IsZero())
+		require.Equal(t, value == uint128Max, value.IsMax())
 	})
 }
 
@@ -218,7 +218,7 @@ func Test_Uint128_Predicates_AgreeWithStructEquality(t *testing.T) {
 func Test_Uint128_As16_MatchesNetipByteLayout(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		value := genUint128.Draw(t, "value")
-		require.Equal(t, value.as16(), netip.AddrFrom16(value.as16()).As16())
+		require.Equal(t, value.As16(), netip.AddrFrom16(value.As16()).As16())
 	})
 }
 
@@ -229,7 +229,7 @@ func Test_Uint128_Bitwise_AllocationFree(t *testing.T) {
 	b := uint128{1, 1 << 63}
 	c := uint128{1 << 63, 1}
 	d := uint128Max
-	allocs := testing.AllocsPerRun(100, func() { compareSink = a.and(b).or(c).compare(d) })
+	allocs := testing.AllocsPerRun(100, func() { compareSink = a.And(b).Or(c).Compare(d) })
 	require.Zero(t, allocs, "allocations per call")
 }
 
@@ -263,14 +263,14 @@ var genUint128 = rapid.Custom(func(t *rapid.T) uint128 {
 		run := rapid.SampledFrom([]int{1, 2, 4, 8, 16, 32, 64}).Draw(t, "run")
 		value := alternatingUint128(run)
 		if rapid.Bool().Draw(t, "inverted") {
-			value = value.not()
+			value = value.Not()
 		}
 		return value
 	}
 })
 
 // alternatingUint128 returns the value whose bits alternate between set
-// and clear in runs of the given length, set run first.
+// And clear in runs of the given length, set run first.
 func alternatingUint128(run int) uint128 {
 	var value uint128
 	for bit := range 128 {
