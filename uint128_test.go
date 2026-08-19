@@ -533,6 +533,379 @@ func Test_Uint128_Arithmetic_AllocationFree(t *testing.T) {
 	require.Zero(t, allocs, "allocations per call")
 }
 
+// verifies that the leading-zero count runs from the top of the high
+// half through the low half, 128 for zero.
+func Test_Uint128_LeadingZeros_Boundaries(t *testing.T) {
+	cases := []struct {
+		name  string
+		value uint128
+		want  int
+	}{
+		{name: "zero", value: uint128{}, want: 128},
+		{name: "all ones", value: uint128Max, want: 0},
+		{name: "bit 127, the top bit", value: uint128{1 << 63, 0}, want: 0},
+		{name: "bit 63, the top of the low half", value: uint128{0, 1 << 63}, want: 64},
+		{name: "bit 0", value: uint128{0, 1}, want: 127},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.value.LeadingZeros())
+		})
+	}
+}
+
+// verifies that the trailing-zero count runs from the bottom of the low
+// half through the high half, 128 for zero.
+func Test_Uint128_TrailingZeros_Boundaries(t *testing.T) {
+	cases := []struct {
+		name  string
+		value uint128
+		want  int
+	}{
+		{name: "zero", value: uint128{}, want: 128},
+		{name: "all ones", value: uint128Max, want: 0},
+		{name: "bit 0", value: uint128{0, 1}, want: 0},
+		{name: "bit 64, the bottom of the high half", value: uint128{1, 0}, want: 64},
+		{name: "bit 127, the top bit", value: uint128{1 << 63, 0}, want: 127},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.value.TrailingZeros())
+		})
+	}
+}
+
+// verifies that the leading-one run is measured across the half boundary
+// and stops at the first zero, including on a two-run mask.
+func Test_Uint128_LeadingOnes_Boundaries(t *testing.T) {
+	cases := []struct {
+		name  string
+		value uint128
+		want  int
+	}{
+		{name: "zero", value: uint128{}, want: 0},
+		{name: "all ones", value: uint128Max, want: 128},
+		{name: "high half full", value: uint128{^uint64(0), 0}, want: 64},
+		{name: "run crosses into the low half", value: uint128{^uint64(0), 1 << 63}, want: 65},
+		{name: "top bit clear", value: uint128{0x7FFFFFFFFFFFFFFF, 0}, want: 0},
+		{name: "hole just above the half boundary", value: uint128{0xFFFFFFFFFFFFFFFE, 0}, want: 63},
+		{name: "two-run mask stops at its first run", value: uint128{0xFFFF000000000000, 0xFFFF000000000000}, want: 16},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.value.LeadingOnes())
+		})
+	}
+}
+
+// verifies that the population count sums both halves, on the extremes,
+// an alternating pattern and a non-contiguous geo-style mask.
+func Test_Uint128_OnesCount_Boundaries(t *testing.T) {
+	cases := []struct {
+		name  string
+		value uint128
+		want  int
+	}{
+		{name: "zero", value: uint128{}, want: 0},
+		{name: "all ones", value: uint128Max, want: 128},
+		{name: "one bit in each half", value: uint128{1, 1}, want: 2},
+		{name: "alternating bits", value: alternatingUint128(1), want: 64},
+		{name: "geo mask ffff:ffff:ff00::ffff:ffff:0:0", value: uint128{0xFFFFFFFFFF000000, 0xFFFFFFFF00000000}, want: 72},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.value.OnesCount())
+		})
+	}
+}
+
+// verifies that the lowest set bit is isolated in either half, zero for
+// zero, and that on a two-run mask it is the bottom of the lower run.
+func Test_Uint128_LowestSetBit_Boundaries(t *testing.T) {
+	cases := []struct {
+		name        string
+		value, want uint128
+	}{
+		{name: "zero", value: uint128{}, want: uint128{}},
+		{name: "two bits in the low half", value: uint128{0, 0b1100}, want: uint128{0, 0b100}},
+		{name: "one bit in the high half", value: uint128{0b1000, 0}, want: uint128{0b1000, 0}},
+		{name: "one bit in each half keeps the low one", value: uint128{1, 1}, want: uint128{0, 1}},
+		{name: "two-run mask peels bit 48 first", value: uint128{0xFFFF000000000000, 0xFFFF000000000000}, want: uint128{0, 1 << 48}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.value.LowestSetBit())
+		})
+	}
+}
+
+// verifies that clearing the lowest set bit removes exactly that bit in
+// either half and leaves zero unchanged.
+func Test_Uint128_ClearLowestSetBit_Boundaries(t *testing.T) {
+	cases := []struct {
+		name        string
+		value, want uint128
+	}{
+		{name: "zero", value: uint128{}, want: uint128{}},
+		{name: "two bits in the low half", value: uint128{0, 0b1100}, want: uint128{0, 0b1000}},
+		{name: "single bit in the high half", value: uint128{1, 0}, want: uint128{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.value.ClearLowestSetBit())
+		})
+	}
+}
+
+// verifies that the power-of-two predicate holds for exactly one set bit
+// in either half and rejects zero and multi-bit values.
+func Test_Uint128_IsPowerOfTwo_Boundaries(t *testing.T) {
+	cases := []struct {
+		name  string
+		value uint128
+		want  bool
+	}{
+		{name: "zero", value: uint128{}, want: false},
+		{name: "bit 0", value: uint128{0, 1}, want: true},
+		{name: "bit 64", value: uint128{1, 0}, want: true},
+		{name: "one bit in each half", value: uint128{1, 1}, want: false},
+		{name: "two adjacent bits", value: uint128{0, 3}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.value.IsPowerOfTwo())
+		})
+	}
+}
+
+// verifies that the single-bit constructor counts from the least
+// significant bit and straddles the half boundary at bits 63 and 64.
+func Test_Uint128Bit_PlacesBitFromLeastSignificant(t *testing.T) {
+	cases := []struct {
+		name string
+		bit  int
+		want uint128
+	}{
+		{name: "bit 0 is the lowest", bit: 0, want: uint128{0, 1}},
+		{name: "bit 63 tops the low half", bit: 63, want: uint128{0, 1 << 63}},
+		{name: "bit 64 bottoms the high half", bit: 64, want: uint128{1, 0}},
+		{name: "bit 127 is the top", bit: 127, want: uint128{1 << 63, 0}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, uint128Bit(tc.bit))
+		})
+	}
+}
+
+// verifies that the prefix mask has exactly the given number of leading
+// ones at the edges 0, 64, 128 and the IPv4-mapped prefix length 96.
+func Test_Uint128MaskFromPrefix_LeadingOnesTable(t *testing.T) {
+	cases := []struct {
+		name string
+		bits int
+		want uint128
+	}{
+		{name: "0 is the empty mask", bits: 0, want: uint128{}},
+		{name: "1 is the top bit", bits: 1, want: uint128{1 << 63, 0}},
+		{name: "32 fills the top quarter", bits: 32, want: uint128{0xFFFFFFFF << 32, 0}},
+		{name: "63 leaves the half boundary bit clear", bits: 63, want: uint128{0xFFFFFFFFFFFFFFFE, 0}},
+		{name: "64 is exactly the high half", bits: 64, want: uint128{^uint64(0), 0}},
+		{name: "65 crosses into the low half", bits: 65, want: uint128{^uint64(0), 1 << 63}},
+		{name: "96 is the IPv4-mapped network mask", bits: 96, want: uint128{^uint64(0), 0xFFFFFFFF00000000}},
+		{name: "127 leaves the lowest bit clear", bits: 127, want: uint128{^uint64(0), 0xFFFFFFFFFFFFFFFE}},
+		{name: "128 is all ones", bits: 128, want: uint128Max},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, uint128MaskFromPrefix(tc.bits))
+		})
+	}
+}
+
+// verifies that every prefix mask, from the empty one to all ones, is
+// contiguous.
+func Test_Uint128_IsContiguousMask_AcceptsEveryPrefixMask(t *testing.T) {
+	for bits := range 129 {
+		require.True(t, uint128MaskFromPrefix(bits).IsContiguousMask(), "prefix length %d", bits)
+	}
+}
+
+// verifies that the contiguity predicate rejects every mask whose ones do
+// not form a single leading run.
+//
+// The shapes are the ones every later non-contiguous test reduces to: the
+// two alternating patterns, a second run past the half boundary, a hole
+// exactly at bit 64 and a lone low bit.
+func Test_Uint128_IsContiguousMask_RejectsNonContiguous(t *testing.T) {
+	cases := []struct {
+		name string
+		mask uint128
+	}{
+		{name: "alternating starting with one", mask: uint128{0xAAAAAAAAAAAAAAAA, 0xAAAAAAAAAAAAAAAA}},
+		{name: "alternating starting with zero", mask: uint128{0x5555555555555555, 0x5555555555555555}},
+		{name: "two runs across bit 64", mask: uint128{^uint64(0), 0xFFFF0000FFFF0000}},
+		{name: "hole exactly at bit 64", mask: uint128{^uint64(0) - 1, ^uint64(0)}},
+		{name: "single low bit", mask: uint128{0, 1}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.False(t, tc.mask.IsContiguousMask())
+		})
+	}
+}
+
+// verifies that the three bit counts agree with the arbitrary-precision
+// oracle.
+//
+// Leading zeros come from the oracle's bit length, trailing zeros from its
+// own count (128 for zero, where the oracle reports none) and the
+// population count from a bit scan.
+func Test_Uint128_BitCounts_AgreeWithBigInt(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		value := genUint128.Draw(t, "value")
+		valueBig := bigOf(value)
+		require.Equal(t, 128-valueBig.BitLen(), value.LeadingZeros())
+		trailing := 128
+		if !value.IsZero() {
+			trailing = int(valueBig.TrailingZeroBits())
+		}
+		require.Equal(t, trailing, value.TrailingZeros())
+		ones := 0
+		for idx := range 128 {
+			ones += int(valueBig.Bit(idx))
+		}
+		require.Equal(t, ones, value.OnesCount())
+	})
+}
+
+// verifies that the leading-one run of a value is the leading-zero run of
+// its complement.
+func Test_Uint128_LeadingOnes_IsLeadingZerosOfNot(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		value := genUint128.Draw(t, "value")
+		require.Equal(t, value.Not().LeadingZeros(), value.LeadingOnes())
+	})
+}
+
+// verifies that the isolated lowest bit is zero exactly for zero and
+// otherwise a single bit of the value below which no bit is set.
+func Test_Uint128_LowestSetBit_IsolatesLowestBit(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		value := genUint128.Draw(t, "value")
+		lowest := value.LowestSetBit()
+		if value.IsZero() {
+			require.True(t, lowest.IsZero())
+			return
+		}
+		require.True(t, lowest.IsPowerOfTwo())
+		require.Equal(t, lowest, value.And(lowest))
+		require.Equal(t, value.TrailingZeros(), lowest.TrailingZeros())
+	})
+}
+
+// verifies that clearing the lowest set bit removes exactly the isolated
+// lowest bit: or-ing it back restores the value, the count drops by one.
+func Test_Uint128_ClearLowestSetBit_RemovesExactlyLowestBit(t *testing.T) {
+	nonZero := genUint128.Filter(func(value uint128) bool { return !value.IsZero() })
+	rapid.Check(t, func(t *rapid.T) {
+		value := nonZero.Draw(t, "value")
+		cleared := value.ClearLowestSetBit()
+		require.Equal(t, value, cleared.Or(value.LowestSetBit()))
+		require.Equal(t, value.OnesCount()-1, cleared.OnesCount())
+	})
+}
+
+// verifies that the power-of-two predicate is the population count being
+// exactly one.
+func Test_Uint128_IsPowerOfTwo_AgreesWithOnesCount(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		value := genUint128.Draw(t, "value")
+		require.Equal(t, value.OnesCount() == 1, value.IsPowerOfTwo())
+	})
+}
+
+// verifies that the single bit at position 127 minus the leading-zero
+// count is the highest set bit of a non-zero value.
+//
+// This is the expression the difference peel and the range decomposition
+// spell at their call sites instead of a dedicated method.
+func Test_Uint128Bit_HighestSetBitFromLeadingZeros(t *testing.T) {
+	nonZero := genUint128.Filter(func(value uint128) bool { return !value.IsZero() })
+	rapid.Check(t, func(t *rapid.T) {
+		value := nonZero.Draw(t, "value")
+		highest := uint128Bit(127 - value.LeadingZeros())
+		require.Equal(t, highest, value.And(highest))
+		require.True(t, value.Shr(uint(128-highest.LeadingZeros())).IsZero())
+		require.Equal(t, bigOf(value).BitLen()-1, 127-value.LeadingZeros())
+	})
+}
+
+// verifies that the prefix mask of any length has that many leading ones
+// and no other set bit, and is contiguous.
+func Test_Uint128MaskFromPrefix_LeadingOnesAndCountAreLength(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		bits := rapid.IntRange(0, 128).Draw(t, "bits")
+		mask := uint128MaskFromPrefix(bits)
+		require.Equal(t, bits, mask.LeadingOnes())
+		require.Equal(t, bits, mask.OnesCount())
+		require.True(t, mask.IsContiguousMask())
+	})
+}
+
+// verifies that the contiguity predicate agrees with two independent
+// oracles.
+//
+// The first is the leading-one and trailing-zero runs covering the whole
+// word (or the value being zero), the second a top-down bit scan that
+// tolerates no one after the first zero.
+func Test_Uint128_IsContiguousMask_AgreesWithOracles(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		value := genUint128.Draw(t, "value")
+		byRuns := value.IsZero() || value.LeadingOnes()+value.TrailingZeros() == 128
+		require.Equal(t, byRuns, value.IsContiguousMask())
+		require.Equal(t, contiguousByScan(value), value.IsContiguousMask())
+	})
+}
+
+// verifies that peeling the lowest set bit repeatedly reaches zero in
+// exactly as many steps as there are set bits.
+//
+// This is the length contract of the difference iterator, which peels one
+// borrowed bit per yielded network.
+func Test_Uint128_ClearLowestSetBit_ReachesZeroInOnesCountSteps(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		value := genUint128.Draw(t, "value")
+		steps := 0
+		for remaining := value; !remaining.IsZero(); remaining = remaining.ClearLowestSetBit() {
+			steps++
+		}
+		require.Equal(t, value.OnesCount(), steps)
+	})
+}
+
+// verifies that masking with the prefix mask yields the same address the
+// standard library keeps when it applies a prefix length.
+func Test_Uint128MaskFromPrefix_AgreesWithNetipPrefix(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		value := genUint128.Draw(t, "value")
+		bits := rapid.IntRange(0, 128).Draw(t, "bits")
+		prefix, err := netip.AddrFrom16(value.As16()).Prefix(bits)
+		require.NoError(t, err)
+		require.Equal(t, prefix.Addr().As16(), value.And(uint128MaskFromPrefix(bits)).As16())
+	})
+}
+
+// verifies that a chain of bit counts and a lowest-bit isolation does not
+// allocate.
+func Test_Uint128_BitCounts_AllocationFree(t *testing.T) {
+	m := uint128{0xFFFF000000000000, 0xFFFF000000000000}
+	allocs := testing.AllocsPerRun(100, func() {
+		compareSink = m.LeadingZeros() + m.OnesCount() + m.LowestSetBit().TrailingZeros()
+	})
+	require.Zero(t, allocs, "allocations per call")
+}
+
 // genUint128 draws a 128-bit value over the shapes the IPv6 sessions
 // need to see.
 //
@@ -584,6 +957,24 @@ func alternatingUint128(run int) uint128 {
 		}
 	}
 	return value
+}
+
+// contiguousByScan reports whether the bits of the value, read from the
+// top, are a run of ones followed by a run of zeros.
+//
+// It is a plain scan that fails on the first one after a zero, so it is
+// independent of the wrapping-subtraction formula it serves as oracle for.
+func contiguousByScan(value uint128) bool {
+	valueBig := bigOf(value)
+	seenZero := false
+	for idx := 127; idx >= 0; idx-- {
+		set := valueBig.Bit(idx) == 1
+		if set && seenZero {
+			return false
+		}
+		seenZero = seenZero || !set
+	}
+	return true
 }
 
 // bigOf returns the numeric value as an arbitrary-precision integer.

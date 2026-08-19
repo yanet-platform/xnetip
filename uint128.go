@@ -168,3 +168,86 @@ func uint128FromUint64(value uint64) uint128 {
 func uint128FromHalves(hi, lo uint64) uint128 {
 	return uint128{hi, lo}
 }
+
+// LeadingZeros returns the number of leading zero bits, 128 for zero.
+func (m uint128) LeadingZeros() int {
+	if m.hi != 0 {
+		return bits.LeadingZeros64(m.hi)
+	}
+	return 64 + bits.LeadingZeros64(m.lo)
+}
+
+// LeadingOnes returns the length of the leading run of one bits, 128
+// for the all-ones value.
+func (m uint128) LeadingOnes() int {
+	return m.Not().LeadingZeros()
+}
+
+// TrailingZeros returns the number of trailing zero bits, 128 for zero.
+func (m uint128) TrailingZeros() int {
+	if m.lo != 0 {
+		return bits.TrailingZeros64(m.lo)
+	}
+	return 64 + bits.TrailingZeros64(m.hi)
+}
+
+// OnesCount returns the population count.
+func (m uint128) OnesCount() int {
+	return bits.OnesCount64(m.hi) + bits.OnesCount64(m.lo)
+}
+
+// LowestSetBit returns the value with only the lowest set bit kept
+// (m & -m), zero for zero.
+func (m uint128) LowestSetBit() uint128 {
+	return m.And(m.Neg())
+}
+
+// ClearLowestSetBit returns m with its lowest set bit cleared
+// (m & (m - 1)), zero for zero.
+func (m uint128) ClearLowestSetBit() uint128 {
+	return m.And(m.SubOne())
+}
+
+// IsPowerOfTwo reports whether exactly one bit is set.
+func (m uint128) IsPowerOfTwo() bool {
+	return !m.IsZero() && m.ClearLowestSetBit().IsZero()
+}
+
+// uint128Bit returns the value with only bit n set, for n in 0 through
+// 127.
+//
+// Bits are numbered from the least significant one, the way a left shift
+// of one counts them: bit 0 is the last bit of an IPv6 address and bit
+// 127 its first. That is the opposite of the top-down numbering IPv6
+// prose uses, so a caller holding a leading-zero count passes 127 minus
+// that count to name the highest set bit (../netip/src/net.rs:4154).
+func uint128Bit(n int) uint128 {
+	return uint128{0, 1}.Shl(uint(n))
+}
+
+// uint128MaskFromPrefix returns the mask whose top bits are ones and the
+// rest zero, for bits in 0 through 128.
+//
+// Callers validate the range: the public mask constructor rejects longer
+// prefixes with an error, this helper is only ever called with a length
+// a contiguous mask can have. The mask is the complement of all ones
+// shifted right by the length, so 0 yields the empty mask, 64 exactly
+// the high half and 128 all ones without a special case
+// (../netip/src/net.rs:68).
+func uint128MaskFromPrefix(bits int) uint128 {
+	return uint128{^uint64(0), ^uint64(0)}.Shr(uint(bits)).Not()
+}
+
+// IsContiguousMask reports whether the value is a run of leading ones
+// followed by zeros, including all-zero and all-ones.
+//
+// Subtracting one flips the lowest set bit and sets every bit below it,
+// so the or with the predecessor fills exactly the bits below the lowest
+// one. The result is all ones only if every bit above that one was
+// already set, which is the leading-run shape. Zero has no lowest set
+// bit to flip, its predecessor wraps to all ones and the empty mask of
+// the whole address space counts as contiguous, as it must
+// (../netip/src/net.rs:2965).
+func (m uint128) IsContiguousMask() bool {
+	return m.Or(m.SubOne()).IsMax()
+}
