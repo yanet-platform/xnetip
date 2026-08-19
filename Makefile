@@ -13,7 +13,8 @@ export PATH := $(shell go env GOPATH)/bin:$(PATH)
 test:
 	go test -race ./...
 
-# Property tests at one tenth of the iterations.
+# Property tests at one fifth of the checks (rapid divides -rapid.checks
+# by five under -short).
 test-short:
 	go test -short ./...
 

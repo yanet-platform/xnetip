@@ -2,8 +2,11 @@
 .roadmap/
 .claude/
 
-# Build and test artifacts.
+# Build and test artifacts. rapid writes the failing case of a property
+# test under testdata/rapid/; it is replayed, pinned as a unit case, and
+# never committed.
 bin/
+testdata/rapid/
 *.test
 *.out
 *.prof

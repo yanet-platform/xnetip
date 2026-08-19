@@ -4,7 +4,7 @@ Guidance for AI coding agents working on `xnetip`. Keep it under 8 KB: facts abo
 
 ## Project
 
-`xnetip` (`github.com/yanet-platform/xnetip`, Go 1.24, single package, **stdlib only — runtime and tests**) is a Go port of the Rust crate `netip` 0.3.9: IPv4/IPv6 network types as `(address, mask)` pairs with first-class **non-contiguous masks**, full set algebra (contains, intersection, difference, merge, adjacency, supernet), address iteration, range-to-CIDR, in-place aggregation and binary split. Reference sources: `../netip/src/{net.rs,parser.rs,fmt.rs}` (read them for semantics — the Go API mirrors them one to one), `../netip/CLAUDE.md`, `../netip/.docs/ROADMAP.md`.
+`xnetip` (`github.com/yanet-platform/xnetip`, Go 1.24, single package, **stdlib-only runtime**, tests on `testify` + `rapid`) is a Go port of the Rust crate `netip` 0.3.9: IPv4/IPv6 network types as `(address, mask)` pairs with first-class **non-contiguous masks**, full set algebra (contains, intersection, difference, merge, adjacency, supernet), address iteration, range-to-CIDR, in-place aggregation and binary split. Reference sources: `../netip/src/{net.rs,parser.rs,fmt.rs}` (read them for semantics — the Go API mirrors them one to one), `../netip/CLAUDE.md`, `../netip/.docs/ROADMAP.md`.
 
 Priorities: **functionality first, performance second**. Iteration 1 scope: the network core. Out of scope (backlog in `.roadmap/00-overview.md`): `Contiguous`/`BiContiguous` wrappers and their aggregations, `MacAddr`, `ParseNext*`, byte-slice parsing, hand-rolled parsers.
 
@@ -14,7 +14,8 @@ Priorities: **functionality first, performance second**. Iteration 1 scope: the 
 go build ./... && go vet ./...
 go test ./...                              # all tests (black-box package xnetip_test)
 go test -run 'Test_IPv4Network_Contains' -v ./...
-go test -short ./...                       # property tests with reduced iteration count
+go test -short ./...                       # rapid checks divided by five
+go test -run 'Test_X' -rapid.checks=1000 -rapid.seed=<n> ./...   # more checks (default 100), replay a failure
 go test -run xxx -bench 'BenchmarkIPv4Network_Contains' -benchmem ./...
 go test -run xxx -bench . -count 10 > new.txt && benchstat old.txt new.txt   # A/B, same session
 go test -fuzz 'FuzzParseIPv4Network' -fuzztime 30s ./...                     # parsers only
@@ -22,7 +23,7 @@ gofumpt -l -w . ; golangci-lint run ./... ; gocommentlint                    # g
 make test | make lint | make bench          # wrappers for the above (added by session 001)
 ```
 
-CI (GitHub Actions, `.github/workflows/ci.yml`) runs `go test -race`, vet, gofumpt check, golangci-lint (`modernize`, `staticcheck`, `govet`, `errcheck`, `unused`) and compiles benchmarks. `gocommentlint` runs as the `pre-commit` hook (`make hooks`). `benchstat`, `gofumpt`, `golangci-lint`, `gocommentlint` are installed in `$GOPATH/bin`.
+CI (GitHub Actions, `.github/workflows/ci.yml`) runs `go test -race`, vet, gofumpt check, golangci-lint (`modernize`, `staticcheck`, `govet`, `errcheck`, `unused`, `testifylint`) and compiles benchmarks. `gocommentlint` runs as the `pre-commit` hook (`make hooks`). `benchstat`, `gofumpt`, `golangci-lint`, `gocommentlint` are installed in `$GOPATH/bin`.
 
 ## Layout
 
@@ -33,7 +34,7 @@ network4.go network6.go network.go   IPv4Network  IPv6Network  IPNetwork{network
 parse.go format.go errors.go compact.go   parsing (net/netip based), String/AppendTo/MarshalText, sentinels, Compact[T]
 addrs.go difference.go range.go aggregate.go binary_split.go   heavy algorithms, one file each
 *_test.go          mirror of the source file, package xnetip_test; *_internal_test.go only for unexported code
-testutil_test.go   forAll property helper (math/rand/v2, seed flag, -short), assert helpers
+testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by the type's birth session
 .roadmap/          gitignored session plan: 00-overview.md (order, status, backlog) + NNN-slug.md per session
 .agents/conventions/{go,comments,tests}.md   style rules (read the one you touch)
 ```
@@ -49,7 +50,7 @@ testutil_test.go   forAll property helper (math/rand/v2, seed flag, -short), ass
 
 ## Hard constraints
 
-- **Only the standard library**, in runtime code and in tests — no `testify`, no `rapid`, no `x/` packages.
+- **Standard library only in runtime code.** Tests: `testing` + `github.com/stretchr/testify` (`require`/`assert`) + `pgregory.net/rapid`, nothing else (Go has no dev-dependency class, they sit in the root `go.mod`).
 - **No `unsafe`, no cgo, no reflection in runtime code.**
 - **Runtime code is allocation-free** except `String()`/`MarshalText` results and error construction. Hot paths carry a `testing.AllocsPerRun` test. Algorithms needing O(N) scratch memory are not implemented silently — stop and report the trade-off.
 - **IPv4/IPv6 parity**: an operation has the same algorithm and case analysis in both families (word width differs, control flow does not). A tweak that helps one family goes to both or neither.
@@ -58,7 +59,7 @@ testutil_test.go   forAll property helper (math/rand/v2, seed flag, -short), ass
 ## Session protocol (TDD, one function of one type per session)
 
 1. Read `.roadmap/00-overview.md`, then the session file `.roadmap/NNN-slug.md` and check its dependencies are `done`. Read the referenced Rust lines fresh.
-2. Tests first: write the session's test table (unit, boundary, **non-contiguous masks**, property invariants, differential checks against `net/netip` where an oracle exists) and watch them fail to compile or fail.
+2. Tests first: write the session's test table (unit, boundary, **non-contiguous masks**, `rapid.Check` properties, differential checks against `net/netip` where an oracle exists) and watch them fail to compile or fail.
 3. Implement the one function, keeping v4/v6 parity, and run `make test` until green.
 4. Benchmarks only where the session file says so (algorithms, parse/format/compare) — `b.Loop()`, `b.ReportAllocs()`. Trivial delegates are waived with the reason recorded.
 5. Gates: `make lint` (gofumpt, vet, golangci-lint, gocommentlint) and `make test` clean. Doc comment on every exported symbol, brief + blank + detailed shape.

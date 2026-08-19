@@ -10,4 +10,5 @@ linters:
     - govet
     - modernize
     - staticcheck
+    - testifylint
     - unused

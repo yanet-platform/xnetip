@@ -5,6 +5,5 @@
 // pattern, not only a run of leading ones. All operations — containment,
 // intersection, difference, merge, adjacency, aggregation, iteration —
 // are defined on those pairs and stay correct for non-contiguous masks.
-// The package is a port of the Rust crate netip and depends only on the
-// standard library.
+// The package depends only on the standard library.
 package xnetip
