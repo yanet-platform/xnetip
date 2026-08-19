@@ -389,3 +389,289 @@ func BenchmarkIPv4Addr_AppendTo_Longest(b *testing.B) {
 		bytesSink = address.AppendTo(buffer[:0])
 	}
 }
+
+// verifies that dotted-decimal text of four octets in range parses to the
+// address it spells.
+//
+// The cases span the unspecified address, the broadcast address, and a
+// zero octet and a 255 octet on their own.
+func Test_ParseIPv4Addr_AcceptsBasicForms(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  [4]byte
+	}{
+		{name: "unspecified address", input: "0.0.0.0", want: [4]byte{0, 0, 0, 0}},
+		{name: "broadcast address is the longest form", input: "255.255.255.255", want: [4]byte{255, 255, 255, 255}},
+		{name: "private address", input: "192.168.1.1", want: [4]byte{192, 168, 1, 1}},
+		{name: "single-digit octets", input: "1.2.3.4", want: [4]byte{1, 2, 3, 4}},
+		{name: "zero octet itself is not a leading zero", input: "0.1.2.3", want: [4]byte{0, 1, 2, 3}},
+		{name: "255 is the largest octet", input: "255.0.0.0", want: [4]byte{255, 0, 0, 0}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := xnetip.ParseIPv4Addr(tc.input)
+			require.NoError(t, err)
+			require.Equal(t, xnetip.IPv4AddrFrom4(tc.want), got)
+		})
+	}
+}
+
+// verifies that an octet with a leading zero is rejected as unparseable
+// text, the octal-injection guard the standard grammars share.
+func Test_ParseIPv4Addr_RejectsLeadingZeroOctets(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "leading zero in the first octet", input: "01.2.3.4"},
+		{name: "leading zero in the second octet", input: "1.02.3.4"},
+		{name: "leading zero in the third octet", input: "1.2.03.4"},
+		{name: "leading zero in the fourth octet", input: "1.2.3.04"},
+		{name: "double zero", input: "00.0.0.0"},
+		{name: "triple zero", input: "000.0.0.0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv4Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that an octet above 255 is rejected as unparseable text,
+// whether by one or by many digits.
+func Test_ParseIPv4Addr_RejectsOctetOverflow(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "256 in the first octet", input: "256.0.0.0"},
+		{name: "999 in the first octet", input: "999.0.0.0"},
+		{name: "999 in the last octet", input: "0.0.0.999"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv4Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that anything but exactly four dot-separated groups is rejected
+// as unparseable text: too many, too few, empty input and empty groups.
+func Test_ParseIPv4Addr_RejectsWrongGroupCount(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "five groups", input: "1.2.3.4.5"},
+		{name: "three groups", input: "1.2.3"},
+		{name: "two groups", input: "1.2"},
+		{name: "one group", input: "1"},
+		{name: "empty input", input: ""},
+		{name: "single dot", input: "."},
+		{name: "three dots with empty groups", input: "..."},
+		{name: "empty group in the middle", input: "1..2.3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv4Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that the whole input must be the address, so any surrounding
+// or trailing byte is rejected as unparseable text.
+//
+// The cases cover whitespace, a trailing letter, letters instead of
+// digits, CIDR, port and zone suffixes, an oversized octet and a
+// multibyte character.
+func Test_ParseIPv4Addr_RejectsGarbageAndWhitespace(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "leading space", input: " 1.2.3.4"},
+		{name: "trailing space", input: "1.2.3.4 "},
+		{name: "trailing newline", input: "1.2.3.4\n"},
+		{name: "trailing letter", input: "1.2.3.4x"},
+		{name: "letters instead of digits", input: "a.b.c.d"},
+		{name: "CIDR suffix", input: "1.2.3.4/24"},
+		{name: "port suffix", input: "1.2.3.4:80"},
+		{name: "zone suffix on an IPv4 address", input: "1.2.3.4%eth0"},
+		{name: "huge first octet", input: "999999999999999999.0.0.0"},
+		{name: "multibyte character in the last octet", input: "1.2.3.é"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv4Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that well-formed IPv6 text is rejected as a family mismatch,
+// not as unparseable text.
+//
+// The cases cover a plain IPv6 address, an IPv4-mapped one, the
+// unspecified one and a zoned one.
+func Test_ParseIPv4Addr_RejectsIPv6AsFamilyMismatch(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "IPv6 literal", input: "2001:db8::1"},
+		{name: "IPv4-mapped IPv6 literal", input: "::ffff:1.2.3.4"},
+		{name: "unspecified IPv6 address", input: "::"},
+		{name: "zoned IPv6 literal", input: "fe80::1%eth0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := xnetip.ParseIPv4Addr(tc.input)
+			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+			require.NotErrorIs(t, err, xnetip.ErrParse)
+		})
+	}
+}
+
+// verifies that the error message names the parser, echoes the input in
+// quotes and carries the cause, so a log line identifies the failed text.
+func Test_ParseIPv4Addr_ErrorEchoesInput(t *testing.T) {
+	_, err := xnetip.ParseIPv4Addr("1.2.3")
+	require.Error(t, err)
+	require.True(t, strings.HasPrefix(err.Error(), `xnetip.ParseIPv4Addr("1.2.3"): `), err.Error())
+	require.Contains(t, err.Error(), xnetip.ErrParse.Error())
+	_, err = xnetip.ParseIPv4Addr("2001:db8::1")
+	require.Error(t, err)
+	require.Equal(t, `xnetip.ParseIPv4Addr("2001:db8::1"): `+xnetip.ErrAddrFamilyMismatch.Error(), err.Error())
+}
+
+// verifies that the panicking variant panics on unparseable text with the
+// parse error itself.
+func Test_MustParseIPv4Addr_PanicsOnError(t *testing.T) {
+	require.PanicsWithError(t, `xnetip.ParseIPv4Addr("x"): `+xnetip.ErrParse.Error()+`: ParseAddr("x"): unable to parse IP`, func() {
+		xnetip.MustParseIPv4Addr("x")
+	})
+}
+
+// verifies that the panicking variant returns the parsed address on valid
+// text.
+func Test_MustParseIPv4Addr_ReturnsOnSuccess(t *testing.T) {
+	require.Equal(t, xnetip.IPv4AddrFrom4([4]byte{10, 0, 0, 1}), xnetip.MustParseIPv4Addr("10.0.0.1"))
+}
+
+// verifies that parsing the text form of an address yields the address
+// back, for every address.
+func Test_ParseIPv4Addr_RoundTripsThroughString(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		got, err := xnetip.ParseIPv4Addr(address.String())
+		require.NoError(t, err)
+		require.Equal(t, address, got)
+	})
+}
+
+// verifies accept/reject parity with net/netip on strings drawn from the
+// characters of the address grammar plus a few easy-to-confuse extras.
+//
+// Drawing from that alphabet rather than from arbitrary bytes exercises
+// the parity close to the accept boundary.
+func Test_ParseIPv4Addr_NearMissParityWithNetip(t *testing.T) {
+	alphabet := []byte(".:/+ x0123456789abcdef")
+	rapid.Check(t, func(t *rapid.T) {
+		text := string(rapid.SliceOfN(rapid.SampledFrom(alphabet), 0, 24).Draw(t, "text"))
+		requireParseIPv4AddrMatchesNetip(t, text)
+	})
+}
+
+// verifies accept/reject parity with net/netip on the text of a valid
+// address with one byte deleted or replaced by an arbitrary byte.
+func Test_ParseIPv4Addr_MutationParityWithNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		text := []byte(genIPv4Addr.Draw(t, "address").String())
+		position := rapid.IntRange(0, len(text)-1).Draw(t, "position")
+		if rapid.Bool().Draw(t, "delete") {
+			text = slices.Delete(text, position, position+1)
+		} else {
+			text[position] = rapid.Byte().Draw(t, "replacement")
+		}
+		requireParseIPv4AddrMatchesNetip(t, string(text))
+	})
+}
+
+// verifies accept/reject parity and value agreement with net/netip on
+// arbitrary text, seeded with every input of the unit tables.
+func FuzzParseIPv4Addr(f *testing.F) {
+	seeds := []string{
+		"0.0.0.0", "255.255.255.255", "192.168.1.1", "1.2.3.4", "0.1.2.3", "255.0.0.0",
+		"01.2.3.4", "1.02.3.4", "1.2.03.4", "1.2.3.04", "00.0.0.0", "000.0.0.0",
+		"256.0.0.0", "999.0.0.0", "0.0.0.999",
+		"1.2.3.4.5", "1.2.3", "1.2", "1", "", ".", "...", "1..2.3",
+		" 1.2.3.4", "1.2.3.4 ", "1.2.3.4\n", "1.2.3.4x", "a.b.c.d", "1.2.3.4/24", "1.2.3.4:80",
+		"1.2.3.4%eth0", "999999999999999999.0.0.0", "1.2.3.é",
+		"2001:db8::1", "::ffff:1.2.3.4", "::", "fe80::1%eth0", "x", "10.0.0.1",
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, text string) {
+		requireParseIPv4AddrMatchesNetip(t, text)
+	})
+}
+
+// requireParseIPv4AddrMatchesNetip asserts that the parser accepts text
+// exactly when net/netip parses it as IPv4, with the same octets.
+func requireParseIPv4AddrMatchesNetip(t require.TestingT, text string) {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	got, err := xnetip.ParseIPv4Addr(text)
+	want, wantErr := netip.ParseAddr(text)
+	if wantErr != nil || !want.Is4() {
+		require.Error(t, err, "input %q", text)
+		return
+	}
+	require.NoError(t, err, "input %q", text)
+	require.Equal(t, want.As4(), got.As4(), "input %q", text)
+}
+
+// verifies that parsing valid text does not allocate: the error wrapping
+// is the only allocating path.
+func Test_ParseIPv4Addr_DoesNotAllocate(t *testing.T) {
+	text := "192.168.0.1"
+	requireNoAllocs(t, func() { ipv4AddrSink, errSink = xnetip.ParseIPv4Addr(text) })
+}
+
+func BenchmarkParseIPv4Addr_Bare(b *testing.B) {
+	text := "10.0.0.1"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipv4AddrSink, errSink = xnetip.ParseIPv4Addr(text)
+	}
+}
+
+func BenchmarkParseIPv4Addr_Typical(b *testing.B) {
+	text := "192.168.0.1"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipv4AddrSink, errSink = xnetip.ParseIPv4Addr(text)
+	}
+}
+
+func BenchmarkParseIPv4Addr_Longest(b *testing.B) {
+	text := "255.255.255.255"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipv4AddrSink, errSink = xnetip.ParseIPv4Addr(text)
+	}
+}
+
+func BenchmarkParseIPv4Addr_Reject(b *testing.B) {
+	text := "1.2.3"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipv4AddrSink, errSink = xnetip.ParseIPv4Addr(text)
+	}
+}

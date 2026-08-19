@@ -116,8 +116,10 @@ func (m *failRecorder) FailNow() { m.failedNow = true }
 // Sinks keep the measured closures' results alive, so the compiler cannot
 // optimise the work under test away.
 var (
-	wordSink   uint32
-	intSink    int
-	bytesSink  []byte
-	stringSink string
+	wordSink     uint32
+	intSink      int
+	bytesSink    []byte
+	stringSink   string
+	errSink      error
+	ipv4AddrSink xnetip.IPv4Addr
 )

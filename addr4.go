@@ -3,6 +3,7 @@ package xnetip
 import (
 	"cmp"
 	"encoding/binary"
+	"fmt"
 	"net/netip"
 )
 
@@ -67,4 +68,50 @@ func (m IPv4Addr) String() string {
 // enough capacity in b (15 bytes suffice) it performs no allocation.
 func (m IPv4Addr) AppendTo(b []byte) []byte {
 	return netip.AddrFrom4(m.As4()).AppendTo(b)
+}
+
+// ParseIPv4Addr parses s as a dotted-decimal IPv4 address ("192.168.0.1").
+//
+// The accepted grammar is the IPv4 grammar of net/netip: four decimal
+// octets in 0..255 without leading zeros and nothing else, no whitespace,
+// no suffix. Text that is not an address wraps ErrParse together with the
+// net/netip error that explains the rejection. IPv6 text, including
+// IPv4-mapped forms such as "::ffff:1.2.3.4", wraps ErrAddrFamilyMismatch.
+// Every error names the parser and echoes s, so errors.Is works on the
+// sentinels and the message identifies the input.
+func ParseIPv4Addr(s string) (IPv4Addr, error) {
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return IPv4Addr{}, wrapParseError("ParseIPv4Addr", s, ErrParse, err)
+	}
+	if !addr.Is4() {
+		return IPv4Addr{}, wrapParseError("ParseIPv4Addr", s, ErrAddrFamilyMismatch, nil)
+	}
+	return IPv4AddrFrom4(addr.As4()), nil
+}
+
+// wrapParseError builds the error every parser of this package returns:
+// the parser's name with the input echoed in quotes, then the cause.
+//
+// The sentinel is one of the exported errors of this package and the
+// detail, if not nil, is the underlying net/netip error. Both are wrapped,
+// so errors.Is matches the sentinel while the message keeps the exact
+// reason net/netip gave.
+func wrapParseError(parser, input string, sentinel, detail error) error {
+	if detail == nil {
+		return fmt.Errorf("xnetip.%s(%q): %w", parser, input, sentinel)
+	}
+	return fmt.Errorf("xnetip.%s(%q): %w: %w", parser, input, sentinel, detail)
+}
+
+// MustParseIPv4Addr calls ParseIPv4Addr and panics on error.
+//
+// It is intended for tests and package-level variables with hard-coded
+// text, like netip.MustParseAddr.
+func MustParseIPv4Addr(s string) IPv4Addr {
+	addr, err := ParseIPv4Addr(s)
+	if err != nil {
+		panic(err)
+	}
+	return addr
 }
