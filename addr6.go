@@ -1,5 +1,7 @@
 package xnetip
 
+import "net/netip"
+
 // IPv6Addr is an IPv6 address stored as a 128-bit integer.
 //
 // The zero value is the unspecified address ::. Values are comparable
@@ -55,4 +57,34 @@ func (m IPv6Addr) Bits() (hi, lo uint64) {
 // packs together with the mask.
 func (m IPv6Addr) Compare(other IPv6Addr) int {
 	return m.bits.Compare(other.bits)
+}
+
+// String returns the canonical RFC 5952 text of the address, such as
+// "2001:db8::1" or "::ffff:1.2.3.4" for the IPv4-mapped range.
+//
+// The form is the one net/netip prints for an IPv6 address without a
+// zone: the longest run of two or more zero groups collapses to "::",
+// the leftmost run wins a tie, a single zero group stays, hex is
+// lowercase without leading zeros. It allocates once, for the result.
+func (m IPv6Addr) String() string {
+	return netip.AddrFrom16(m.As16()).String()
+}
+
+// AppendTo appends the canonical text of the address to b and returns
+// the extended buffer.
+//
+// It is the allocation-free path behind String and MarshalText: with
+// enough capacity in b (45 bytes suffice) it performs no allocation.
+func (m IPv6Addr) AppendTo(b []byte) []byte {
+	return netip.AddrFrom16(m.As16()).AppendTo(b)
+}
+
+// StringExpanded returns the address as eight zero-padded 4-digit hex
+// groups, such as "2001:0db8:0000:0000:0000:0000:0000:0001".
+//
+// It is the form netip.Addr.StringExpanded prints: nothing is compressed
+// and the IPv4-mapped range is written as hex groups too, so every
+// address is exactly 39 bytes long. It allocates once, for the result.
+func (m IPv6Addr) StringExpanded() string {
+	return netip.AddrFrom16(m.As16()).StringExpanded()
 }

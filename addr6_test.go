@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"net/netip"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -413,4 +415,209 @@ func benchIPv6Addrs(count int) []xnetip.IPv6Addr {
 		addrs[idx] = xnetip.IPv6AddrFromBits(uint64(idx)*0x9E37_79B9_7F4A_7C15, 0)
 	}
 	return addrs
+}
+
+// verifies that the text form is the RFC 5952 canonical one.
+//
+// The longest run of two or more zero groups collapses to "::", the
+// leftmost run wins a tie, a single zero group stays, hex is lowercase
+// without leading zeros, and the IPv4-mapped range ends in a dotted quad.
+func Test_IPv6Addr_String_FormatsCanonicalRFC5952(t *testing.T) {
+	cases := []struct {
+		name   string
+		groups [8]uint16
+		want   string
+	}{
+		{name: "unspecified address is a bare double colon", groups: [8]uint16{}, want: "::"},
+		{name: "loopback compresses the leading zeros", groups: [8]uint16{0, 0, 0, 0, 0, 0, 0, 1}, want: "::1"},
+		{name: "trailing zeros compress", groups: [8]uint16{0x2001, 0xdb8, 0, 0, 0, 0, 0, 0}, want: "2001:db8::"},
+		{name: "leading zeros compress", groups: [8]uint16{0, 0, 1, 2, 3, 4, 5, 6}, want: "::1:2:3:4:5:6"},
+		{name: "single leading zero group is not compressed", groups: [8]uint16{0, 1, 2, 3, 4, 5, 6, 7}, want: "0:1:2:3:4:5:6:7"},
+		{name: "longest zero run wins", groups: [8]uint16{1, 0, 0, 1, 0, 0, 0, 1}, want: "1:0:0:1::1"},
+		{name: "leftmost zero run wins on tie", groups: [8]uint16{1, 0, 0, 1, 0, 0, 1, 1}, want: "1::1:0:0:1:1"},
+		{name: "single zero group is not compressed", groups: [8]uint16{0x2001, 0xdb8, 0, 1, 1, 1, 1, 1}, want: "2001:db8:0:1:1:1:1:1"},
+		{name: "hex is lowercase without leading zeros", groups: [8]uint16{0xABCD, 0xEF01, 0, 0, 0, 0, 0, 0}, want: "abcd:ef01::"},
+		{name: "IPv4-mapped address prints a dotted tail", groups: [8]uint16{0, 0, 0, 0, 0, 0xffff, 0x0102, 0x0304}, want: "::ffff:1.2.3.4"},
+		{name: "IPv4-compatible address is not special", groups: [8]uint16{0, 0, 0, 0, 0, 0, 0x0102, 0x0304}, want: "::102:304"},
+		{name: "all ones is the longest form", groups: [8]uint16{0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff}, want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			address := xnetip.IPv6AddrFrom8(
+				tc.groups[0], tc.groups[1], tc.groups[2], tc.groups[3],
+				tc.groups[4], tc.groups[5], tc.groups[6], tc.groups[7],
+			)
+			require.Equal(t, tc.want, address.String())
+		})
+	}
+}
+
+// verifies that the expanded form prints all eight groups as four hex
+// digits each, with no compression, mapped addresses included.
+func Test_IPv6Addr_StringExpanded_PadsEveryGroup(t *testing.T) {
+	cases := []struct {
+		name   string
+		groups [8]uint16
+		want   string
+	}{
+		{name: "compressible address is written in full", groups: [8]uint16{0x2001, 0xdb8, 0, 0, 0, 0, 0, 1}, want: "2001:0db8:0000:0000:0000:0000:0000:0001"},
+		{name: "IPv4-mapped address is written as hex groups", groups: [8]uint16{0, 0, 0, 0, 0, 0xffff, 0x0102, 0x0304}, want: "0000:0000:0000:0000:0000:ffff:0102:0304"},
+		{name: "unspecified address is all zero digits", groups: [8]uint16{}, want: "0000:0000:0000:0000:0000:0000:0000:0000"},
+		{name: "all ones keeps its length", groups: [8]uint16{0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff}, want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			address := xnetip.IPv6AddrFrom8(
+				tc.groups[0], tc.groups[1], tc.groups[2], tc.groups[3],
+				tc.groups[4], tc.groups[5], tc.groups[6], tc.groups[7],
+			)
+			require.Equal(t, tc.want, address.StringExpanded())
+		})
+	}
+}
+
+// verifies that the text form is appended after the buffer's existing
+// content rather than overwriting it.
+func Test_IPv6Addr_AppendTo_AppendsAfterExistingContent(t *testing.T) {
+	address := xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)
+	got := address.AppendTo([]byte("a="))
+	require.Equal(t, "a=2001:db8::1", string(got))
+}
+
+// verifies that a buffer with spare capacity is extended in place: the
+// returned slice shares the caller's backing array.
+func Test_IPv6Addr_AppendTo_KeepsBackingArray(t *testing.T) {
+	address := xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)
+	buffer := make([]byte, 0, 64)
+	got := address.AppendTo(buffer)
+	require.Equal(t, "2001:db8::1", string(got))
+	require.Same(t, &buffer[:1][0], &got[0])
+}
+
+// verifies that the appending form and the string form agree on every
+// address.
+func Test_IPv6Addr_AppendTo_AgreesWithString(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		require.Equal(t, address.String(), string(address.AppendTo(nil)))
+	})
+}
+
+// verifies that the expanded form equals the eight groups printed as
+// four hex digits each and joined by colons, the simplest oracle.
+func Test_IPv6Addr_StringExpanded_MatchesGroupOracle(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		hi, lo := address.Bits()
+		want := fmt.Sprintf(
+			"%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x",
+			uint16(hi>>48), uint16(hi>>32), uint16(hi>>16), uint16(hi),
+			uint16(lo>>48), uint16(lo>>32), uint16(lo>>16), uint16(lo),
+		)
+		require.Equal(t, want, address.StringExpanded())
+	})
+}
+
+// verifies that the text form keeps the canonical alphabet and shape
+// on every address.
+//
+// Only lowercase hex digits, colons and dots appear, "::" occurs at most
+// once, and the length never exceeds the eight-group width.
+func Test_IPv6Addr_String_HasCanonicalAlphabetAndShape(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		text := address.String()
+		require.LessOrEqual(t, len(text), len("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"))
+		require.LessOrEqual(t, strings.Count(text, "::"), 1)
+		require.LessOrEqual(t, strings.Count(text, ":"), 7+1)
+		require.Empty(t, strings.Trim(text, "0123456789abcdef:."))
+	})
+}
+
+// verifies that the canonical and the expanded forms are byte for byte
+// what net/netip prints for the same sixteen bytes, mapped included.
+func Test_IPv6Addr_String_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		oracle := netip.AddrFrom16(address.As16())
+		require.Equal(t, oracle.String(), address.String())
+		require.Equal(t, oracle.StringExpanded(), address.StringExpanded())
+	})
+}
+
+// verifies that appending into a buffer with enough capacity does not
+// allocate, which is the contract every network formatter builds on.
+func Test_IPv6Addr_AppendTo_DoesNotAllocate(t *testing.T) {
+	address := xnetip.IPv6AddrFrom8(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff)
+	buffer := make([]byte, 0, 64)
+	requireNoAllocs(t, func() { bytesSink = address.AppendTo(buffer[:0]) })
+}
+
+// verifies that the string forms allocate at most once each, for the
+// result itself.
+func Test_IPv6Addr_String_AllocatesAtMostOnce(t *testing.T) {
+	address := xnetip.IPv6AddrFrom8(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff)
+	allocs := testing.AllocsPerRun(100, func() { stringSink = address.String() })
+	require.LessOrEqual(t, allocs, 1.0)
+	allocs = testing.AllocsPerRun(100, func() { stringSink = address.StringExpanded() })
+	require.LessOrEqual(t, allocs, 1.0)
+}
+
+func BenchmarkIPv6Addr_String_Compressed(b *testing.B) {
+	address := xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)
+	b.ReportAllocs()
+	for b.Loop() {
+		stringSink = address.String()
+	}
+}
+
+func BenchmarkIPv6Addr_String_Full(b *testing.B) {
+	address := xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 1, 2, 3, 4, 5, 6)
+	b.ReportAllocs()
+	for b.Loop() {
+		stringSink = address.String()
+	}
+}
+
+func BenchmarkIPv6Addr_String_Mapped(b *testing.B) {
+	address := xnetip.IPv6AddrFrom8(0, 0, 0, 0, 0, 0xffff, 0xc000, 0x0201)
+	b.ReportAllocs()
+	for b.Loop() {
+		stringSink = address.String()
+	}
+}
+
+func BenchmarkIPv6Addr_AppendTo_Compressed(b *testing.B) {
+	address := xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)
+	buffer := make([]byte, 0, 64)
+	b.ReportAllocs()
+	for b.Loop() {
+		bytesSink = address.AppendTo(buffer[:0])
+	}
+}
+
+func BenchmarkIPv6Addr_AppendTo_Full(b *testing.B) {
+	address := xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 1, 2, 3, 4, 5, 6)
+	buffer := make([]byte, 0, 64)
+	b.ReportAllocs()
+	for b.Loop() {
+		bytesSink = address.AppendTo(buffer[:0])
+	}
+}
+
+func BenchmarkIPv6Addr_AppendTo_Mapped(b *testing.B) {
+	address := xnetip.IPv6AddrFrom8(0, 0, 0, 0, 0, 0xffff, 0xc000, 0x0201)
+	buffer := make([]byte, 0, 64)
+	b.ReportAllocs()
+	for b.Loop() {
+		bytesSink = address.AppendTo(buffer[:0])
+	}
+}
+
+func BenchmarkIPv6Addr_StringExpanded(b *testing.B) {
+	address := xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)
+	b.ReportAllocs()
+	for b.Loop() {
+		stringSink = address.StringExpanded()
+	}
 }
