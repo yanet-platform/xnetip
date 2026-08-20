@@ -32,7 +32,7 @@ uint128.go         unexported 128-bit helper {hi, lo uint64}, exported methods, 
 addr4.go addr6.go  unexported address kernels addr4{uint32} addr6{uint128} — the public API speaks netip.Addr
 net4.go net6.go net.go               Network4  Network6  Network{network Network6; is4 bool}
                    a type's whole API lives in its file (constructors, Parse*, formatters, marshalling, set algebra, Addrs, Difference)
-errors.go compact.go             sentinels, Compact (function over an unexported wrapper)
+errors.go compact.go contiguous.go   sentinels, Compact (function over an unexported wrapper), Contiguous[T] CIDR wrapper + the network[T] F-bound
 range.go aggregate.go binary_split.go   free functions over ranges and slices (RangeToNetworks*, Aggregate*, BinarySplit*), one file each
 *_test.go          mirror of the source file, package xnetip_test; white-box files (package xnetip): uint128_test.go and the kernel suites addr4_test.go, addr6_test.go, errors_test.go
 testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by the type's birth session

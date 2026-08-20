@@ -1,14 +1,5 @@
 package xnetip
 
-// network is the set of network types the formatting adapters accept.
-//
-// It exists so an adapter is written once over a type parameter
-// instead of three times per network type. It is a constraint for
-// type parameters, not an interface for values.
-type network interface {
-	Network4 | Network6 | Network
-}
-
 // Compact renders a network in its shortest unambiguous form.
 //
 // A host route is written as its bare address, everything else
@@ -19,7 +10,7 @@ type network interface {
 // network counting as IPv6. The output reparses with the family's
 // Parse function, which reads a bare address as a host route. The
 // opaque result carries String, AppendTo and fmt.Stringer.
-func Compact[T network](n T) compact[T] {
+func Compact[T network[T]](n T) compact[T] {
 	return compact[T]{network: n}
 }
 
@@ -31,7 +22,7 @@ func Compact[T network](n T) compact[T] {
 // fmt.Stringer contract, never by name. Future formatting adapters
 // follow the same shape, a constructor function over an opaque
 // wrapper.
-type compact[T network] struct {
+type compact[T network[T]] struct {
 	// network is the network value to render.
 	network T
 }

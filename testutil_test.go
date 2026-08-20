@@ -442,6 +442,78 @@ var genNetwork = rapid.Custom(func(t *rapid.T) xnetip.Network {
 	return xnetip.NetworkFrom6(genNetwork6.Draw(t, "network6"))
 })
 
+// genContiguous4 draws an IPv4 CIDR block: uniform prefix lengths
+// with fixed weights for the universe and the host route.
+//
+// Every draw is asserted to wrap through the exact constructor, so
+// each property test drawing a block inherits the invariant check of
+// the wrapper's birth session.
+var genContiguous4 = rapid.Custom(func(t *rapid.T) xnetip.Contiguous[xnetip.Network4] {
+	var bits int
+	switch rapid.IntRange(0, 9).Draw(t, "prefix shape") {
+	case 0:
+		bits = 0
+	case 1:
+		bits = 32
+	default:
+		bits = rapid.IntRange(0, 32).Draw(t, "prefix")
+	}
+	network, err := xnetip.Network4FromCIDR(genNetipAddr4.Draw(t, "addr"), bits)
+	require.NoError(t, err)
+	wrapped, ok := xnetip.ContiguousFrom(network)
+	require.True(t, ok, "CIDR draw did not wrap")
+	return wrapped
+})
+
+// genContiguous6 draws an IPv6 CIDR block: uniform prefix lengths
+// with fixed weights for the universe and the host route.
+//
+// Every draw is asserted to wrap through the exact constructor, so
+// each property test drawing a block inherits the invariant check of
+// the wrapper's birth session.
+var genContiguous6 = rapid.Custom(func(t *rapid.T) xnetip.Contiguous[xnetip.Network6] {
+	var bits int
+	switch rapid.IntRange(0, 9).Draw(t, "prefix shape") {
+	case 0:
+		bits = 0
+	case 1:
+		bits = 128
+	default:
+		bits = rapid.IntRange(0, 128).Draw(t, "prefix")
+	}
+	network, err := xnetip.Network6FromCIDR(genNetipAddr6.Draw(t, "addr"), bits)
+	require.NoError(t, err)
+	wrapped, ok := xnetip.ContiguousFrom(network)
+	require.True(t, ok, "CIDR draw did not wrap")
+	return wrapped
+})
+
+// genContiguous draws a family-agnostic CIDR block, reusing the
+// concrete block generators with a fixed share of IPv4-mapped IPv6.
+//
+// Two draws in five are IPv4, one is an IPv4-mapped IPv6 network —
+// the Is6 shape closest to the IPv4 family — and the rest are plain
+// IPv6, so both families and the mapped edge flow through every
+// property test. Every draw is asserted to wrap through the exact
+// constructor.
+var genContiguous = rapid.Custom(func(t *rapid.T) xnetip.Contiguous[xnetip.Network] {
+	var network xnetip.Network
+	switch rapid.IntRange(0, 4).Draw(t, "family shape") {
+	case 0, 1:
+		network = xnetip.NetworkFrom4(genContiguous4.Draw(t, "network4").Network())
+	case 2:
+		mapped := netipAddrFrom6Bits(0, 0x0000FFFF00000000|uint64(rapid.Uint32().Draw(t, "mapped")))
+		fromCIDR, err := xnetip.NetworkFromCIDR(mapped, rapid.IntRange(0, 128).Draw(t, "mapped prefix"))
+		require.NoError(t, err)
+		network = fromCIDR
+	default:
+		network = xnetip.NetworkFrom6(genContiguous6.Draw(t, "network6").Network())
+	}
+	wrapped, ok := xnetip.ContiguousFrom(network)
+	require.True(t, ok, "CIDR draw did not wrap")
+	return wrapped
+})
+
 // digitsOnly reports whether text is non-empty and all ASCII digits.
 //
 // This is the shape a CIDR suffix must have for the std-parity checks
@@ -461,15 +533,18 @@ func digitsOnly(text string) bool {
 // Sinks keep the measured closures' results alive, so the compiler cannot
 // optimise the work under test away.
 var (
-	wordSink      uint32
-	stringSink    string
-	intSink       int
-	bytesSink     []byte
-	networkSink   xnetip.Network4
-	network6Sink  xnetip.Network6
-	ipNetworkSink xnetip.Network
-	addrSink      netip.Addr
-	prefixSink    netip.Prefix
-	okSink        bool
-	errSink       error
+	wordSink        uint32
+	stringSink      string
+	intSink         int
+	bytesSink       []byte
+	networkSink     xnetip.Network4
+	network6Sink    xnetip.Network6
+	ipNetworkSink   xnetip.Network
+	addrSink        netip.Addr
+	prefixSink      netip.Prefix
+	okSink          bool
+	contiguous4Sink xnetip.Contiguous[xnetip.Network4]
+	contiguous6Sink xnetip.Contiguous[xnetip.Network6]
+	contiguousSink  xnetip.Contiguous[xnetip.Network]
+	errSink         error
 )
