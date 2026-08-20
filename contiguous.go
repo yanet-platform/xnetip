@@ -167,6 +167,18 @@ func (m Contiguous[T]) Compare(other Contiguous[T]) int {
 	return m.network.Compare(other.network)
 }
 
+// Contains reports whether every address of other is also an address
+// of m.
+//
+// Both blocks are CIDR by the type invariant, so the mask-subset
+// check is a single unsigned compare of the masks — the typed
+// argument is what makes that formula sound. The answer equals the
+// wrapped networks' Contains; blocks of different families (Network
+// instantiation) never contain each other.
+func (m Contiguous[T]) Contains(other Contiguous[T]) bool {
+	return m.network.containsContiguous(other.network)
+}
+
 // PrefixLen returns the prefix length of the block, total by the
 // contiguity invariant.
 //
@@ -279,4 +291,8 @@ type network[T any] interface {
 	// parseText is the concrete type's route to its ParseContiguous
 	// function, called on a zero value as a dispatch token.
 	parseText(string) (T, error)
+
+	// containsContiguous is the concrete type's containment kernel
+	// for two CIDR operands.
+	containsContiguous(T) bool
 }

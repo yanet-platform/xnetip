@@ -382,6 +382,22 @@ func (m Network4) Contains(other Network4) bool {
 	return a2&m1 == a1 && m2&m1 == m1
 }
 
+// containsContiguous is Contains for two CIDR networks, the
+// mask-subset conjunct collapsed to one unsigned compare.
+//
+// With this network as `(a1, m1)` and the other as `(a2, m2)`, both
+// masks leading runs of one bits, the subset test `m2&m1 == m1`
+// holds exactly when `m1 <= m2`: a longer run keeps every bit of a
+// shorter one, and among leading runs longer means numerically
+// greater. The collapse is unsound for non-contiguous masks, so the
+// caller must guarantee the precondition — the typed wrapper carries
+// it in its invariant.
+func (m Network4) containsContiguous(other Network4) bool {
+	a1, m1 := m.addr.Bits(), m.mask.Bits()
+	a2, m2 := other.addr.Bits(), other.mask.Bits()
+	return a2&m1 == a1 && m1 <= m2
+}
+
 // Intersection returns the network of addresses common to m and other.
 //
 // The intersection of two networks is always a single network: its

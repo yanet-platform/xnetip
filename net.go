@@ -380,6 +380,20 @@ func (m Network) Contains(other Network) bool {
 	return m.is4 == other.is4 && m.network.Contains(other.network)
 }
 
+// containsContiguous is Contains for two CIDR networks, the
+// mask-subset conjunct collapsed to one unsigned compare.
+//
+// The family check must come first: without it the IPv6 universe
+// would contain the mapped storage form of every IPv4 network. For
+// two IPv4 networks the 128-bit collapse on the stored forms is
+// exact: mapped storage pins the top 96 address and mask bits to
+// the same values on both sides, leaving exactly the IPv4 compare
+// on the low 32 bits. The caller must guarantee both masks are
+// contiguous — the typed wrapper carries it in its invariant.
+func (m Network) containsContiguous(other Network) bool {
+	return m.is4 == other.is4 && m.network.containsContiguous(other.network)
+}
+
 // Intersection returns the network of addresses common to m and other.
 //
 // Networks of different address families are disjoint and yield

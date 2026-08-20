@@ -421,6 +421,161 @@ func Test_Contiguous_Prefix_RebuildRoundTripProperty(t *testing.T) {
 	})
 }
 
+// verifies that an IPv4 block contains its nested block and not the
+// other way around.
+func Test_Contiguous_Contains_Nested4(t *testing.T) {
+	container := xnetip.MustParseContiguous4("10.0.0.0/8")
+	nested := xnetip.MustParseContiguous4("10.1.0.0/16")
+	require.True(t, container.Contains(nested))
+	require.False(t, nested.Contains(container))
+}
+
+// verifies that an IPv6 block contains its nested block and not the
+// other way around.
+func Test_Contiguous_Contains_Nested6(t *testing.T) {
+	container := xnetip.MustParseContiguous6("2001:db8::/32")
+	nested := xnetip.MustParseContiguous6("2001:db8:1::/48")
+	require.True(t, container.Contains(nested))
+	require.False(t, nested.Contains(container))
+}
+
+// verifies that equal blocks contain each other in both families.
+func Test_Contiguous_Contains_EqualBlocks(t *testing.T) {
+	first4 := xnetip.MustParseContiguous4("172.16.0.0/12")
+	second4 := xnetip.MustParseContiguous4("172.16.0.0/12")
+	require.True(t, first4.Contains(second4))
+	require.True(t, second4.Contains(first4))
+	first6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	second6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	require.True(t, first6.Contains(second6))
+	require.True(t, second6.Contains(first6))
+}
+
+// verifies the boundary prefixes: the universe contains a host route
+// and itself, a host route contains only itself.
+func Test_Contiguous_Contains_BoundaryPrefixes(t *testing.T) {
+	universe4 := xnetip.MustParseContiguous4("0.0.0.0/0")
+	host4 := xnetip.MustParseContiguous4("8.8.8.8/32")
+	require.True(t, universe4.Contains(host4))
+	require.False(t, host4.Contains(universe4))
+	require.True(t, universe4.Contains(universe4))
+	require.True(t, host4.Contains(host4))
+	require.False(t, host4.Contains(xnetip.MustParseContiguous4("8.8.4.4/32")))
+	universe6 := xnetip.MustParseContiguous6("::/0")
+	host6 := xnetip.MustParseContiguous6("::1/128")
+	require.True(t, universe6.Contains(host6))
+	require.False(t, host6.Contains(universe6))
+	require.True(t, universe6.Contains(universe6))
+	require.True(t, host6.Contains(host6))
+	require.False(t, host6.Contains(xnetip.MustParseContiguous6("::2/128")))
+}
+
+// verifies that disjoint sibling halves contain each other in
+// neither direction, in both families.
+func Test_Contiguous_Contains_DisjointSiblings(t *testing.T) {
+	low4 := xnetip.MustParseContiguous4("10.0.0.0/9")
+	high4 := xnetip.MustParseContiguous4("10.128.0.0/9")
+	require.False(t, low4.Contains(high4))
+	require.False(t, high4.Contains(low4))
+	low6 := xnetip.MustParseContiguous6("2001:db8::/33")
+	high6 := xnetip.MustParseContiguous6("2001:db8:8000::/33")
+	require.False(t, low6.Contains(high6))
+	require.False(t, high6.Contains(low6))
+}
+
+// verifies that same-family pairs of the dual instantiation answer
+// exactly as the wrapped networks do.
+func Test_Contiguous_Contains_DualSameFamilyMatchesInner(t *testing.T) {
+	container4 := xnetip.MustParseContiguous("10.0.0.0/8")
+	nested4 := xnetip.MustParseContiguous("10.1.0.0/16")
+	require.True(t, container4.Contains(nested4))
+	require.False(t, nested4.Contains(container4))
+	require.Equal(t, container4.Network().Contains(nested4.Network()), container4.Contains(nested4))
+	container6 := xnetip.MustParseContiguous("2001:db8::/32")
+	nested6 := xnetip.MustParseContiguous("2001:db8:1::/48")
+	require.True(t, container6.Contains(nested6))
+	require.False(t, nested6.Contains(container6))
+	require.Equal(t, container6.Network().Contains(nested6.Network()), container6.Contains(nested6))
+}
+
+// verifies that blocks of different families never contain each
+// other, the IPv4-mapped IPv6 form against IPv4 included.
+func Test_Contiguous_Contains_DualMixedFamilyIsFalse(t *testing.T) {
+	ipv4 := xnetip.MustParseContiguous("10.0.0.0/8")
+	ipv6 := xnetip.MustParseContiguous("2001:db8::/32")
+	require.False(t, ipv4.Contains(ipv6))
+	require.False(t, ipv6.Contains(ipv4))
+	mapped := xnetip.MustParseContiguous("::ffff:10.0.0.0/104")
+	require.False(t, ipv4.Contains(mapped))
+	require.False(t, mapped.Contains(ipv4))
+}
+
+// verifies that the collapsed formula agrees with the general
+// containment of the unwrapped networks, in all three instantiations.
+func Test_Contiguous_Contains_MatchesInnerProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first4 := genContiguous4.Draw(t, "first4")
+		second4 := genContiguous4.Draw(t, "second4")
+		require.Equal(t, first4.Network().Contains(second4.Network()), first4.Contains(second4))
+		first6 := genContiguous6.Draw(t, "first6")
+		second6 := genContiguous6.Draw(t, "second6")
+		require.Equal(t, first6.Network().Contains(second6.Network()), first6.Contains(second6))
+		first := genContiguous.Draw(t, "first")
+		second := genContiguous.Draw(t, "second")
+		require.Equal(t, first.Network().Contains(second.Network()), first.Contains(second))
+	})
+}
+
+// verifies the partial order: containment is reflexive,
+// antisymmetric up to equality and transitive on drawn blocks.
+func Test_Contiguous_Contains_PartialOrderProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := genContiguous.Draw(t, "first")
+		second := genContiguous.Draw(t, "second")
+		third := genContiguous.Draw(t, "third")
+		require.True(t, first.Contains(first))
+		if first.Contains(second) && second.Contains(first) {
+			require.Equal(t, first, second)
+		}
+		if first.Contains(second) && second.Contains(third) {
+			require.True(t, first.Contains(third))
+		}
+	})
+}
+
+// verifies against net/netip: containment equals prefix overlap
+// with the length condition, and base-address containment likewise.
+func Test_Contiguous_Contains_MatchesNetipPrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first4 := genContiguous4.Draw(t, "first4")
+		second4 := genContiguous4.Draw(t, "second4")
+		nested4 := first4.Prefix().Overlaps(second4.Prefix()) && first4.PrefixLen() <= second4.PrefixLen()
+		require.Equal(t, nested4, first4.Contains(second4))
+		byAddr4 := first4.Prefix().Contains(second4.Network().Addr()) && first4.PrefixLen() <= second4.PrefixLen()
+		require.Equal(t, byAddr4, first4.Contains(second4))
+		first6 := genContiguous6.Draw(t, "first6")
+		second6 := genContiguous6.Draw(t, "second6")
+		nested6 := first6.Prefix().Overlaps(second6.Prefix()) && first6.PrefixLen() <= second6.PrefixLen()
+		require.Equal(t, nested6, first6.Contains(second6))
+		byAddr6 := first6.Prefix().Contains(second6.Network().Addr()) && first6.PrefixLen() <= second6.PrefixLen()
+		require.Equal(t, byAddr6, first6.Contains(second6))
+	})
+}
+
+// verifies that typed containment allocates nothing in all three
+// instantiations.
+func Test_Contiguous_Contains_AllocationFree(t *testing.T) {
+	container4 := xnetip.MustParseContiguous4("10.0.0.0/8")
+	nested4 := xnetip.MustParseContiguous4("10.1.0.0/16")
+	requireNoAllocs(t, func() { okSink = container4.Contains(nested4) })
+	container6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	nested6 := xnetip.MustParseContiguous6("2001:db8:1::/48")
+	requireNoAllocs(t, func() { okSink = container6.Contains(nested6) })
+	container := xnetip.MustParseContiguous("10.0.0.0/8")
+	nested := xnetip.MustParseContiguous("10.1.0.0/16")
+	requireNoAllocs(t, func() { okSink = container.Contains(nested) })
+}
+
 // verifies that both total prefix accessors allocate nothing in all
 // three instantiations.
 func Test_Contiguous_PrefixLen_AllocationFree(t *testing.T) {
@@ -874,6 +1029,60 @@ func BenchmarkParseContiguous6_Reject(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		contiguous6Sink, errSink = xnetip.ParseContiguous6("2001::/ffff:0:ffff::")
+	}
+}
+
+func BenchmarkContiguous_Contains_IPv4True(b *testing.B) {
+	container := xnetip.MustParseContiguous4("10.0.0.0/8")
+	nested := xnetip.MustParseContiguous4("10.1.0.0/16")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = container.Contains(nested)
+	}
+}
+
+func BenchmarkContiguous_Contains_IPv4False(b *testing.B) {
+	container := xnetip.MustParseContiguous4("10.0.0.0/8")
+	foreign := xnetip.MustParseContiguous4("192.168.0.0/16")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = container.Contains(foreign)
+	}
+}
+
+func BenchmarkContiguous_Contains_IPv6True(b *testing.B) {
+	container := xnetip.MustParseContiguous6("2001:db8::/32")
+	nested := xnetip.MustParseContiguous6("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = container.Contains(nested)
+	}
+}
+
+func BenchmarkContiguous_Contains_IPv6False(b *testing.B) {
+	container := xnetip.MustParseContiguous6("2001:db8::/32")
+	foreign := xnetip.MustParseContiguous6("fe80::/10")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = container.Contains(foreign)
+	}
+}
+
+func BenchmarkContiguous_Contains_IPv4General(b *testing.B) {
+	container := xnetip.MustParseContiguous4("10.0.0.0/8")
+	nested := xnetip.MustParseContiguous4("10.1.0.0/16")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = container.Network().Contains(nested.Network())
+	}
+}
+
+func BenchmarkContiguous_Contains_IPv6General(b *testing.B) {
+	container := xnetip.MustParseContiguous6("2001:db8::/32")
+	nested := xnetip.MustParseContiguous6("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = container.Network().Contains(nested.Network())
 	}
 }
 
