@@ -2,6 +2,7 @@ package xnetip_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"net/netip"
 	"testing"
 
@@ -245,4 +246,123 @@ func Test_IPv4Network_ToIPv6Mapped_AllocationFree(t *testing.T) {
 	)
 	require.NoError(t, err)
 	requireNoAllocs(t, func() { network6Sink = network.ToIPv6Mapped() })
+}
+
+// verifies that the CIDR constructor clears the host bits of the
+// address and produces the contiguous mask of the given length.
+func Test_IPv4NetworkFromCIDR_MasksHostBits(t *testing.T) {
+	cases := []struct {
+		name     string
+		addr     string
+		bits     int
+		wantAddr string
+		wantMask string
+	}{
+		{name: "host bits cleared", addr: "192.168.1.5", bits: 24, wantAddr: "192.168.1.0", wantMask: "255.255.255.0"},
+		{name: "host route keeps the address", addr: "192.168.1.5", bits: 32, wantAddr: "192.168.1.5", wantMask: "255.255.255.255"},
+		{name: "zero length is the universe", addr: "192.168.1.5", bits: 0, wantAddr: "0.0.0.0", wantMask: "0.0.0.0"},
+		{name: "single leading bit", addr: "255.255.255.255", bits: 1, wantAddr: "128.0.0.0", wantMask: "128.0.0.0"},
+		{name: "point-to-point pair keeps bit 31", addr: "10.0.0.3", bits: 31, wantAddr: "10.0.0.2", wantMask: "255.255.255.254"},
+		{name: "already aligned address stays", addr: "10.0.0.0", bits: 8, wantAddr: "10.0.0.0", wantMask: "255.0.0.0"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPv4NetworkFromCIDR(netip.MustParseAddr(testCase.addr), testCase.bits)
+			require.NoError(t, err)
+			require.Equal(t, netip.MustParseAddr(testCase.wantAddr), network.Addr())
+			require.Equal(t, netip.MustParseAddr(testCase.wantMask), network.Mask())
+		})
+	}
+}
+
+// verifies that the universe network built from a zero length equals
+// the type's zero value.
+func Test_IPv4NetworkFromCIDR_UniverseEqualsZeroValue(t *testing.T) {
+	network, err := xnetip.IPv4NetworkFromCIDR(netip.MustParseAddr("192.168.1.5"), 0)
+	require.NoError(t, err)
+	require.Equal(t, xnetip.IPv4Network{}, network)
+}
+
+// verifies that a prefix length outside 0 through 32 yields the
+// overflow sentinel and the zero network.
+func Test_IPv4NetworkFromCIDR_RejectsOutOfRangeBits(t *testing.T) {
+	cases := []struct {
+		name string
+		bits int
+	}{
+		{name: "one past the family width", bits: 33},
+		{name: "negative length", bits: -1},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPv4NetworkFromCIDR(netip.MustParseAddr("192.168.1.5"), testCase.bits)
+			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+			require.Equal(t, xnetip.IPv4Network{}, network)
+		})
+	}
+}
+
+// verifies that a non-Is4 address, IPv4-mapped included, yields the
+// family-mismatch sentinel and the zero network for a valid length.
+func Test_IPv4NetworkFromCIDR_RejectsForeignFamily(t *testing.T) {
+	cases := []struct {
+		name string
+		addr netip.Addr
+	}{
+		{name: "IPv6 address", addr: netip.MustParseAddr("2001:db8::1")},
+		{name: "IPv4-mapped IPv6 address", addr: netip.MustParseAddr("::ffff:192.168.1.5")},
+		{name: "invalid zero address", addr: netip.Addr{}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPv4NetworkFromCIDR(testCase.addr, 24)
+			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+			require.Equal(t, xnetip.IPv4Network{}, network)
+		})
+	}
+}
+
+// verifies that the CIDR constructor agrees with the net/netip oracle
+// for masking a prefix and always yields a normalized result.
+//
+// Non-contiguous masks cannot arise from this constructor — the mask
+// is a leading run of ones by construction — so the contiguity of
+// every drawn result is asserted in place of a non-contiguous case
+// table.
+func Test_IPv4NetworkFromCIDR_MatchesNetipMasked(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr")
+		bits := rapid.IntRange(0, 32).Draw(t, "bits")
+		network, err := xnetip.IPv4NetworkFromCIDR(addr, bits)
+		require.NoError(t, err)
+		require.Equal(t, netip.PrefixFrom(addr, bits).Masked().Addr(), network.Addr())
+		require.Equal(t, netipAddrFrom4Bits(^uint32(0)<<(32-bits)), network.Mask())
+		maskBytes := network.Mask().As4()
+		maskBits := binary.BigEndian.Uint32(maskBytes[:])
+		require.Equal(t, ^uint32(0), maskBits|(maskBits-1))
+		addrBytes := network.Addr().As4()
+		addrBits := binary.BigEndian.Uint32(addrBytes[:])
+		require.Equal(t, addrBits, addrBits&maskBits)
+	})
+}
+
+// verifies that every length outside 0 through 32, far past the width
+// or negative, yields the overflow sentinel.
+func Test_IPv4NetworkFromCIDR_OverflowProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr")
+		bits := rapid.OneOf(rapid.IntRange(33, 300), rapid.IntRange(-300, -1)).Draw(t, "bits")
+		network, err := xnetip.IPv4NetworkFromCIDR(addr, bits)
+		require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+		require.Equal(t, xnetip.IPv4Network{}, network)
+	})
+}
+
+// verifies that the CIDR constructor allocates nothing on the success
+// path, per the allocation-free runtime contract.
+func Test_IPv4NetworkFromCIDR_AllocationFree(t *testing.T) {
+	addr := netip.MustParseAddr("192.168.1.5")
+	var err error
+	requireNoAllocs(t, func() { networkSink, err = xnetip.IPv4NetworkFromCIDR(addr, 24) })
+	require.NoError(t, err)
 }

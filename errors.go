@@ -3,6 +3,8 @@ package xnetip
 import (
 	"errors"
 	"fmt"
+	"net/netip"
+	"strconv"
 )
 
 // ErrParse reports text that is not an address or network in any accepted
@@ -27,6 +29,14 @@ var ErrAddrFamilyMismatch = errors.New("address family mismatch")
 // rejection is this package's own and wraps the sentinel alone.
 var ErrZone = errors.New("zone not allowed")
 
+// ErrCIDROverflow reports a prefix length outside its address family's
+// range, 0 through 32 for IPv4 and 0 through 128 for IPv6.
+//
+// The CIDR constructors return it wrapped with the address and length
+// echoed, so errors.Is recognizes the rejection whatever the entry
+// point.
+var ErrCIDROverflow = errors.New("prefix length out of range")
+
 // wrapParseError builds the error the parsers and checked constructors
 // return: the function name with the input echoed, then the cause.
 //
@@ -39,4 +49,10 @@ func wrapParseError(function, input string, sentinel, detail error) error {
 		return fmt.Errorf("xnetip.%s(%q): %w", function, input, sentinel)
 	}
 	return fmt.Errorf("xnetip.%s(%q): %w: %w", function, input, sentinel, detail)
+}
+
+// cidrInput formats an address and prefix length pair the way the
+// CIDR constructors echo it in their errors, as addr/bits text.
+func cidrInput(addr netip.Addr, bits int) string {
+	return addr.String() + "/" + strconv.Itoa(bits)
 }

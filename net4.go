@@ -46,6 +46,28 @@ func fromBits4(addr, mask ipv4Addr) IPv4Network {
 	}
 }
 
+// IPv4NetworkFromCIDR returns the network of addr with the top bits
+// bits masked.
+//
+// Host bits of addr are cleared: 192.168.1.5 with 24 gives
+// 192.168.1.0/24, the same network netip.Prefix.Masked would report.
+// The address must be Is4 — an IPv6 address, IPv4-mapped included, or
+// the invalid zero netip.Addr is rejected with ErrAddrFamilyMismatch —
+// and bits must be in the range 0 through 32, otherwise
+// ErrCIDROverflow is returned.
+func IPv4NetworkFromCIDR(addr netip.Addr, bits int) (IPv4Network, error) {
+	addrKernel, ok := ipv4AddrFromNetip(addr)
+	if !ok {
+		input := cidrInput(addr, bits)
+		return IPv4Network{}, wrapParseError("IPv4NetworkFromCIDR", input, ErrAddrFamilyMismatch, nil)
+	}
+	if bits < 0 || bits > 32 {
+		input := cidrInput(addr, bits)
+		return IPv4Network{}, wrapParseError("IPv4NetworkFromCIDR", input, ErrCIDROverflow, nil)
+	}
+	return fromBits4(addrKernel, ipv4MaskFromPrefix(bits)), nil
+}
+
 // Addr returns the network address (already normalized by the mask) as
 // an Is4 netip.Addr.
 func (m IPv4Network) Addr() netip.Addr {
