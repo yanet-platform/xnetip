@@ -1355,6 +1355,480 @@ func Test_Network4_IsDisjoint_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { okSink = left.IsDisjoint(right) })
 }
 
+// verifies that disjoint operands yield the source network once.
+//
+// With nothing shared, the difference is the whole minuend. The
+// suites for this sequence are forward-only: the back-end pins of a
+// double-ended cursor have no iter.Seq analogue, so none appear
+// here.
+func Test_Network4_Difference_DisjointYieldsSource(t *testing.T) {
+	source := xnetip.MustParseNetwork4("10.0.0.0/8")
+	other := xnetip.MustParseNetwork4("192.168.0.0/16")
+	require.Equal(t, []xnetip.Network4{source}, slices.Collect(source.Difference(other)))
+}
+
+// verifies that subtracting a superset leaves nothing.
+func Test_Network4_Difference_SubsetIsEmpty(t *testing.T) {
+	source := xnetip.MustParseNetwork4("192.168.1.0/24")
+	other := xnetip.MustParseNetwork4("192.168.0.0/16")
+	require.Empty(t, slices.Collect(source.Difference(other)))
+}
+
+// verifies that a network minus itself is empty.
+func Test_Network4_Difference_SelfIsEmpty(t *testing.T) {
+	source := xnetip.MustParseNetwork4("10.0.0.0/8")
+	require.Empty(t, slices.Collect(source.Difference(source)))
+}
+
+// verifies that subtracting a /24 from its /16 superset yields eight
+// networks satisfying every part invariant.
+func Test_Network4_Difference_SupersetInvariants(t *testing.T) {
+	source := xnetip.MustParseNetwork4("192.168.0.0/16")
+	other := xnetip.MustParseNetwork4("192.168.1.0/24")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 8)
+	requireIPv4DifferenceParts(t, source, other, parts)
+}
+
+// requireIPv4DifferenceParts asserts the invariants every difference
+// part must satisfy.
+//
+// Each part must lie inside the source and be disjoint from the
+// subtracted network, and the parts must be pairwise disjoint.
+func requireIPv4DifferenceParts(t require.TestingT, source, other xnetip.Network4, parts []xnetip.Network4) {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	for _, part := range parts {
+		require.True(t, source.Contains(part), "part %v not in source", part)
+		require.True(t, part.IsDisjoint(other), "part %v intersects the other network", part)
+	}
+	for first := range parts {
+		for second := first + 1; second < len(parts); second++ {
+			require.True(t, parts[first].IsDisjoint(parts[second]),
+				"parts %v and %v overlap", parts[first], parts[second])
+		}
+	}
+}
+
+// verifies that the universe minus one host peels one network per
+// address bit.
+func Test_Network4_Difference_UniverseMinusHost(t *testing.T) {
+	source := xnetip.MustParseNetwork4("0.0.0.0/0")
+	other := xnetip.MustParseNetwork4("1.2.3.4/32")
+	require.Len(t, slices.Collect(source.Difference(other)), 32)
+}
+
+// verifies that a host route minus the universe is empty.
+func Test_Network4_Difference_HostMinusUniverse(t *testing.T) {
+	source := xnetip.MustParseNetwork4("1.2.3.4/32")
+	other := xnetip.MustParseNetwork4("0.0.0.0/0")
+	require.Empty(t, slices.Collect(source.Difference(other)))
+}
+
+// verifies that two equal host routes leave nothing.
+func Test_Network4_Difference_HostsSame(t *testing.T) {
+	source := xnetip.MustParseNetwork4("1.2.3.4/32")
+	other := xnetip.MustParseNetwork4("1.2.3.4/32")
+	require.Empty(t, slices.Collect(source.Difference(other)))
+}
+
+// verifies that two different host routes yield the source alone.
+func Test_Network4_Difference_HostsDifferent(t *testing.T) {
+	source := xnetip.MustParseNetwork4("1.2.3.4/32")
+	other := xnetip.MustParseNetwork4("5.6.7.8/32")
+	require.Equal(t, []xnetip.Network4{source}, slices.Collect(source.Difference(other)))
+}
+
+// verifies the documented peel order on a hand-checked case.
+//
+// The universe minus one host yields the 32 contiguous networks /1
+// through /32, most significant differing bit first.
+func Test_Network4_Difference_VerifiedByHandExactOrder(t *testing.T) {
+	source := xnetip.MustParseNetwork4("0.0.0.0/0")
+	other := xnetip.MustParseNetwork4("8.8.8.8/32")
+	expected := []xnetip.Network4{
+		xnetip.MustParseNetwork4("128.0.0.0/1"),
+		xnetip.MustParseNetwork4("64.0.0.0/2"),
+		xnetip.MustParseNetwork4("32.0.0.0/3"),
+		xnetip.MustParseNetwork4("16.0.0.0/4"),
+		xnetip.MustParseNetwork4("0.0.0.0/5"),
+		xnetip.MustParseNetwork4("12.0.0.0/6"),
+		xnetip.MustParseNetwork4("10.0.0.0/7"),
+		xnetip.MustParseNetwork4("9.0.0.0/8"),
+		xnetip.MustParseNetwork4("8.128.0.0/9"),
+		xnetip.MustParseNetwork4("8.64.0.0/10"),
+		xnetip.MustParseNetwork4("8.32.0.0/11"),
+		xnetip.MustParseNetwork4("8.16.0.0/12"),
+		xnetip.MustParseNetwork4("8.0.0.0/13"),
+		xnetip.MustParseNetwork4("8.12.0.0/14"),
+		xnetip.MustParseNetwork4("8.10.0.0/15"),
+		xnetip.MustParseNetwork4("8.9.0.0/16"),
+		xnetip.MustParseNetwork4("8.8.128.0/17"),
+		xnetip.MustParseNetwork4("8.8.64.0/18"),
+		xnetip.MustParseNetwork4("8.8.32.0/19"),
+		xnetip.MustParseNetwork4("8.8.16.0/20"),
+		xnetip.MustParseNetwork4("8.8.0.0/21"),
+		xnetip.MustParseNetwork4("8.8.12.0/22"),
+		xnetip.MustParseNetwork4("8.8.10.0/23"),
+		xnetip.MustParseNetwork4("8.8.9.0/24"),
+		xnetip.MustParseNetwork4("8.8.8.128/25"),
+		xnetip.MustParseNetwork4("8.8.8.64/26"),
+		xnetip.MustParseNetwork4("8.8.8.32/27"),
+		xnetip.MustParseNetwork4("8.8.8.16/28"),
+		xnetip.MustParseNetwork4("8.8.8.0/29"),
+		xnetip.MustParseNetwork4("8.8.8.12/30"),
+		xnetip.MustParseNetwork4("8.8.8.10/31"),
+		xnetip.MustParseNetwork4("8.8.8.9/32"),
+	}
+	collected := slices.Collect(source.Difference(other))
+	require.Equal(t, expected, collected)
+	for _, part := range collected {
+		require.True(t, part.IsContiguous(), "part %v not contiguous", part)
+	}
+}
+
+// verifies the exact-count contract across all three branches.
+//
+// The count is the popcount of the extra intersection bits when the
+// operands overlap, one when they are disjoint and zero for a subset
+// — non-contiguous masks included.
+func Test_Network4_Difference_CountFixedCases(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		other  string
+		want   int
+	}{
+		{name: "overlapping /16 minus /24", source: "192.168.0.0/16", other: "192.168.1.0/24", want: 8},
+		{name: "disjoint", source: "10.0.0.0/8", other: "192.168.0.0/16", want: 1},
+		{name: "subset", source: "192.168.1.0/24", other: "192.168.0.0/16", want: 0},
+		{name: "non-contiguous low-byte hole", source: "10.0.0.0/255.0.0.0", other: "10.0.0.1/255.0.0.255", want: 8},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			source := xnetip.MustParseNetwork4(testCase.source)
+			other := xnetip.MustParseNetwork4(testCase.other)
+			require.Len(t, slices.Collect(source.Difference(other)), testCase.want)
+		})
+	}
+}
+
+// verifies that breaking out of the loop stops the sequence after
+// exactly the consumed items.
+func Test_Network4_Difference_EarlyBreakStops(t *testing.T) {
+	source := xnetip.MustParseNetwork4("192.168.0.0/16")
+	other := xnetip.MustParseNetwork4("192.168.1.0/24")
+	consumed := 0
+	for range source.Difference(other) {
+		consumed++
+		if consumed == 2 {
+			break
+		}
+	}
+	require.Equal(t, 2, consumed)
+}
+
+// verifies that the same sequence value can be ranged twice and
+// yields identical items both times.
+func Test_Network4_Difference_ReIterable(t *testing.T) {
+	source := xnetip.MustParseNetwork4("192.168.0.0/16")
+	other := xnetip.MustParseNetwork4("192.168.1.0/24")
+	sequence := source.Difference(other)
+	firstPass := slices.Collect(sequence)
+	secondPass := slices.Collect(sequence)
+	require.Equal(t, firstPass, secondPass)
+}
+
+// verifies the exact peel of a non-contiguous pair.
+//
+// The low-byte hole in the subtrahend mask is peeled bit by bit,
+// highest first, every part keeping the source's non-contiguous
+// shape.
+func Test_Network4_Difference_NonContiguousExactPeel(t *testing.T) {
+	source := xnetip.MustParseNetwork4("10.0.0.0/255.0.0.0")
+	other := xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255")
+	expected := []xnetip.Network4{
+		xnetip.MustParseNetwork4("10.0.0.128/255.0.0.128"),
+		xnetip.MustParseNetwork4("10.0.0.64/255.0.0.192"),
+		xnetip.MustParseNetwork4("10.0.0.32/255.0.0.224"),
+		xnetip.MustParseNetwork4("10.0.0.16/255.0.0.240"),
+		xnetip.MustParseNetwork4("10.0.0.8/255.0.0.248"),
+		xnetip.MustParseNetwork4("10.0.0.4/255.0.0.252"),
+		xnetip.MustParseNetwork4("10.0.0.2/255.0.0.254"),
+		xnetip.MustParseNetwork4("10.0.0.0/255.0.0.255"),
+	}
+	collected := slices.Collect(source.Difference(other))
+	require.Equal(t, expected, collected)
+	requireIPv4DifferenceParts(t, source, other, collected)
+}
+
+// verifies the peel on an alternating subtrahend mask.
+//
+// The 16 parts accumulate the bits of 85.85.85.85 into their masks
+// from the top; the first three and the last are pinned by hand.
+func Test_Network4_Difference_UniverseMinusAlternatingHost(t *testing.T) {
+	source := xnetip.MustParseNetwork4("0.0.0.0/0")
+	other := xnetip.MustParseNetwork4("1.2.3.4/85.85.85.85")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 16)
+	require.Equal(t, xnetip.MustParseNetwork4("64.0.0.0/64.0.0.0"), parts[0])
+	require.Equal(t, xnetip.MustParseNetwork4("16.0.0.0/80.0.0.0"), parts[1])
+	require.Equal(t, xnetip.MustParseNetwork4("4.0.0.0/84.0.0.0"), parts[2])
+	require.Equal(t, xnetip.MustParseNetwork4("1.0.1.5/85.85.85.85"), parts[15])
+	requireIPv4DifferenceParts(t, source, other, parts)
+}
+
+// verifies a non-contiguous source against a contiguous subtrahend.
+//
+// The peel walks the middle-byte hole, so every part but the final
+// one stays non-contiguous and the final one closes the run.
+func Test_Network4_Difference_NonContiguousSourceContiguousOther(t *testing.T) {
+	source := xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")
+	other := xnetip.MustParseNetwork4("10.0.0.0/24")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 8)
+	for _, part := range parts[:7] {
+		require.False(t, part.IsContiguous(), "part %v unexpectedly contiguous", part)
+	}
+	require.True(t, parts[7].IsContiguous())
+	requireIPv4DifferenceParts(t, source, other, parts)
+}
+
+// verifies a two-run source mask against a host route: the peel is
+// confined to the bits the source leaves free below its upper run.
+func Test_Network4_Difference_TwoRunMasksOnBoth(t *testing.T) {
+	source := xnetip.MustParseNetwork4("192.168.0.0/255.255.0.255")
+	other := xnetip.MustParseNetwork4("192.168.0.0/255.255.255.255")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 8)
+	requireIPv4DifferenceParts(t, source, other, parts)
+}
+
+// verifies that every difference part lies inside the source network.
+func Test_Network4_Difference_PartsInSourceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork4.Draw(t, "source")
+		other := genNetwork4.Draw(t, "other")
+		for part := range source.Difference(other) {
+			require.True(t, source.Contains(part), "part %v not in source %v", part, source)
+		}
+	})
+}
+
+// verifies that every difference part is disjoint from the subtracted
+// network.
+func Test_Network4_Difference_PartsDisjointFromOtherProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork4.Draw(t, "source")
+		other := genNetwork4.Draw(t, "other")
+		for part := range source.Difference(other) {
+			require.True(t, part.IsDisjoint(other), "part %v intersects %v", part, other)
+		}
+	})
+}
+
+// verifies that the difference parts are pairwise disjoint.
+func Test_Network4_Difference_PairwiseDisjointProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork4.Draw(t, "source")
+		other := genNetwork4.Draw(t, "other")
+		parts := slices.Collect(source.Difference(other))
+		for first := range parts {
+			for second := first + 1; second < len(parts); second++ {
+				require.True(t, parts[first].IsDisjoint(parts[second]),
+					"parts %v and %v overlap", parts[first], parts[second])
+			}
+		}
+	})
+}
+
+// verifies that any network minus itself is empty.
+func Test_Network4_Difference_SelfIsEmptyProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork4.Draw(t, "source")
+		require.Empty(t, slices.Collect(source.Difference(source)))
+	})
+}
+
+// verifies completeness by counting.
+//
+// The parts' sizes plus the intersection's size add up to the
+// source's size, which together with the pairwise-disjoint and
+// inside-the-source invariants proves the union of the parts is
+// exactly the set difference.
+func Test_Network4_Difference_CompletenessProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork4.Draw(t, "source")
+		other := genNetwork4.Draw(t, "other")
+		sourceSize := uint64(1) << source.NumHostBits()
+		intersectionSize := uint64(0)
+		if intersected, ok := source.Intersection(other); ok {
+			intersectionSize = uint64(1) << intersected.NumHostBits()
+		}
+		differenceSize := uint64(0)
+		for part := range source.Difference(other) {
+			differenceSize += uint64(1) << part.NumHostBits()
+		}
+		require.Equal(t, sourceSize, differenceSize+intersectionSize)
+	})
+}
+
+// verifies the three-branch count rule.
+//
+// The sequence holds exactly one part per extra intersection bit
+// when the operands overlap, a lone part when they are disjoint and
+// no parts for a subset.
+func Test_Network4_Difference_CountMatchesPopcountProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork4.Draw(t, "source")
+		other := genNetwork4.Draw(t, "other")
+		want := 1
+		if intersected, ok := source.Intersection(other); ok {
+			_, sourceMask := ipv4NetworkBits(source)
+			_, intersectionMask := ipv4NetworkBits(intersected)
+			want = bits.OnesCount32(intersectionMask &^ sourceMask)
+		}
+		require.Len(t, slices.Collect(source.Difference(other)), want)
+	})
+}
+
+// verifies that every yielded part satisfies the network invariant
+// of a zero address outside the mask.
+//
+// The peel step constructs parts directly instead of going through a
+// normalizing constructor, so the invariant is pinned here.
+func Test_Network4_Difference_ItemsAreNormalizedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork4.Draw(t, "source")
+		other := genNetwork4.Draw(t, "other")
+		for part := range source.Difference(other) {
+			addr, mask := ipv4NetworkBits(part)
+			require.Equal(t, addr&mask, addr, "part %v not normalized", part)
+		}
+	})
+}
+
+// verifies the documented peel order over the bits `d` fixed by the
+// intersection but free in the source.
+//
+// Each part's mask grows the already-peeled set by exactly one bit
+// of `d`, always the highest pending one, until all of `d` is
+// covered.
+func Test_Network4_Difference_PeelOrderProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork4.Draw(t, "source")
+		other := genNetwork4.Draw(t, "other")
+		_, sourceMask := ipv4NetworkBits(source)
+		intersected, ok := source.Intersection(other)
+		if !ok {
+			require.Equal(t, []xnetip.Network4{source}, slices.Collect(source.Difference(other)))
+			return
+		}
+		_, intersectionMask := ipv4NetworkBits(intersected)
+		d := intersectionMask &^ sourceMask
+		peeled := uint32(0)
+		for part := range source.Difference(other) {
+			_, mask := ipv4NetworkBits(part)
+			extra := mask &^ sourceMask
+			newBit := extra &^ peeled
+			pending := d &^ peeled
+			require.Zero(t, extra&^d, "part %v adds bits outside d", part)
+			require.Equal(t, peeled, extra&peeled, "part %v drops peeled bits", part)
+			require.Equal(t, 1, bits.OnesCount32(newBit), "part %v adds more than one bit", part)
+			require.Equal(t, uint32(1)<<(31-bits.LeadingZeros32(pending)), newBit,
+				"part %v peels a non-highest pending bit", part)
+			peeled = extra
+		}
+		require.Equal(t, d, peeled)
+	})
+}
+
+// ipv4NetworkMembers lists every address of a small network by
+// scattering each host index over the mask's zero bits.
+//
+// It is the simple oracle the brute-force membership checks loop
+// over, independent of the address iterators.
+func ipv4NetworkMembers(addr, mask uint32) []uint32 {
+	hostBits := []uint32{}
+	for bit := uint32(1); bit != 0; bit <<= 1 {
+		if mask&bit == 0 {
+			hostBits = append(hostBits, bit)
+		}
+	}
+	members := []uint32{}
+	for index := range 1 << len(hostBits) {
+		value := addr
+		for position, bit := range hostBits {
+			if index&(1<<position) != 0 {
+				value |= bit
+			}
+		}
+		members = append(members, value)
+	}
+	return members
+}
+
+// verifies membership by brute force on small sources: the parts
+// cover exactly the source members outside the other network.
+func Test_Network4_Difference_BruteForceMembershipProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork4.Filter(func(network xnetip.Network4) bool {
+			return network.NumHostBits() <= 12
+		}).Draw(t, "source")
+		other := genNetwork4.Draw(t, "other")
+		parts := slices.Collect(source.Difference(other))
+		sourceAddr, sourceMask := ipv4NetworkBits(source)
+		otherAddr, otherMask := ipv4NetworkBits(other)
+		for _, member := range ipv4NetworkMembers(sourceAddr, sourceMask) {
+			inOther := member&otherMask == otherAddr
+			inParts := false
+			for _, part := range parts {
+				partAddr, partMask := ipv4NetworkBits(part)
+				if member&partMask == partAddr {
+					inParts = true
+					break
+				}
+			}
+			require.Equal(t, !inOther, inParts, "member %#x miscovered", member)
+		}
+	})
+}
+
+// verifies that consuming the sequence with a range loop allocates
+// nothing.
+func Test_Network4_Difference_AllocationFree(t *testing.T) {
+	source := xnetip.MustParseNetwork4("0.0.0.0/0")
+	other := xnetip.MustParseNetwork4("8.8.8.8/32")
+	requireNoAllocs(t, func() {
+		for part := range source.Difference(other) {
+			networkSink = part
+		}
+	})
+}
+
+func BenchmarkNetwork4_Difference_UniverseMinusHost(b *testing.B) {
+	source := xnetip.MustParseNetwork4("0.0.0.0/0")
+	other := xnetip.MustParseNetwork4("1.2.3.4/32")
+	b.ReportAllocs()
+	for b.Loop() {
+		for part := range source.Difference(other) {
+			networkSink = part
+		}
+	}
+}
+
+func BenchmarkNetwork4_Difference_UniverseMinusAlternatingHost(b *testing.B) {
+	source := xnetip.MustParseNetwork4("0.0.0.0/0")
+	other := xnetip.MustParseNetwork4("1.2.3.4/85.85.85.85")
+	b.ReportAllocs()
+	for b.Loop() {
+		for part := range source.Difference(other) {
+			networkSink = part
+		}
+	}
+}
+
 // verifies that adjacency needs the same mask and exactly one
 // differing masked bit, anywhere in the mask.
 //
