@@ -46,6 +46,13 @@ var ErrCIDROverflow = errors.New("prefix length out of range")
 // for a mask carrying a zone suffix.
 var ErrInvalidMask = errors.New("invalid network mask")
 
+// ErrNonContiguousMask reports network text whose mask is valid but
+// not a leading run of one bits, where a CIDR block was required.
+//
+// Only the Contiguous parsers return it: the text is a well-formed
+// network that the plain network parsers accept.
+var ErrNonContiguousMask = errors.New("mask not contiguous")
+
 // ErrEmptyInput reports empty text where a network was required.
 //
 // Only the UnmarshalText implementations return it: their zero values

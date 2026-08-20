@@ -1,7 +1,10 @@
 package xnetip_test
 
 import (
+	"errors"
 	"net/netip"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -289,4 +292,446 @@ func Test_Contiguous_OperationsAllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { contiguousSink, okSink = xnetip.ContiguousFrom(network) })
 	requireNoAllocs(t, func() { ipNetworkSink = other.Network() })
 	requireNoAllocs(t, func() { intSink = other.Compare(contiguousSink) })
+}
+
+// verifies that every contiguous IPv4 form parses to the exactly
+// wrapped network: prefix, dotted mask and bare address notation.
+func Test_ParseContiguous4_AcceptsContiguousForms(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "prefix form", input: "192.168.0.0/16", want: "192.168.0.0/16"},
+		{name: "another prefix form", input: "192.168.1.0/24", want: "192.168.1.0/24"},
+		{name: "contiguous dotted mask equals the prefix form", input: "192.168.0.0/255.255.0.0", want: "192.168.0.0/16"},
+		{name: "bare address is a host route", input: "10.0.0.1", want: "10.0.0.1/32"},
+		{name: "/0 is the universe", input: "0.0.0.0/0", want: "0.0.0.0/0"},
+		{name: "/32 keeps the address", input: "1.2.3.4/32", want: "1.2.3.4/32"},
+		{name: "host bits normalize under the mask", input: "10.1.2.3/8", want: "10.0.0.0/8"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			block, err := xnetip.ParseContiguous4(testCase.input)
+			require.NoError(t, err)
+			require.Equal(t, mustContiguous4(t, testCase.want), block)
+		})
+	}
+}
+
+// verifies that a valid IPv4 network with a one bit after a zero
+// mask bit is rejected, yielding the sentinel and the zero wrapper.
+func Test_ParseContiguous4_RejectsNonContiguousMask(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "two-run mask", input: "10.0.0.0/255.0.255.0"},
+		{name: "two-run mask around the last octet", input: "192.168.0.1/255.255.0.255"},
+		{name: "alternating mask", input: "170.85.170.85/170.85.170.85"},
+		{name: "hole at the half boundary", input: "10.1.2.3/255.254.255.255"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			block, err := xnetip.ParseContiguous4(testCase.input)
+			require.ErrorIs(t, err, xnetip.ErrNonContiguousMask)
+			require.Equal(t, xnetip.Contiguous[xnetip.Network4]{}, block)
+		})
+	}
+}
+
+// verifies that every contiguous IPv6 form parses to the exactly
+// wrapped network: prefix, colon mask and bare address notation.
+func Test_ParseContiguous6_AcceptsContiguousForms(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "prefix form", input: "2001:db8::/32", want: "2001:db8::/32"},
+		{name: "geo prefix form", input: "2a02:6b8:c00::/40", want: "2a02:6b8:c00::/40"},
+		{name: "contiguous colon mask equals the prefix form", input: "2001:db8::/ffff:ffff::", want: "2001:db8::/32"},
+		{name: "bare address is a host route", input: "2001:db8::1", want: "2001:db8::1/128"},
+		{name: "/0 is the universe", input: "::/0", want: "::/0"},
+		{name: "/128 keeps the address", input: "2001:db8::1/128", want: "2001:db8::1/128"},
+		{name: "host bits normalize under the mask", input: "2001:db8::1/32", want: "2001:db8::/32"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			block, err := xnetip.ParseContiguous6(testCase.input)
+			require.NoError(t, err)
+			require.Equal(t, mustContiguous6(t, testCase.want), block)
+		})
+	}
+}
+
+// verifies that a valid IPv6 network with a one bit after a zero
+// mask bit is rejected, yielding the sentinel and the zero wrapper.
+func Test_ParseContiguous6_RejectsNonContiguousMask(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "two-run mask", input: "2001::/ffff:0:ffff::"},
+		{name: "geo-style two-run mask", input: "2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0"},
+		{name: "alternating mask", input: "2001:db8::/aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"},
+		{name: "hole at bit 64", input: "2001:db8::/ffff:ffff:ffff:fffe:ffff::"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			block, err := xnetip.ParseContiguous6(testCase.input)
+			require.ErrorIs(t, err, xnetip.ErrNonContiguousMask)
+			require.Equal(t, xnetip.Contiguous[xnetip.Network6]{}, block)
+		})
+	}
+}
+
+// verifies that the family-agnostic parser follows the address part:
+// dotted text is IPv4 and IPv4-mapped text stays IPv6.
+func Test_ParseContiguous_SelectsFamilyByAddress(t *testing.T) {
+	ipv4, err := xnetip.ParseContiguous("10.0.0.0/8")
+	require.NoError(t, err)
+	require.True(t, ipv4.Network().Is4())
+	require.Equal(t, mustContiguous(t, "10.0.0.0/8"), ipv4)
+	mapped, err := xnetip.ParseContiguous("::ffff:10.0.0.0/104")
+	require.NoError(t, err)
+	require.True(t, mapped.Network().Is6())
+	require.Equal(t, mustContiguous(t, "::ffff:10.0.0.0/104"), mapped)
+}
+
+// verifies that the family-agnostic parser rejects a non-contiguous
+// mask of either family, yielding the sentinel and the zero wrapper.
+func Test_ParseContiguous_RejectsNonContiguousMask(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "IPv4 two-run mask", input: "192.168.0.1/255.255.0.255"},
+		{name: "IPv4 alternating mask", input: "170.85.170.85/170.85.170.85"},
+		{name: "IPv6 two-run mask", input: "2001::/ffff:0:ffff::"},
+		{name: "IPv6 hole at bit 64", input: "2001:db8::/ffff:ffff:ffff:fffe:ffff::"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			block, err := xnetip.ParseContiguous(testCase.input)
+			require.ErrorIs(t, err, xnetip.ErrNonContiguousMask)
+			require.Equal(t, xnetip.Contiguous[xnetip.Network]{}, block)
+		})
+	}
+}
+
+// verifies that text that is no network at all keeps the parse
+// sentinel of the network grammar in every family.
+func Test_ParseContiguous_GarbageKeepsParseSentinel(t *testing.T) {
+	_, err := xnetip.ParseContiguous4("not-a-net")
+	require.ErrorIs(t, err, xnetip.ErrParse)
+	_, err = xnetip.ParseContiguous6("not-a-net")
+	require.ErrorIs(t, err, xnetip.ErrParse)
+	_, err = xnetip.ParseContiguous("not-a-net")
+	require.ErrorIs(t, err, xnetip.ErrParse)
+}
+
+// verifies that a zone suffix is rejected with the zone sentinel by
+// the IPv6 and the family-agnostic parser alike.
+func Test_ParseContiguous_RejectsZone(t *testing.T) {
+	_, err := xnetip.ParseContiguous6("fe80::1%eth0/64")
+	require.ErrorIs(t, err, xnetip.ErrZone)
+	_, err = xnetip.ParseContiguous("fe80::1%eth0/64")
+	require.ErrorIs(t, err, xnetip.ErrZone)
+}
+
+// verifies that every rejection names the contiguous parser and
+// echoes the input, never leaking the network parser it delegates to.
+func Test_ParseContiguous_ErrorNamesThisParser(t *testing.T) {
+	inputs4 := []string{"not-a-net", "10.0.0.0/255.0.255.0", "10.0.0.0/33"}
+	for _, input := range inputs4 {
+		_, err := xnetip.ParseContiguous4(input)
+		require.Error(t, err)
+		require.True(t, strings.HasPrefix(err.Error(), "xnetip.ParseContiguous4("), err.Error())
+		require.Contains(t, err.Error(), strconv.Quote(input))
+	}
+	inputs6 := []string{"not-a-net", "2001::/ffff:0:ffff::", "2001:db8::/129"}
+	for _, input := range inputs6 {
+		_, err := xnetip.ParseContiguous6(input)
+		require.Error(t, err)
+		require.True(t, strings.HasPrefix(err.Error(), "xnetip.ParseContiguous6("), err.Error())
+		require.Contains(t, err.Error(), strconv.Quote(input))
+	}
+	inputsDual := []string{"not-a-net", "10.0.0.0/255.0.255.0", "2001::/ffff:0:ffff::"}
+	for _, input := range inputsDual {
+		_, err := xnetip.ParseContiguous(input)
+		require.Error(t, err)
+		require.True(t, strings.HasPrefix(err.Error(), "xnetip.ParseContiguous("), err.Error())
+		require.Contains(t, err.Error(), strconv.Quote(input))
+	}
+}
+
+// verifies that each must variant panics on invalid input and passes
+// a valid block through.
+func Test_MustParseContiguous_PanicsOnInvalidInput(t *testing.T) {
+	require.Panics(t, func() { xnetip.MustParseContiguous4("10.0.0.0/255.0.255.0") })
+	require.Panics(t, func() { xnetip.MustParseContiguous6("2001::/ffff:0:ffff::") })
+	require.Panics(t, func() { xnetip.MustParseContiguous("not-a-net") })
+	require.Equal(t, mustContiguous4(t, "10.0.0.0/8"), xnetip.MustParseContiguous4("10.0.0.0/8"))
+	require.Equal(t, mustContiguous6(t, "2001:db8::/32"), xnetip.MustParseContiguous6("2001:db8::/32"))
+	require.Equal(t, mustContiguous(t, "10.0.0.0/8"), xnetip.MustParseContiguous("10.0.0.0/8"))
+}
+
+// verifies that parsing an IPv4 network's text succeeds exactly when
+// its mask is contiguous, wrapping that network and nothing else.
+func Test_ParseContiguous4_AcceptOracleProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		block, err := xnetip.ParseContiguous4(network.String())
+		if network.IsContiguous() {
+			require.NoError(t, err)
+			require.Equal(t, network, block.Network())
+		} else {
+			require.ErrorIs(t, err, xnetip.ErrNonContiguousMask)
+			require.Equal(t, xnetip.Contiguous[xnetip.Network4]{}, block)
+		}
+	})
+}
+
+// verifies that parsing an IPv6 network's text succeeds exactly when
+// its mask is contiguous, wrapping that network and nothing else.
+func Test_ParseContiguous6_AcceptOracleProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		block, err := xnetip.ParseContiguous6(network.String())
+		if network.IsContiguous() {
+			require.NoError(t, err)
+			require.Equal(t, network, block.Network())
+		} else {
+			require.ErrorIs(t, err, xnetip.ErrNonContiguousMask)
+			require.Equal(t, xnetip.Contiguous[xnetip.Network6]{}, block)
+		}
+	})
+}
+
+// verifies that parsing a family-agnostic network's text succeeds
+// exactly when its mask is contiguous, keeping family and network.
+func Test_ParseContiguous_AcceptOracleProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork.Draw(t, "network")
+		block, err := xnetip.ParseContiguous(network.String())
+		if network.IsContiguous() {
+			require.NoError(t, err)
+			require.Equal(t, network, block.Network())
+		} else {
+			require.ErrorIs(t, err, xnetip.ErrNonContiguousMask)
+			require.Equal(t, xnetip.Contiguous[xnetip.Network]{}, block)
+		}
+	})
+}
+
+// verifies that a block's text parses back to the same block in all
+// three instantiations.
+func Test_ParseContiguous_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block4 := genContiguous4.Draw(t, "block4")
+		parsed4, err := xnetip.ParseContiguous4(block4.Network().String())
+		require.NoError(t, err)
+		require.Equal(t, block4, parsed4)
+		block6 := genContiguous6.Draw(t, "block6")
+		parsed6, err := xnetip.ParseContiguous6(block6.Network().String())
+		require.NoError(t, err)
+		require.Equal(t, block6, parsed6)
+		block := genContiguous.Draw(t, "block")
+		parsed, err := xnetip.ParseContiguous(block.Network().String())
+		require.NoError(t, err)
+		require.Equal(t, block, parsed)
+	})
+}
+
+// verifies that on text the network parser rejects, the same-family
+// contiguous parser rejects with exactly the same sentinel set.
+func Test_ParseContiguous_ErrorSetMatchesNetworkParserProperty(t *testing.T) {
+	corpus := []string{
+		"", "/", "/24", "hello", "zz/24", " 10.0.0.1/24", "01.2.3.4/8",
+		"10.0.0.0/33", "10.0.0.0/08", "10.0.0.0/+8", "10.0.0.1//24",
+		"10.0.0.1/2001:db8::1", "2001:db8::1/129", "2001:db8::/xx",
+		"fe80::1%eth0/64", "2001:db8::%eth0/32", "1.2.3/8", "10.0.0.0/256",
+		"2001:db8::1", "10.0.0.1", "::ffff:10.0.0.1/120",
+	}
+	sentinels := []error{
+		xnetip.ErrParse, xnetip.ErrAddrFamilyMismatch, xnetip.ErrZone,
+		xnetip.ErrCIDROverflow, xnetip.ErrInvalidMask,
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		input := rapid.SampledFrom(corpus).Draw(t, "input")
+		_, networkErr4 := xnetip.ParseNetwork4(input)
+		_, blockErr4 := xnetip.ParseContiguous4(input)
+		if networkErr4 != nil {
+			require.Error(t, blockErr4)
+			for _, sentinel := range sentinels {
+				require.Equal(t, errors.Is(networkErr4, sentinel), errors.Is(blockErr4, sentinel))
+			}
+		}
+		_, networkErr6 := xnetip.ParseNetwork6(input)
+		_, blockErr6 := xnetip.ParseContiguous6(input)
+		if networkErr6 != nil {
+			require.Error(t, blockErr6)
+			for _, sentinel := range sentinels {
+				require.Equal(t, errors.Is(networkErr6, sentinel), errors.Is(blockErr6, sentinel))
+			}
+		}
+		_, networkErr := xnetip.ParseNetwork(input)
+		_, blockErr := xnetip.ParseContiguous(input)
+		if networkErr != nil {
+			require.Error(t, blockErr)
+			for _, sentinel := range sentinels {
+				require.Equal(t, errors.Is(networkErr, sentinel), errors.Is(blockErr, sentinel))
+			}
+		}
+	})
+}
+
+// verifies that IPv4 prefix-form text agrees with the std masked
+// prefix on acceptance and on the parsed address and length.
+func Test_ParseContiguous4_MatchesNetipParsePrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr")
+		bits := rapid.IntRange(0, 32).Draw(t, "bits")
+		input := addr.String() + "/" + strconv.Itoa(bits)
+		block, err := xnetip.ParseContiguous4(input)
+		require.NoError(t, err)
+		stdPrefix, err := netip.ParsePrefix(input)
+		require.NoError(t, err)
+		masked := stdPrefix.Masked()
+		require.Equal(t, masked.Addr(), block.Network().Addr())
+		prefixLen, ok := block.Network().PrefixLen()
+		require.True(t, ok)
+		require.Equal(t, masked.Bits(), prefixLen)
+	})
+}
+
+// verifies that IPv6 prefix-form text agrees with the std masked
+// prefix on acceptance and on the parsed address and length.
+func Test_ParseContiguous6_MatchesNetipParsePrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr6.Draw(t, "addr")
+		bits := rapid.IntRange(0, 128).Draw(t, "bits")
+		input := addr.String() + "/" + strconv.Itoa(bits)
+		block, err := xnetip.ParseContiguous6(input)
+		require.NoError(t, err)
+		stdPrefix, err := netip.ParsePrefix(input)
+		require.NoError(t, err)
+		masked := stdPrefix.Masked()
+		require.Equal(t, masked.Addr(), block.Network().Addr())
+		prefixLen, ok := block.Network().PrefixLen()
+		require.True(t, ok)
+		require.Equal(t, masked.Bits(), prefixLen)
+	})
+}
+
+func FuzzParseContiguous4(f *testing.F) {
+	seeds := []string{
+		"192.168.0.0/16", "192.168.1.0/24", "192.168.0.0/255.255.0.0", "10.0.0.1",
+		"0.0.0.0/0", "1.2.3.4/32", "10.1.2.3/8", "10.0.0.0/255.0.255.0",
+		"192.168.0.1/255.255.0.255", "170.85.170.85/170.85.170.85",
+		"10.1.2.3/255.254.255.255", "not-a-net", "10.0.0.0/33", "10.0.0.0/08",
+		"", "fe80::1%eth0/64", "2001:db8::/32", "::ffff:10.0.0.0/104",
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		block, err := xnetip.ParseContiguous4(input)
+		network, networkErr := xnetip.ParseNetwork4(input)
+		switch {
+		case networkErr != nil:
+			if err == nil {
+				t.Fatalf("accepted %q, which the network parser rejects: %v", input, networkErr)
+			}
+		case network.IsContiguous():
+			if err != nil {
+				t.Fatalf("rejected contiguous %q: %v", input, err)
+			}
+			if block.Network() != network {
+				t.Fatalf("parsed %q as %v, the network parser says %v", input, block.Network(), network)
+			}
+		default:
+			if !errors.Is(err, xnetip.ErrNonContiguousMask) {
+				t.Fatalf("non-contiguous %q must wrap the sentinel, got %v", input, err)
+			}
+		}
+	})
+}
+
+func FuzzParseContiguous6(f *testing.F) {
+	seeds := []string{
+		"2001:db8::/32", "2a02:6b8:c00::/40", "2001:db8::/ffff:ffff::",
+		"2001:db8::1", "::/0", "2001:db8::1/128", "2001::/ffff:0:ffff::",
+		"2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+		"2001:db8::/aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa",
+		"2001:db8::/ffff:ffff:ffff:fffe:ffff::", "not-a-net", "2001:db8::/129",
+		"", "fe80::1%eth0/64", "10.0.0.0/8", "::ffff:10.0.0.0/104",
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		block, err := xnetip.ParseContiguous6(input)
+		network, networkErr := xnetip.ParseNetwork6(input)
+		switch {
+		case networkErr != nil:
+			if err == nil {
+				t.Fatalf("accepted %q, which the network parser rejects: %v", input, networkErr)
+			}
+		case network.IsContiguous():
+			if err != nil {
+				t.Fatalf("rejected contiguous %q: %v", input, err)
+			}
+			if block.Network() != network {
+				t.Fatalf("parsed %q as %v, the network parser says %v", input, block.Network(), network)
+			}
+		default:
+			if !errors.Is(err, xnetip.ErrNonContiguousMask) {
+				t.Fatalf("non-contiguous %q must wrap the sentinel, got %v", input, err)
+			}
+		}
+	})
+}
+
+func BenchmarkParseContiguous4_Prefix(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		contiguous4Sink, errSink = xnetip.ParseContiguous4("192.168.0.0/16")
+	}
+}
+
+func BenchmarkParseContiguous4_Mask(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		contiguous4Sink, errSink = xnetip.ParseContiguous4("192.168.0.0/255.255.0.0")
+	}
+}
+
+func BenchmarkParseContiguous4_Reject(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		contiguous4Sink, errSink = xnetip.ParseContiguous4("10.0.0.0/255.0.255.0")
+	}
+}
+
+func BenchmarkParseContiguous6_Prefix(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		contiguous6Sink, errSink = xnetip.ParseContiguous6("2001:db8::/32")
+	}
+}
+
+func BenchmarkParseContiguous6_Mask(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		contiguous6Sink, errSink = xnetip.ParseContiguous6("2001:db8::/ffff:ffff::")
+	}
+}
+
+func BenchmarkParseContiguous6_Reject(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		contiguous6Sink, errSink = xnetip.ParseContiguous6("2001::/ffff:0:ffff::")
+	}
 }
