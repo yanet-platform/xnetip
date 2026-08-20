@@ -3,6 +3,7 @@ package xnetip_test
 import (
 	"encoding/binary"
 	"math"
+	"math/bits"
 	"net/netip"
 	"slices"
 	"testing"
@@ -1011,5 +1012,158 @@ func BenchmarkIPv6Network_IsContiguous_NonContiguous(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = network.IsContiguous()
+	}
+}
+
+// verifies that a contiguous mask reports its leading-ones run length,
+// from the universe through the host route.
+//
+// The run lengths at and just past the 64-bit half boundary are pinned
+// explicitly, and an IPv4-mapped network reports its 128-bit length:
+// the image of an IPv4 /24 is a /120.
+func Test_IPv6Network_Prefix_LeadingOnesRunLength(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    int
+	}{
+		{name: "/40", network: mustIPv6Network(t, "2a02:6b8::", "ffff:ffff:ff00::"), want: 40},
+		{name: "host route /128", network: mustIPv6Network(t, "2a02:6b8::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: 128},
+		{name: "mapped /24 is /120", network: mustIPv4Network(t, "8.8.8.0", "255.255.255.0").ToIPv6Mapped(), want: 120},
+		{name: "universe /0", network: mustIPv6Network(t, "::", "::"), want: 0},
+		{name: "single leading bit /1", network: mustIPv6Network(t, "8000::", "8000::"), want: 1},
+		{name: "/127", network: mustIPv6Network(t, "2001:db8::2", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe"), want: 127},
+		{name: "/128 explicit", network: mustIPv6Network(t, "2001:db8::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: 128},
+		{name: "run ends exactly at the half boundary /64", network: mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff:ffff::"), want: 64},
+		{name: "run crosses the half boundary /65", network: mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff:ffff:8000::"), want: 65},
+		{name: "zero value is the universe", network: xnetip.IPv6Network{}, want: 0},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.True(t, ok)
+			require.Equal(t, testCase.want, prefix)
+		})
+	}
+}
+
+// verifies that a non-contiguous mask has no prefix length and reports
+// zero, whether the leading run is broken, empty or trailing-only.
+//
+// The half boundary is the IPv6-specific trap: a hole straddling bit
+// 64 and a full high half over a broken low half must both report no
+// prefix.
+func Test_IPv6Network_Prefix_NonContiguousHasNone(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+	}{
+		{name: "hole in the middle", network: mustIPv6Network(t, "2001:db8::1", "ffff:ffff::ffff")},
+		{name: "no leading run", network: mustIPv6Network(t, "::1", "::ffff")},
+		{name: "leading zero then ones", network: mustIPv6Network(t, "::", "7fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "geo mask with two runs", network: mustIPv6Network(t, "2001:db8::", "ffff:ffff:ff00::ffff:ffff:0:0")},
+		{name: "hole straddling bit 64", network: mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff:fff0:0fff:ffff::")},
+		{name: "alternating groups", network: mustIPv6Network(t, "2001:0:db8::", "ffff:0:ffff:0:ffff:0:ffff:0")},
+		{name: "high half full, low half broken", network: mustIPv6Network(t, "::", "ffff:ffff:ffff:ffff:0:ffff:0:ffff")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.False(t, ok)
+			require.Zero(t, prefix)
+		})
+	}
+}
+
+// verifies that a prefix length exists exactly for contiguous masks
+// and that the length rebuilds the mask through the netip oracle.
+func Test_IPv6Network_Prefix_SomeIffContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		prefix, ok := network.Prefix()
+		require.Equal(t, network.IsContiguous(), ok)
+		if !ok {
+			require.Zero(t, prefix)
+			return
+		}
+		allOnes := netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+		maskOracle, err := allOnes.Prefix(prefix)
+		require.NoError(t, err)
+		require.Equal(t, maskOracle.Addr(), network.Mask())
+	})
+}
+
+// verifies that a network built from any address and prefix length
+// reports that same length back.
+func Test_IPv6Network_Prefix_RoundTripsCIDRProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr6.Draw(t, "addr")
+		cidr := rapid.IntRange(0, 128).Draw(t, "cidr")
+		network, err := xnetip.IPv6NetworkFromCIDR(addr, cidr)
+		require.NoError(t, err)
+		prefix, ok := network.Prefix()
+		require.True(t, ok)
+		require.Equal(t, cidr, prefix)
+	})
+}
+
+// verifies that for a contiguous mask the reported length is the one
+// net/netip accepts and reports back for the same address.
+func Test_IPv6Network_Prefix_MatchesNetipBitsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		if !network.IsContiguous() {
+			return
+		}
+		maskBytes := network.Mask().As16()
+		leading := bits.LeadingZeros64(^binary.BigEndian.Uint64(maskBytes[:8]))
+		if leading == 64 {
+			leading += bits.LeadingZeros64(^binary.BigEndian.Uint64(maskBytes[8:]))
+		}
+		prefix, ok := network.Prefix()
+		require.True(t, ok)
+		require.Equal(t, netip.PrefixFrom(network.Addr(), leading).Bits(), prefix)
+	})
+}
+
+// verifies that computing the prefix allocates nothing on either
+// outcome.
+func Test_IPv6Network_Prefix_AllocationFree(t *testing.T) {
+	contiguous := mustIPv6Network(t, "2001:db8::", "ffff:ffff::")
+	nonContiguous := mustIPv6Network(t, "2001:db8::1", "ffff:ffff::ffff")
+	requireNoAllocs(t, func() { intSink, okSink = contiguous.Prefix() })
+	requireNoAllocs(t, func() { intSink, okSink = nonContiguous.Prefix() })
+}
+
+func BenchmarkIPv6Network_Prefix_Contiguous(b *testing.B) {
+	network := mustIPv6Network(b, "2001:db8::", "ffff:ffff::")
+	b.ReportAllocs()
+	for b.Loop() {
+		intSink, okSink = network.Prefix()
+	}
+}
+
+func BenchmarkIPv6Network_Prefix_NonContiguous(b *testing.B) {
+	network := mustIPv6Network(b, "2001:db8::1", "ffff:ffff::ffff")
+	b.ReportAllocs()
+	for b.Loop() {
+		intSink, okSink = network.Prefix()
+	}
+}
+
+func BenchmarkIPv6Network_Prefix_Mixed(b *testing.B) {
+	// A 50/50 contiguous/non-contiguous rotation exercises both
+	// outcomes of the contiguity check within one measurement.
+	networks := []xnetip.IPv6Network{
+		mustIPv6Network(b, "2001:db8::", "ffff:ffff::"),
+		mustIPv6Network(b, "2001:db8::1", "ffff:ffff::ffff"),
+		mustIPv6Network(b, "2a02:6b8::", "ffff:ffff:ffff::"),
+		mustIPv6Network(b, "2a02:6b8::1", "ffff:0:0:0:ffff::"),
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		for _, network := range networks {
+			intSink, okSink = network.Prefix()
+		}
 	}
 }
