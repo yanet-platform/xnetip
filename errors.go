@@ -46,6 +46,14 @@ var ErrCIDROverflow = errors.New("prefix length out of range")
 // for a mask carrying a zone suffix.
 var ErrInvalidMask = errors.New("invalid network mask")
 
+// ErrEmptyInput reports empty text where a network was required.
+//
+// Only the UnmarshalText implementations return it: their zero values
+// are valid networks, so empty text must not silently produce one the
+// way it produces the invalid zero netip.Prefix. The parsers reject
+// empty text through ErrParse and the net/netip cause instead.
+var ErrEmptyInput = errors.New("empty input")
+
 // wrapParseError builds the error the parsers and checked constructors
 // return: the function name with the input echoed, then the cause.
 //

@@ -269,6 +269,35 @@ func (m IPv4Network) AppendTo(b []byte) []byte {
 	return m.mask.AppendTo(b)
 }
 
+// MarshalText implements encoding.TextMarshaler.
+//
+// The text is the String form of the network: an address, "/" and
+// either a prefix length (contiguous mask) or a dotted mask
+// (non-contiguous mask). It never fails and allocates only the
+// returned slice.
+func (m IPv4Network) MarshalText() ([]byte, error) {
+	return m.AppendTo(make([]byte, 0, len("255.255.255.255/255.255.255.255"))), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+//
+// The text must be accepted by ParseIPv4Network. Empty text wraps
+// ErrEmptyInput rather than yielding the zero value the way it yields
+// the invalid zero netip.Prefix: the zero IPv4Network is the valid
+// network 0.0.0.0/0, so empty text would silently hide a missing
+// field. The receiver is untouched on any error.
+func (m *IPv4Network) UnmarshalText(text []byte) error {
+	if len(text) == 0 {
+		return wrapParseError("IPv4Network.UnmarshalText", "", ErrEmptyInput, nil)
+	}
+	network, err := ParseIPv4Network(string(text))
+	if err != nil {
+		return err
+	}
+	*m = network
+	return nil
+}
+
 // ToIPv6Mapped returns this network as an IPv4-mapped IPv6 network.
 //
 // The address becomes ::ffff:a.b.c.d and the mask keeps the upper 96
