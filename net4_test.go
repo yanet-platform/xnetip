@@ -3193,6 +3193,228 @@ func BenchmarkNetwork4_Addrs_NonContiguous8HostBits(b *testing.B) {
 	}
 }
 
+// verifies that a /24 yields its 256 addresses in descending numeric
+// order, each smaller than the previous by exactly one.
+func Test_Network4_AddrsBackward_Slash24DescendsByOne(t *testing.T) {
+	network := xnetip.MustParseNetwork4("192.168.1.0/24")
+	expected := netip.MustParseAddr("192.168.1.255")
+	count := 0
+	for addr := range network.AddrsBackward() {
+		require.Equal(t, expected, addr)
+		expected = expected.Prev()
+		count++
+	}
+	require.Equal(t, 256, count)
+	require.Equal(t, netip.MustParseAddr("192.168.1.0"), expected.Next())
+}
+
+// verifies that a host route yields exactly its single address.
+func Test_Network4_AddrsBackward_HostRouteSingle(t *testing.T) {
+	network := xnetip.MustParseNetwork4("10.0.0.1/32")
+	collected := slices.Collect(network.AddrsBackward())
+	require.Equal(t, []netip.Addr{netip.MustParseAddr("10.0.0.1")}, collected)
+}
+
+// verifies that the default route starts at the all-ones address and
+// steps to its predecessor: the head of the 2^32-item sequence.
+func Test_Network4_AddrsBackward_UniverseHead(t *testing.T) {
+	network := xnetip.MustParseNetwork4("0.0.0.0/0")
+	head := collectHead(network.AddrsBackward(), 2)
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("255.255.255.255"),
+		netip.MustParseAddr("255.255.255.254"),
+	}, head)
+}
+
+// verifies that a non-contiguous sequence starts at the last address,
+// ends at the network address and never repeats an item.
+func Test_Network4_AddrsBackward_StartsAtLastAddr(t *testing.T) {
+	network := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
+	collected := slices.Collect(network.AddrsBackward())
+	require.Len(t, collected, 256)
+	require.Equal(t, network.LastAddr(), collected[0])
+	require.Equal(t, netip.MustParseAddr("192.168.255.1"), collected[0])
+	require.Equal(t, network.Addr(), collected[255])
+	seen := map[netip.Addr]bool{}
+	for _, addr := range collected {
+		require.False(t, seen[addr], "address repeated: %v", addr)
+		seen[addr] = true
+	}
+}
+
+// verifies that breaking out of the loop stops the sequence after
+// exactly the consumed items.
+func Test_Network4_AddrsBackward_EarlyBreakStops(t *testing.T) {
+	network := xnetip.MustParseNetwork4("192.168.1.0/24")
+	consumed := 0
+	for range network.AddrsBackward() {
+		consumed++
+		if consumed == 3 {
+			break
+		}
+	}
+	require.Equal(t, 3, consumed)
+}
+
+// verifies that one sequence value can be ranged twice and yields the
+// same addresses on both passes.
+func Test_Network4_AddrsBackward_ReIterable(t *testing.T) {
+	network := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
+	sequence := network.AddrsBackward()
+	first := slices.Collect(sequence)
+	second := slices.Collect(sequence)
+	require.Equal(t, first, second)
+}
+
+// verifies the exact reverse order of a mask with a four-bit hole.
+//
+// Descending host indices drain the hole, so the third octet steps
+// down by sixteen while every other octet stays pinned.
+func Test_Network4_AddrsBackward_NonContiguousPinnedReverseOrder(t *testing.T) {
+	network := xnetip.MustParseNetwork4("10.0.0.1/255.255.15.255")
+	expected := make([]netip.Addr, 0, 16)
+	for value := range 16 {
+		expected = append(expected, netip.AddrFrom4([4]byte{10, 0, byte(16 * (15 - value)), 1}))
+	}
+	require.Equal(t, expected, slices.Collect(network.AddrsBackward()))
+}
+
+// verifies on the alternating mask that the two lowest host bits
+// drain first: the borrow clears bit 0, then moves to bit 2.
+func Test_Network4_AddrsBackward_AlternatingMaskHead(t *testing.T) {
+	network := xnetip.MustParseNetwork4("0.0.0.0/170.170.170.170")
+	head := collectHead(network.AddrsBackward(), 3)
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("85.85.85.85"),
+		netip.MustParseAddr("85.85.85.84"),
+		netip.MustParseAddr("85.85.85.81"),
+	}, head)
+}
+
+// verifies the head of the widest non-contiguous network against the
+// host-index oracle.
+//
+// Its 30 host bits make a full drain infeasible, so only the first
+// two items are probed: the all-ones address, then the borrow
+// clearing bit 1, the lowest host bit above the masked bit 0.
+func Test_Network4_AddrsBackward_WidestNonContiguousHead(t *testing.T) {
+	network := xnetip.MustParseNetwork4("128.0.0.1/128.0.0.1")
+	head := collectHead(network.AddrsBackward(), 2)
+	require.Equal(t, []netip.Addr{
+		addr4AtHostIndexReference(network, 1<<30-1),
+		addr4AtHostIndexReference(network, 1<<30-2),
+	}, head)
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("255.255.255.255"),
+		netip.MustParseAddr("255.255.255.253"),
+	}, head)
+}
+
+// verifies on bounded spaces that the backward sequence is exactly
+// the reverse of the forward one, whatever the mask's shape.
+func Test_Network4_AddrsBackward_ExactReverseOfAddrsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := drawBoundedNetwork4(t, 16)
+		expected := slices.Collect(network.Addrs())
+		slices.Reverse(expected)
+		require.Equal(t, expected, slices.Collect(network.AddrsBackward()))
+	})
+}
+
+// verifies that the head of the sequence matches the host-index
+// oracle walked from the last index downward.
+//
+// The address at backward step s is the address at host index
+// count-1-s, so the sequence drains the indices in descending order.
+func Test_Network4_AddrsBackward_HeadMatchesHostIndexOracleProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		count := uint64(1) << network.NumHostBits()
+		take := min(count, 32)
+		step := uint64(0)
+		for addr := range network.AddrsBackward() {
+			require.Equal(t, addr4AtHostIndexReference(network, uint32(count-1-step)), addr)
+			step++
+			if step == take {
+				break
+			}
+		}
+		require.Equal(t, take, step)
+	})
+}
+
+// verifies that the first yielded address is the last address for
+// every generated network.
+func Test_Network4_AddrsBackward_FirstIsLastAddrProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		head := collectHead(network.AddrsBackward(), 1)
+		require.Equal(t, []netip.Addr{network.LastAddr()}, head)
+	})
+}
+
+// verifies against net/netip that a contiguous backward sequence
+// equals repeated predecessor steps from the last address onward.
+func Test_Network4_AddrsBackward_MatchesNetipPrevDifferential(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefixBits := rapid.IntRange(20, 32).Draw(t, "bits")
+		network, err := xnetip.Network4FromCIDR(genNetipAddr4.Draw(t, "addr"), prefixBits)
+		require.NoError(t, err)
+		expected := network.LastAddr()
+		for addr := range network.AddrsBackward() {
+			require.Equal(t, expected, addr)
+			expected = expected.Prev()
+		}
+	})
+}
+
+// verifies that a full drain of the backward sequence performs no
+// allocation, whatever the mask's shape.
+func Test_Network4_AddrsBackward_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseNetwork4("192.168.1.0/24")
+	nonContiguous := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
+	requireNoAllocs(t, func() {
+		for addr := range contiguous.AddrsBackward() {
+			addrSink = addr
+		}
+	})
+	requireNoAllocs(t, func() {
+		for addr := range nonContiguous.AddrsBackward() {
+			addrSink = addr
+		}
+	})
+}
+
+func BenchmarkNetwork4_AddrsBackward_Slash24(b *testing.B) {
+	network := xnetip.MustParseNetwork4("77.88.55.0/24")
+	b.ReportAllocs()
+	for b.Loop() {
+		for addr := range network.AddrsBackward() {
+			addrSink = addr
+		}
+	}
+}
+
+func BenchmarkNetwork4_AddrsBackward_Slash16(b *testing.B) {
+	network := xnetip.MustParseNetwork4("77.88.0.0/16")
+	b.ReportAllocs()
+	for b.Loop() {
+		for addr := range network.AddrsBackward() {
+			addrSink = addr
+		}
+	}
+}
+
+func BenchmarkNetwork4_AddrsBackward_NonContiguous8HostBits(b *testing.B) {
+	network := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
+	b.ReportAllocs()
+	for b.Loop() {
+		for addr := range network.AddrsBackward() {
+			addrSink = addr
+		}
+	}
+}
+
 // mergeReferenceIPv4 is the simple merge oracle.
 //
 // Equal networks merge to themselves, equal-mask single-bit siblings

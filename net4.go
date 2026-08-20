@@ -291,6 +291,49 @@ func (m Network4) Addrs() iter.Seq[netip.Addr] {
 	}
 }
 
+// AddrsBackward returns every address of the network in reverse
+// host-index order, starting at LastAddr().
+//
+// It yields exactly the addresses of Addrs in the opposite order, so
+// for a contiguous mask this is descending numeric order from
+// LastAddr() to Addr(). Every yielded address is an Is4 netip.Addr,
+// zone-free. The sequence is re-iterable, allocation-free and stops
+// early when the consumer breaks. The number of addresses is exactly
+// 1 << NumHostBits().
+func (m Network4) AddrsBackward() iter.Seq[netip.Addr] {
+	return func(yield func(netip.Addr) bool) {
+		base, mask := m.addr.Bits(), m.mask.Bits()
+		hostMask := ^mask
+		back := base | hostMask
+		// The walk ends at the network address, whose host bits are
+		// all zero.
+		//
+		// Host patterns never repeat, so that address is reached
+		// exactly once, after all others, and comparing against it
+		// terminates every network including the default route,
+		// whose count would overflow the word.
+		if hostMask&(hostMask+1) == 0 {
+			for {
+				if !yield(addr4FromBits(back).Netip()) || back == base {
+					return
+				}
+				back--
+			}
+		}
+		// The non-contiguous step is O(1) for any mask shape.
+		//
+		// With the mask bits cleared, the -1 borrow ripples straight
+		// across them, so the decrement lands in the previous host
+		// position however the host bits are scattered.
+		for {
+			if !yield(addr4FromBits(back).Netip()) || back == base {
+				return
+			}
+			back = ((back&hostMask)-1)&hostMask | base
+		}
+	}
+}
+
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
 // other.
 //
