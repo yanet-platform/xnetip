@@ -3368,3 +3368,98 @@ func BenchmarkIPv6Network_IsBicontiguous_NonBicontiguous(b *testing.B) {
 		okSink = network.IsBicontiguous()
 	}
 }
+
+// verifies that a contiguous network reports its mask's zero bits,
+// the complement of the prefix length, half-boundary lengths included.
+func Test_IPv6Network_NumHostBits_ContiguousComplementsPrefix(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    int
+	}{
+		{name: "default route frees the whole word", network: xnetip.MustParseIPv6Network("::/0"), want: 128},
+		{name: "/32", network: xnetip.MustParseIPv6Network("2001:db8::/32"), want: 96},
+		{name: "/64 frees exactly the low half", network: xnetip.MustParseIPv6Network("2001:db8::/64"), want: 64},
+		{name: "/63 crosses the half boundary", network: xnetip.MustParseIPv6Network("2001:db8::/63"), want: 65},
+		{name: "/65 starts below the half boundary", network: xnetip.MustParseIPv6Network("2001:db8::/65"), want: 63},
+		{name: "/127", network: xnetip.MustParseIPv6Network("2001:db8::/127"), want: 1},
+		{name: "host route holds one address", network: xnetip.MustParseIPv6Network("2001:db8::1/128"), want: 0},
+		{name: "zero value is the default route", network: xnetip.IPv6Network{}, want: 128},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.NumHostBits())
+		})
+	}
+}
+
+// verifies that host bits are counted wherever the mask leaves them,
+// in either half and across the half boundary.
+func Test_IPv6Network_NumHostBits_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    int
+	}{
+		{name: "two-run classifier mask", network: xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), want: 56},
+		{name: "hole across the half boundary", network: mustIPv6Network(t, "::", "ffff:ffff:ffff:0:0:ffff:ffff:ffff"), want: 32},
+		{name: "alternating mask frees every other bit", network: mustIPv6Network(t, "::", "aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"), want: 64},
+		{name: "single host bit at the half boundary", network: mustIPv6Network(t, "::", "ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff"), want: 1},
+		{name: "mask with one set bit", network: mustIPv6Network(t, "::", "8000::"), want: 127},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.NumHostBits())
+		})
+	}
+}
+
+// verifies that the count agrees with a brute bit loop over the mask
+// bytes.
+func Test_IPv6Network_NumHostBits_MatchesBitLoopProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		maskBytes := network.Mask().As16()
+		want := 0
+		for _, maskByte := range maskBytes {
+			for idx := range 8 {
+				if maskByte>>idx&1 == 0 {
+					want++
+				}
+			}
+		}
+		require.Equal(t, want, network.NumHostBits())
+	})
+}
+
+// verifies that a contiguous network's host-bit count complements its
+// prefix length to the word width.
+func Test_IPv6Network_NumHostBits_ComplementsPrefixLenProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		prefix, ok := network.PrefixLen()
+		if !ok {
+			return
+		}
+		require.Equal(t, 128-prefix, network.NumHostBits())
+	})
+}
+
+// verifies that the count is zero exactly on the all-ones mask and
+// the full width exactly on the zero mask.
+func Test_IPv6Network_NumHostBits_ExtremesMatchMaskProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		require.Equal(t, network.Mask() == netipAddrFrom6Bits(^uint64(0), ^uint64(0)), network.NumHostBits() == 0)
+		require.Equal(t, network.Mask() == netipAddrFrom6Bits(0, 0), network.NumHostBits() == 128)
+	})
+}
+
+// verifies that the count is computed without allocating, whatever
+// the mask's shape.
+func Test_IPv6Network_NumHostBits_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseIPv6Network("2001:db8::/64")
+	nonContiguous := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
+	requireNoAllocs(t, func() { intSink = contiguous.NumHostBits() })
+	requireNoAllocs(t, func() { intSink = nonContiguous.NumHostBits() })
+}

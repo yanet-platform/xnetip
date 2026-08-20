@@ -225,6 +225,18 @@ func (m IPv6Network) LastAddr() netip.Addr {
 	return ipv6Addr{m.addr.bits.Or(m.mask.bits.Not())}.Netip()
 }
 
+// NumHostBits returns the number of host bits, the zero bits of the
+// mask.
+//
+// The network holds exactly 2 to the power of this value addresses,
+// in any position the mask leaves free, so the count is carried
+// exactly for every network including the default route, whose 2 to
+// the 128 members fit no integer type. The exponent is the lossless
+// form and the only count the type offers.
+func (m IPv6Network) NumHostBits() int {
+	return m.mask.bits.Not().OnesCount()
+}
+
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
 // other.
 //
