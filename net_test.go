@@ -478,3 +478,135 @@ func Test_IPNetworkFromCIDR_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFromCIDR(addr6, 64) })
 	require.NoError(t, err)
 }
+
+// verifies that the host-route constructor answers in the family of
+// its argument, with the address preserved and the mask all ones.
+//
+// A non-contiguous mask table is not applicable to this constructor:
+// the mask is fixed to all ones, the universe of bits of the address's
+// own family.
+func Test_IPNetworkFromAddr_BuildsHostRouteInOwnFamily(t *testing.T) {
+	cases := []struct {
+		name     string
+		addr     string
+		wantIs4  bool
+		wantMask string
+	}{
+		{name: "IPv4 host route", addr: "192.168.1.1", wantIs4: true, wantMask: "255.255.255.255"},
+		{name: "IPv6 host route", addr: "2001:db8::1", wantIs4: false, wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+		{name: "IPv4 mask is all ones through the accessor", addr: "10.0.0.1", wantIs4: true, wantMask: "255.255.255.255"},
+		{name: "IPv6 mask is all ones through the accessor", addr: "::1", wantIs4: false, wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+		{name: "IPv4-mapped address stays IPv6", addr: "::ffff:192.168.0.1", wantIs4: false, wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+		{name: "unspecified IPv4", addr: "0.0.0.0", wantIs4: true, wantMask: "255.255.255.255"},
+		{name: "unspecified IPv6", addr: "::", wantIs4: false, wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr(testCase.addr))
+			require.NoError(t, err)
+			require.Equal(t, testCase.wantIs4, network.Is4())
+			require.Equal(t, netip.MustParseAddr(testCase.addr), network.Addr())
+			require.Equal(t, netip.MustParseAddr(testCase.wantMask), network.Mask())
+		})
+	}
+}
+
+// verifies that the IPv4 host route round-trips through the IPv4
+// extractor and declines the IPv6 one.
+func Test_IPNetworkFromAddr_RoundTripsThroughIPv4(t *testing.T) {
+	network, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr("192.168.1.1"))
+	require.NoError(t, err)
+	extracted, ok := network.IPv4()
+	require.True(t, ok)
+	expected, err := xnetip.IPv4NetworkFromAddr(netip.MustParseAddr("192.168.1.1"))
+	require.NoError(t, err)
+	require.Equal(t, expected, extracted)
+	_, ok = network.IPv6()
+	require.False(t, ok)
+}
+
+// verifies that the host route of an IPv4-mapped address round-trips
+// through the IPv6 extractor and declines the IPv4 one.
+func Test_IPNetworkFromAddr_MappedAddressRoundTripsThroughIPv6(t *testing.T) {
+	network, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr("::ffff:192.168.0.1"))
+	require.NoError(t, err)
+	extracted, ok := network.IPv6()
+	require.True(t, ok)
+	expected, err := xnetip.IPv6NetworkFromAddr(netip.MustParseAddr("::ffff:192.168.0.1"))
+	require.NoError(t, err)
+	require.Equal(t, expected, extracted)
+	_, ok = network.IPv4()
+	require.False(t, ok)
+}
+
+// verifies that an IPv4 host route equals the lift of the concrete
+// IPv4 host route.
+//
+// Equality of the whole values pins the IPv4-mapped stored form with
+// the all-ones 128-bit mask, because the lift performs that encoding.
+func Test_IPNetworkFromAddr_StoredFormEqualsIPv4Lift(t *testing.T) {
+	network, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr("192.168.1.1"))
+	require.NoError(t, err)
+	concrete, err := xnetip.IPv4NetworkFromAddr(netip.MustParseAddr("192.168.1.1"))
+	require.NoError(t, err)
+	require.Equal(t, xnetip.IPNetworkFrom4(concrete), network)
+}
+
+// verifies that a zone is dropped silently and the zone-free host
+// route is built.
+func Test_IPNetworkFromAddr_DropsZone(t *testing.T) {
+	network, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr("fe80::1%eth0"))
+	require.NoError(t, err)
+	require.True(t, network.Is6())
+	require.Equal(t, netip.MustParseAddr("fe80::1"), network.Addr())
+	require.Empty(t, network.Addr().Zone())
+}
+
+// verifies that the invalid zero address yields the family-mismatch
+// sentinel and the zero network.
+func Test_IPNetworkFromAddr_RejectsInvalidZeroAddr(t *testing.T) {
+	network, err := xnetip.IPNetworkFromAddr(netip.Addr{})
+	require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+	require.Equal(t, xnetip.IPNetwork{}, network)
+}
+
+// verifies that every valid address of either family lifts into a
+// host route of the same family with the address preserved.
+//
+// The result must also equal the lift of the concrete constructor of
+// its family, so the family-agnostic entry point adds no behaviour.
+func Test_IPNetworkFromAddr_AgreesWithConcreteConstructorsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var addr netip.Addr
+		if rapid.Bool().Draw(t, "is4") {
+			addr = genNetipAddr4.Draw(t, "addr4")
+		} else {
+			addr = genNetipAddr6.Draw(t, "addr6")
+		}
+		network, err := xnetip.IPNetworkFromAddr(addr)
+		require.NoError(t, err)
+		require.Equal(t, addr.Is4(), network.Is4())
+		require.Equal(t, addr, network.Addr())
+		if addr.Is4() {
+			concrete, err := xnetip.IPv4NetworkFromAddr(addr)
+			require.NoError(t, err)
+			require.Equal(t, xnetip.IPNetworkFrom4(concrete), network)
+		} else {
+			concrete, err := xnetip.IPv6NetworkFromAddr(addr)
+			require.NoError(t, err)
+			require.Equal(t, xnetip.IPNetworkFrom6(concrete), network)
+		}
+	})
+}
+
+// verifies that the host-route constructor allocates nothing on the
+// success path of either family.
+func Test_IPNetworkFromAddr_AllocationFree(t *testing.T) {
+	addr4 := netip.MustParseAddr("192.168.1.5")
+	addr6 := netip.MustParseAddr("2001:db8::1")
+	var err error
+	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFromAddr(addr4) })
+	require.NoError(t, err)
+	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFromAddr(addr6) })
+	require.NoError(t, err)
+}

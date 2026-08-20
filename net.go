@@ -30,6 +30,28 @@ func IPNetworkFrom6(network IPv6Network) IPNetwork {
 	return IPNetwork{network: network}
 }
 
+// IPNetworkFromAddr returns the host route that contains exactly addr,
+// in the address family of addr.
+//
+// An Is4 address yields an IPv4 network (/32) and an Is6 address an
+// IPv6 network (/128). An IPv4-mapped IPv6 address is Is6 and yields
+// an IPv6 network, a zone is dropped silently, and the invalid zero
+// netip.Addr is rejected with ErrAddrFamilyMismatch.
+func IPNetworkFromAddr(addr netip.Addr) (IPNetwork, error) {
+	// The family dispatch makes the typed constructors total here, so
+	// their errors are impossible.
+	switch {
+	case addr.Is4():
+		network, _ := IPv4NetworkFromAddr(addr)
+		return IPNetworkFrom4(network), nil
+	case addr.Is6():
+		network, _ := IPv6NetworkFromAddr(addr)
+		return IPNetworkFrom6(network), nil
+	default:
+		return IPNetwork{}, wrapParseError("IPNetworkFromAddr", addr.String(), ErrAddrFamilyMismatch, nil)
+	}
+}
+
 // IPNetworkFromCIDR returns the network of addr with the top bits
 // bits masked, in addr's own family.
 //
