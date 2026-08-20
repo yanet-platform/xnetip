@@ -10,15 +10,15 @@ import (
 // the closed address interval [first, last].
 //
 // Blocks are yielded in ascending order and are pairwise disjoint,
-// every block is contiguous and aligned to its own size, and no CIDR
+// each one a typed CIDR block aligned to its own size, and no CIDR
 // decomposition of the interval uses fewer blocks (at most 62). The
 // function is total: the sequence is empty when first > last, and
 // when either end — an IPv6 end (IPv4-mapped included) or the
 // invalid zero Addr — is not an Is4 netip.Addr, because such an
 // interval holds no IPv4 addresses. The sequence is allocation-free
 // and re-iterable.
-func RangeToNetworks4(first, last netip.Addr) iter.Seq[Network4] {
-	return func(yield func(Network4) bool) {
+func RangeToNetworks4(first, last netip.Addr) iter.Seq[Contiguous[Network4]] {
+	return func(yield func(Contiguous[Network4]) bool) {
 		if !first.Is4() || !last.Is4() {
 			return
 		}
@@ -34,9 +34,10 @@ func RangeToNetworks4(first, last netip.Addr) iter.Seq[Network4] {
 		// cleared — the block sizes are exactly the set bits of the
 		// boundary minus the start, walked lowest first, each block
 		// aligned at the running cursor so all mask bits from the
-		// block size upwards form its netmask. A zero encodes the
-		// descending phase alone: the whole interval is one aligned
-		// block.
+		// block size upwards form its netmask, a leading run that
+		// wraps as a typed block without revalidation. A zero
+		// encodes the descending phase alone: the whole interval is
+		// one aligned block.
 		cursor := firstBits
 		differing := cursor ^ lastBits
 		ascending := uint32(0)
@@ -47,7 +48,7 @@ func RangeToNetworks4(first, last netip.Addr) iter.Seq[Network4] {
 		for ascending != 0 {
 			block := ascending & -ascending
 			mask := ascending | -ascending
-			if !yield(Network4{addr: addr4FromBits(cursor), mask: addr4FromBits(mask)}) {
+			if !yield(Contiguous[Network4]{network: Network4{addr: addr4FromBits(cursor), mask: addr4FromBits(mask)}}) {
 				return
 			}
 			ascending ^= block
@@ -59,13 +60,14 @@ func RangeToNetworks4(first, last netip.Addr) iter.Seq[Network4] {
 		// The cursor is aligned beyond that size, and the size is
 		// widened to 64 bits, which keeps the full-range case of
 		// 2^32 addresses branchless. Every block address is already
-		// aligned to its block, so both phases construct networks
-		// normalized by construction, and the final block ends
-		// exactly at the interval's last address.
+		// aligned to its block and every mask is a leading run, so
+		// both phases construct networks normalized by construction
+		// that wrap as typed blocks without revalidation, and the
+		// final block ends exactly at the interval's last address.
 		for {
 			size := uint64(lastBits) - uint64(cursor) + 1
 			blockMax := uint32((^uint64(0) >> 1) >> bits.LeadingZeros64(size))
-			if !yield(Network4{addr: addr4FromBits(cursor), mask: addr4FromBits(^blockMax)}) {
+			if !yield(Contiguous[Network4]{network: Network4{addr: addr4FromBits(cursor), mask: addr4FromBits(^blockMax)}}) {
 				return
 			}
 			end := cursor + blockMax
@@ -81,15 +83,15 @@ func RangeToNetworks4(first, last netip.Addr) iter.Seq[Network4] {
 // the closed address interval [first, last].
 //
 // Blocks are yielded in ascending order and are pairwise disjoint,
-// every block is contiguous and aligned to its own size, and no CIDR
+// each one a typed CIDR block aligned to its own size, and no CIDR
 // decomposition of the interval uses fewer blocks (at most 254). The
 // function is total: the sequence is empty when first > last, and
 // when either end — an Is4 end or the invalid zero Addr — is not an
 // Is6 netip.Addr, because such an interval holds no IPv6 addresses.
 // An IPv4-mapped end is IPv6 and accepted, a zone is dropped
 // silently. The sequence is allocation-free and re-iterable.
-func RangeToNetworks6(first, last netip.Addr) iter.Seq[Network6] {
-	return func(yield func(Network6) bool) {
+func RangeToNetworks6(first, last netip.Addr) iter.Seq[Contiguous[Network6]] {
+	return func(yield func(Contiguous[Network6]) bool) {
 		if !first.Is6() || !last.Is6() {
 			return
 		}
@@ -105,9 +107,10 @@ func RangeToNetworks6(first, last netip.Addr) iter.Seq[Network6] {
 		// cleared — the block sizes are exactly the set bits of the
 		// boundary minus the start, walked lowest first, each block
 		// aligned at the running cursor so all mask bits from the
-		// block size upwards form its netmask. A zero encodes the
-		// descending phase alone: the whole interval is one aligned
-		// block.
+		// block size upwards form its netmask, a leading run that
+		// wraps as a typed block without revalidation. A zero
+		// encodes the descending phase alone: the whole interval is
+		// one aligned block.
 		cursor := firstBits
 		differing := cursor.Xor(lastBits)
 		ascending := uint128{}
@@ -119,7 +122,7 @@ func RangeToNetworks6(first, last netip.Addr) iter.Seq[Network6] {
 			negated := ascending.Neg()
 			block := ascending.And(negated)
 			mask := ascending.Or(negated)
-			if !yield(Network6{addr: addr6{cursor}, mask: addr6{mask}}) {
+			if !yield(Contiguous[Network6]{network: Network6{addr: addr6{cursor}, mask: addr6{mask}}}) {
 				return
 			}
 			ascending = ascending.Xor(block)
@@ -132,9 +135,10 @@ func RangeToNetworks6(first, last netip.Addr) iter.Seq[Network6] {
 		// wraps to zero can only be the full address space, whose
 		// block is everything — the word cannot widen the way the
 		// 32-bit walk does. Every block address is already aligned
-		// to its block, so both phases construct networks normalized
-		// by construction, and the final block ends exactly at the
-		// interval's last address.
+		// to its block and every mask is a leading run, so both
+		// phases construct networks normalized by construction that
+		// wrap as typed blocks without revalidation, and the final
+		// block ends exactly at the interval's last address.
 		allOnes := uint128FromHalves(^uint64(0), ^uint64(0))
 		for {
 			size := lastBits.Sub(cursor).AddOne()
@@ -142,7 +146,7 @@ func RangeToNetworks6(first, last netip.Addr) iter.Seq[Network6] {
 			if !size.IsZero() {
 				blockMax = allOnes.Shr(uint(size.LeadingZeros() + 1))
 			}
-			if !yield(Network6{addr: addr6{cursor}, mask: addr6{blockMax.Not()}}) {
+			if !yield(Contiguous[Network6]{network: Network6{addr: addr6{cursor}, mask: addr6{blockMax.Not()}}}) {
 				return
 			}
 			end := cursor.Add(blockMax)

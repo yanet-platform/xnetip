@@ -15,12 +15,12 @@ import (
 // verifies that an aligned block collapses to its single CIDR.
 func Test_RangeToNetworks4_SingleAlignedBlock(t *testing.T) {
 	blocks := collectIPv4Range("10.0.0.0", "10.0.0.255")
-	require.Equal(t, []xnetip.Network4{xnetip.MustParseNetwork4("10.0.0.0/24")}, blocks)
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.0/24")}, blocks)
 }
 
 // collectIPv4Range collects the cover of a range given as addresses
 // in string form.
-func collectIPv4Range(first, last string) []xnetip.Network4 {
+func collectIPv4Range(first, last string) []xnetip.Contiguous[xnetip.Network4] {
 	return slices.Collect(xnetip.RangeToNetworks4(netip.MustParseAddr(first), netip.MustParseAddr(last)))
 }
 
@@ -33,9 +33,9 @@ func Test_RangeToNetworks4_ClassicMisaligned(t *testing.T) {
 		"0.0.0.192/27", "0.0.0.224/28", "0.0.0.240/29", "0.0.0.248/30",
 		"0.0.0.252/31", "0.0.0.254/32",
 	}
-	expected := []xnetip.Network4{}
+	expected := []xnetip.Contiguous[xnetip.Network4]{}
 	for _, text := range expectedTexts {
-		expected = append(expected, xnetip.MustParseNetwork4(text))
+		expected = append(expected, xnetip.MustParseContiguous4(text))
 	}
 	require.Equal(t, expected, collectIPv4Range("0.0.0.1", "0.0.0.254"))
 }
@@ -44,19 +44,19 @@ func Test_RangeToNetworks4_ClassicMisaligned(t *testing.T) {
 // route alone.
 func Test_RangeToNetworks4_FullRange(t *testing.T) {
 	blocks := collectIPv4Range("0.0.0.0", "255.255.255.255")
-	require.Equal(t, []xnetip.Network4{xnetip.MustParseNetwork4("0.0.0.0/0")}, blocks)
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("0.0.0.0/0")}, blocks)
 }
 
 // verifies the single host at the top of the address space.
 func Test_RangeToNetworks4_SingleHostAtMax(t *testing.T) {
 	blocks := collectIPv4Range("255.255.255.255", "255.255.255.255")
-	require.Equal(t, []xnetip.Network4{xnetip.MustParseNetwork4("255.255.255.255/32")}, blocks)
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("255.255.255.255/32")}, blocks)
 }
 
 // verifies that a one-address interval is its host route.
 func Test_RangeToNetworks4_SingleHost(t *testing.T) {
 	blocks := collectIPv4Range("10.0.0.5", "10.0.0.5")
-	require.Equal(t, []xnetip.Network4{xnetip.MustParseNetwork4("10.0.0.5/32")}, blocks)
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("10.0.0.5/32")}, blocks)
 }
 
 // verifies that a reversed interval yields an empty sequence and no
@@ -92,16 +92,16 @@ func Test_RangeToNetworks4_ForeignEndsYieldEmpty(t *testing.T) {
 // not overflow the walk.
 func Test_RangeToNetworks4_EndsAtMax(t *testing.T) {
 	blocks := collectIPv4Range("255.255.255.254", "255.255.255.255")
-	require.Equal(t, []xnetip.Network4{xnetip.MustParseNetwork4("255.255.255.254/31")}, blocks)
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network4]{xnetip.MustParseContiguous4("255.255.255.254/31")}, blocks)
 }
 
 // verifies a small misaligned interval block by block.
 func Test_RangeToNetworks4_SmallMisaligned(t *testing.T) {
-	expected := []xnetip.Network4{
-		xnetip.MustParseNetwork4("10.0.0.1/32"),
-		xnetip.MustParseNetwork4("10.0.0.2/31"),
-		xnetip.MustParseNetwork4("10.0.0.4/31"),
-		xnetip.MustParseNetwork4("10.0.0.6/32"),
+	expected := []xnetip.Contiguous[xnetip.Network4]{
+		xnetip.MustParseContiguous4("10.0.0.1/32"),
+		xnetip.MustParseContiguous4("10.0.0.2/31"),
+		xnetip.MustParseContiguous4("10.0.0.4/31"),
+		xnetip.MustParseContiguous4("10.0.0.6/32"),
 	}
 	require.Equal(t, expected, collectIPv4Range("10.0.0.1", "10.0.0.6"))
 }
@@ -115,9 +115,9 @@ func Test_RangeToNetworks4_CrossesBlockBoundary(t *testing.T) {
 		"192.168.0.128/25", "192.168.1.0/29", "192.168.1.8/31",
 		"192.168.1.10/32",
 	}
-	expected := []xnetip.Network4{}
+	expected := []xnetip.Contiguous[xnetip.Network4]{}
 	for _, text := range expectedTexts {
-		expected = append(expected, xnetip.MustParseNetwork4(text))
+		expected = append(expected, xnetip.MustParseContiguous4(text))
 	}
 	require.Equal(t, expected, collectIPv4Range("192.168.0.5", "192.168.1.10"))
 }
@@ -148,7 +148,7 @@ func Test_RangeToNetworks4_NormalizedEdgeCases(t *testing.T) {
 			netipAddrFrom4Bits(interval[1]),
 		)
 		for block := range sequence {
-			addr, mask := ipv4NetworkBits(block)
+			addr, mask := ipv4NetworkBits(block.Network())
 			require.Equal(t, addr&mask, addr, "block %v not normalized", block)
 		}
 	}
@@ -186,9 +186,8 @@ func Test_RangeToNetworks4_CoversExactlyProperty(t *testing.T) {
 		require.LessOrEqual(t, len(blocks), 62)
 		cursor := first
 		for idx, block := range blocks {
-			addr, mask := ipv4NetworkBits(block)
+			addr, mask := ipv4NetworkBits(block.Network())
 			require.Equal(t, addr&mask, addr, "block %v not normalized", block)
-			require.True(t, block.IsContiguous(), "block %v not contiguous", block)
 			require.Equal(t, cursor, addr, "block %v does not abut the cursor", block)
 			end := addr | ^mask
 			if idx+1 < len(blocks) {
@@ -199,6 +198,39 @@ func Test_RangeToNetworks4_CoversExactlyProperty(t *testing.T) {
 			}
 		}
 	})
+}
+
+// verifies that every yielded block survives the blind rewrap.
+//
+// The unwrapped network revalidates as a CIDR block equal to the
+// one yielded, pinning the type-level contiguity guarantee.
+func Test_RangeToNetworks4_BlindWrapRevalidationProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		a := rapid.Uint32().Draw(t, "a")
+		b := rapid.Uint32().Draw(t, "b")
+		sequence := xnetip.RangeToNetworks4(
+			netipAddrFrom4Bits(min(a, b)),
+			netipAddrFrom4Bits(max(a, b)),
+		)
+		for block := range sequence {
+			revalidated, ok := xnetip.ContiguousFrom(block.Network())
+			require.True(t, ok, "block %v does not revalidate", block)
+			require.Equal(t, block, revalidated)
+		}
+	})
+}
+
+// verifies that a collected cover feeds typed consumers with no
+// conversion: the blind rewrap reproduces the cover unchanged.
+func Test_RangeToNetworks4_TypedFlowPin(t *testing.T) {
+	blocks := collectIPv4Range("192.168.0.5", "192.168.1.10")
+	rewrapped := []xnetip.Contiguous[xnetip.Network4]{}
+	for _, block := range blocks {
+		revalidated, ok := xnetip.ContiguousFrom(block.Network())
+		require.True(t, ok, "block %v does not revalidate", block)
+		rewrapped = append(rewrapped, revalidated)
+	}
+	require.Equal(t, blocks, rewrapped)
 }
 
 // verifies that reversed random intervals yield an empty sequence.
@@ -251,7 +283,7 @@ func requireIPv4RangeMatchesReference(t require.TestingT, first, last uint32) {
 	}
 	got := [][2]uint32{}
 	for block := range xnetip.RangeToNetworks4(netipAddrFrom4Bits(first), netipAddrFrom4Bits(last)) {
-		addr, mask := ipv4NetworkBits(block)
+		addr, mask := ipv4NetworkBits(block.Network())
 		got = append(got, [2]uint32{addr, mask})
 	}
 	require.Equal(t, rangeToNetworks4Reference(first, last), got, "first=%#x last=%#x", first, last)
@@ -330,7 +362,7 @@ func Test_RangeToNetworks4_UnionBruteForceProperty(t *testing.T) {
 		for address := first; ; address++ {
 			covering := 0
 			for _, block := range blocks {
-				addr, mask := ipv4NetworkBits(block)
+				addr, mask := ipv4NetworkBits(block.Network())
 				if address&mask == addr {
 					covering++
 				}
@@ -341,7 +373,7 @@ func Test_RangeToNetworks4_UnionBruteForceProperty(t *testing.T) {
 			}
 		}
 		for _, block := range blocks {
-			addr, mask := ipv4NetworkBits(block)
+			addr, mask := ipv4NetworkBits(block.Network())
 			require.GreaterOrEqual(t, addr, first)
 			require.LessOrEqual(t, addr|^mask, last)
 		}
@@ -351,8 +383,8 @@ func Test_RangeToNetworks4_UnionBruteForceProperty(t *testing.T) {
 // verifies against net/netip that every block is a valid masked
 // prefix.
 //
-// The prefix built from the block's address and length comes back
-// unchanged from Masked, pinning the alignment against std.
+// Every block's prefix view is total by the yield type and comes
+// back unchanged from Masked, pinning the alignment against std.
 func Test_RangeToNetworks4_BlocksRoundTripNetipPrefixProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		a := rapid.Uint32().Draw(t, "a")
@@ -362,9 +394,7 @@ func Test_RangeToNetworks4_BlocksRoundTripNetipPrefixProperty(t *testing.T) {
 			netipAddrFrom4Bits(max(a, b)),
 		)
 		for block := range sequence {
-			length, ok := block.PrefixLen()
-			require.True(t, ok, "block %v has no prefix length", block)
-			prefix := netip.PrefixFrom(block.Addr(), length)
+			prefix := block.Prefix()
 			require.Equal(t, prefix, prefix.Masked(), "block %v not aligned", block)
 		}
 	})
@@ -377,7 +407,7 @@ func Test_RangeToNetworks4_AllocationFree(t *testing.T) {
 	last := netipAddrFrom4Bits(^uint32(0) - 1)
 	requireNoAllocs(t, func() {
 		for block := range xnetip.RangeToNetworks4(first, last) {
-			networkSink = block
+			contiguous4Sink = block
 		}
 	})
 }
@@ -388,7 +418,7 @@ func BenchmarkRangeToNetworks4_MisalignedWorstCase(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		for block := range xnetip.RangeToNetworks4(first, last) {
-			networkSink = block
+			contiguous4Sink = block
 		}
 	}
 }
@@ -399,7 +429,7 @@ func BenchmarkRangeToNetworks4_ClassicMisaligned(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		for block := range xnetip.RangeToNetworks4(first, last) {
-			networkSink = block
+			contiguous4Sink = block
 		}
 	}
 }
@@ -410,7 +440,7 @@ func BenchmarkRangeToNetworks4_AlignedSingleBlock(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		for block := range xnetip.RangeToNetworks4(first, last) {
-			networkSink = block
+			contiguous4Sink = block
 		}
 	}
 }
@@ -418,12 +448,12 @@ func BenchmarkRangeToNetworks4_AlignedSingleBlock(b *testing.B) {
 // verifies that an aligned block collapses to its single CIDR.
 func Test_RangeToNetworks6_SingleAlignedBlock(t *testing.T) {
 	blocks := collectIPv6Range("2001:db8::", "2001:db8::ffff:ffff:ffff:ffff")
-	require.Equal(t, []xnetip.Network6{xnetip.MustParseNetwork6("2001:db8::/64")}, blocks)
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network6]{xnetip.MustParseContiguous6("2001:db8::/64")}, blocks)
 }
 
 // collectIPv6Range collects the cover of a range given as addresses
 // in string form.
-func collectIPv6Range(first, last string) []xnetip.Network6 {
+func collectIPv6Range(first, last string) []xnetip.Contiguous[xnetip.Network6] {
 	return slices.Collect(xnetip.RangeToNetworks6(netip.MustParseAddr(first), netip.MustParseAddr(last)))
 }
 
@@ -431,15 +461,15 @@ func collectIPv6Range(first, last string) []xnetip.Network6 {
 // route alone.
 func Test_RangeToNetworks6_FullRange(t *testing.T) {
 	blocks := collectIPv6Range("::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
-	require.Equal(t, []xnetip.Network6{xnetip.MustParseNetwork6("::/0")}, blocks)
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network6]{xnetip.MustParseContiguous6("::/0")}, blocks)
 }
 
 // verifies that an interval ending at the address-space maximum does
 // not overflow the walk.
 func Test_RangeToNetworks6_EndsAtMax(t *testing.T) {
 	blocks := collectIPv6Range("ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
-	require.Equal(t, []xnetip.Network6{
-		xnetip.MustParseNetwork6("ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe/127"),
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network6]{
+		xnetip.MustParseContiguous6("ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe/127"),
 	}, blocks)
 }
 
@@ -472,10 +502,10 @@ func Test_RangeToNetworks6_ForeignEndsYieldEmpty(t *testing.T) {
 // verifies that IPv4-mapped ends are IPv6 and accepted, covering the
 // mapped interval by the ordinary greedy rule.
 func Test_RangeToNetworks6_MappedEndsAccepted(t *testing.T) {
-	expected := []xnetip.Network6{
-		xnetip.MustParseNetwork6("::ffff:10.0.0.1/128"),
-		xnetip.MustParseNetwork6("::ffff:10.0.0.2/127"),
-		xnetip.MustParseNetwork6("::ffff:10.0.0.4/127"),
+	expected := []xnetip.Contiguous[xnetip.Network6]{
+		xnetip.MustParseContiguous6("::ffff:10.0.0.1/128"),
+		xnetip.MustParseContiguous6("::ffff:10.0.0.2/127"),
+		xnetip.MustParseContiguous6("::ffff:10.0.0.4/127"),
 	}
 	require.Equal(t, expected, collectIPv6Range("::ffff:10.0.0.1", "::ffff:10.0.0.5"))
 }
@@ -483,7 +513,7 @@ func Test_RangeToNetworks6_MappedEndsAccepted(t *testing.T) {
 // verifies that a one-address interval is its host route.
 func Test_RangeToNetworks6_SingleHost(t *testing.T) {
 	blocks := collectIPv6Range("2001:db8::5", "2001:db8::5")
-	require.Equal(t, []xnetip.Network6{xnetip.MustParseNetwork6("2001:db8::5/128")}, blocks)
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network6]{xnetip.MustParseContiguous6("2001:db8::5/128")}, blocks)
 }
 
 // verifies the textbook decomposition shifted into the last group:
@@ -496,9 +526,9 @@ func Test_RangeToNetworks6_ClassicMisalignedLowBits(t *testing.T) {
 		"2001:db8::e0/124", "2001:db8::f0/125", "2001:db8::f8/126",
 		"2001:db8::fc/127", "2001:db8::fe/128",
 	}
-	expected := []xnetip.Network6{}
+	expected := []xnetip.Contiguous[xnetip.Network6]{}
 	for _, text := range expectedTexts {
-		expected = append(expected, xnetip.MustParseNetwork6(text))
+		expected = append(expected, xnetip.MustParseContiguous6(text))
 	}
 	require.Equal(t, expected, collectIPv6Range("2001:db8::1", "2001:db8::fe"))
 }
@@ -506,9 +536,9 @@ func Test_RangeToNetworks6_ClassicMisalignedLowBits(t *testing.T) {
 // verifies an interval straddling the 64-bit half boundary: the
 // carries in the cursor step and the size cross the halves cleanly.
 func Test_RangeToNetworks6_StraddlesHalfBoundary(t *testing.T) {
-	expected := []xnetip.Network6{
-		xnetip.MustParseNetwork6("::ffff:ffff:ffff:ffff/128"),
-		xnetip.MustParseNetwork6("0:0:0:1::/128"),
+	expected := []xnetip.Contiguous[xnetip.Network6]{
+		xnetip.MustParseContiguous6("::ffff:ffff:ffff:ffff/128"),
+		xnetip.MustParseContiguous6("0:0:0:1::/128"),
 	}
 	require.Equal(t, expected, collectIPv6Range("::ffff:ffff:ffff:ffff", "0:0:0:1::"))
 }
@@ -537,7 +567,7 @@ func Test_RangeToNetworks6_NormalizedEdgeCases(t *testing.T) {
 			netipAddrFrom6Bits(interval[1][0], interval[1][1]),
 		)
 		for block := range sequence {
-			addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(block)
+			addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(block.Network())
 			require.Equal(t, addrHi&maskHi, addrHi, "block %v not normalized", block)
 			require.Equal(t, addrLo&maskLo, addrLo, "block %v not normalized", block)
 		}
@@ -605,10 +635,9 @@ func Test_RangeToNetworks6_CoversExactlyProperty(t *testing.T) {
 		require.LessOrEqual(t, len(blocks), 254)
 		cursor := first
 		for idx, block := range blocks {
-			addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(block)
+			addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(block.Network())
 			require.Equal(t, addrHi&maskHi, addrHi, "block %v not normalized", block)
 			require.Equal(t, addrLo&maskLo, addrLo, "block %v not normalized", block)
-			require.True(t, block.IsContiguous(), "block %v not contiguous", block)
 			require.Equal(t, [2]uint64{addrHi, addrLo}, cursor, "block %v does not abut the cursor", block)
 			end := [2]uint64{addrHi | ^maskHi, addrLo | ^maskLo}
 			if idx+1 < len(blocks) {
@@ -619,6 +648,43 @@ func Test_RangeToNetworks6_CoversExactlyProperty(t *testing.T) {
 			}
 		}
 	})
+}
+
+// verifies that every yielded block survives the blind rewrap.
+//
+// The unwrapped network revalidates as a CIDR block equal to the
+// one yielded, pinning the type-level contiguity guarantee.
+func Test_RangeToNetworks6_BlindWrapRevalidationProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		a := [2]uint64{rapid.Uint64().Draw(t, "a hi"), rapid.Uint64().Draw(t, "a lo")}
+		b := [2]uint64{rapid.Uint64().Draw(t, "b hi"), rapid.Uint64().Draw(t, "b lo")}
+		first, last := a, b
+		if compare128(first, last) > 0 {
+			first, last = last, first
+		}
+		sequence := xnetip.RangeToNetworks6(
+			netipAddrFrom6Bits(first[0], first[1]),
+			netipAddrFrom6Bits(last[0], last[1]),
+		)
+		for block := range sequence {
+			revalidated, ok := xnetip.ContiguousFrom(block.Network())
+			require.True(t, ok, "block %v does not revalidate", block)
+			require.Equal(t, block, revalidated)
+		}
+	})
+}
+
+// verifies that a collected cover feeds typed consumers with no
+// conversion: the blind rewrap reproduces the cover unchanged.
+func Test_RangeToNetworks6_TypedFlowPin(t *testing.T) {
+	blocks := collectIPv6Range("2001:db8::1", "2001:db8::fe")
+	rewrapped := []xnetip.Contiguous[xnetip.Network6]{}
+	for _, block := range blocks {
+		revalidated, ok := xnetip.ContiguousFrom(block.Network())
+		require.True(t, ok, "block %v does not revalidate", block)
+		rewrapped = append(rewrapped, revalidated)
+	}
+	require.Equal(t, blocks, rewrapped)
 }
 
 // verifies that reversed random intervals yield an empty sequence.
@@ -703,7 +769,7 @@ func requireIPv6RangeMatchesReference(t require.TestingT, first, last [2]uint64)
 	}
 	got := [][4]uint64{}
 	for block := range xnetip.RangeToNetworks6(netipAddrFrom6Bits(first[0], first[1]), netipAddrFrom6Bits(last[0], last[1])) {
-		addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(block)
+		addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(block.Network())
 		got = append(got, [4]uint64{addrHi, addrLo, maskHi, maskLo})
 	}
 	require.Equal(t, rangeToNetworks6Reference(first, last), got,
@@ -805,7 +871,7 @@ func Test_RangeToNetworks6_UnionBruteForceProperty(t *testing.T) {
 		for address := first; ; address = add128(address, [2]uint64{0, 1}) {
 			covering := 0
 			for _, block := range blocks {
-				addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(block)
+				addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(block.Network())
 				if address[0]&maskHi == addrHi && address[1]&maskLo == addrLo {
 					covering++
 				}
@@ -816,7 +882,7 @@ func Test_RangeToNetworks6_UnionBruteForceProperty(t *testing.T) {
 			}
 		}
 		for _, block := range blocks {
-			addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(block)
+			addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(block.Network())
 			require.GreaterOrEqual(t, compare128([2]uint64{addrHi, addrLo}, first), 0)
 			require.LessOrEqual(t, compare128([2]uint64{addrHi | ^maskHi, addrLo | ^maskLo}, last), 0)
 		}
@@ -826,8 +892,8 @@ func Test_RangeToNetworks6_UnionBruteForceProperty(t *testing.T) {
 // verifies against net/netip that every block is a valid masked
 // prefix.
 //
-// The prefix built from the block's address and length comes back
-// unchanged from Masked, pinning the alignment against std.
+// Every block's prefix view is total by the yield type and comes
+// back unchanged from Masked, pinning the alignment against std.
 func Test_RangeToNetworks6_BlocksRoundTripNetipPrefixProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		a := [2]uint64{rapid.Uint64().Draw(t, "a hi"), rapid.Uint64().Draw(t, "a lo")}
@@ -841,9 +907,7 @@ func Test_RangeToNetworks6_BlocksRoundTripNetipPrefixProperty(t *testing.T) {
 			netipAddrFrom6Bits(last[0], last[1]),
 		)
 		for block := range sequence {
-			length, ok := block.PrefixLen()
-			require.True(t, ok, "block %v has no prefix length", block)
-			prefix := netip.PrefixFrom(block.Addr(), length)
+			prefix := block.Prefix()
 			require.Equal(t, prefix, prefix.Masked(), "block %v not aligned", block)
 		}
 	})
@@ -853,15 +917,19 @@ func Test_RangeToNetworks6_BlocksRoundTripNetipPrefixProperty(t *testing.T) {
 //
 // Feeding the IPv6 function mapped ends yields the IPv4 blocks
 // mapped, in the same order, pinning identical phase logic across
-// the families.
+// the families. Each expected block is mapped at the network level
+// and rewrapped with the wrap asserted, because the family lift of
+// the wrapper targets the family-agnostic form, not the IPv6 one.
 func Test_RangeToNetworks6_MappedParityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		a := rapid.Uint32().Draw(t, "a")
 		b := rapid.Uint32().Draw(t, "b")
 		first, last := min(a, b), max(a, b)
-		expected := []xnetip.Network6{}
+		expected := []xnetip.Contiguous[xnetip.Network6]{}
 		for block := range xnetip.RangeToNetworks4(netipAddrFrom4Bits(first), netipAddrFrom4Bits(last)) {
-			expected = append(expected, block.ToIPv6Mapped())
+			mappedBlock, ok := xnetip.ContiguousFrom(block.Network().ToIPv6Mapped())
+			require.True(t, ok, "mapped block %v not contiguous", block)
+			expected = append(expected, mappedBlock)
 		}
 		mapped := slices.Collect(xnetip.RangeToNetworks6(
 			netipAddrFrom6Bits(0, 0xffff_00000000|uint64(first)),
@@ -878,7 +946,7 @@ func Test_RangeToNetworks6_AllocationFree(t *testing.T) {
 	last := netipAddrFrom6Bits(^uint64(0), ^uint64(0)-1)
 	requireNoAllocs(t, func() {
 		for block := range xnetip.RangeToNetworks6(first, last) {
-			network6Sink = block
+			contiguous6Sink = block
 		}
 	})
 }
@@ -889,7 +957,7 @@ func BenchmarkRangeToNetworks6_MisalignedWorstCase(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		for block := range xnetip.RangeToNetworks6(first, last) {
-			network6Sink = block
+			contiguous6Sink = block
 		}
 	}
 }
@@ -900,7 +968,7 @@ func BenchmarkRangeToNetworks6_LowBitsMisaligned(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		for block := range xnetip.RangeToNetworks6(first, last) {
-			network6Sink = block
+			contiguous6Sink = block
 		}
 	}
 }
@@ -911,7 +979,7 @@ func BenchmarkRangeToNetworks6_AlignedSingleBlock(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		for block := range xnetip.RangeToNetworks6(first, last) {
-			network6Sink = block
+			contiguous6Sink = block
 		}
 	}
 }
