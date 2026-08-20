@@ -2,6 +2,7 @@ package xnetip
 
 import (
 	"math"
+	"math/bits"
 	"net/netip"
 	"testing"
 
@@ -54,6 +55,67 @@ func Test_IPv4Addr_FromNetip_AcceptsOnlyIs4(t *testing.T) {
 	require.False(t, ok)
 	_, ok = ipv4AddrFromNetip(netip.Addr{})
 	require.False(t, ok)
+}
+
+// verifies that the prefix mask has exactly the given number of leading
+// ones at the edges and the octet boundaries.
+func Test_IPv4MaskFromPrefix_LeadingOnesTable(t *testing.T) {
+	cases := []struct {
+		name string
+		bits int
+		want uint32
+	}{
+		{name: "0 is the empty mask", bits: 0, want: 0},
+		{name: "1 is the top bit", bits: 1, want: 0x80000000},
+		{name: "8 fills the first octet", bits: 8, want: 0xFF000000},
+		{name: "16 fills the top half", bits: 16, want: 0xFFFF0000},
+		{name: "24 fills three octets", bits: 24, want: 0xFFFFFF00},
+		{name: "31 leaves the lowest bit clear", bits: 31, want: 0xFFFFFFFE},
+		{name: "32 is all ones", bits: 32, want: ^uint32(0)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, ipv4AddrFromBits(tc.want), ipv4MaskFromPrefix(tc.bits))
+		})
+	}
+}
+
+// verifies that the prefix mask of any length has that many leading ones
+// and no other set bit, exhaustively over all 33 lengths.
+//
+// A value whose leading-one run and population count both equal the
+// length is uniquely determined, so together the two counts pin every
+// mask the way the Rust table does (../netip/src/net.rs:5038).
+func Test_IPv4MaskFromPrefix_LeadingOnesAndCountAreLength(t *testing.T) {
+	for length := range 33 {
+		mask := ipv4MaskFromPrefix(length).Bits()
+		require.Equal(t, length, bits.LeadingZeros32(^mask), "prefix length %d", length)
+		require.Equal(t, length, bits.OnesCount32(mask), "prefix length %d", length)
+	}
+}
+
+// verifies that every prefix mask grows strictly with the length, so
+// longer prefixes are supersets as bit sets.
+func Test_IPv4MaskFromPrefix_MonotoneInLength(t *testing.T) {
+	for length := range 32 {
+		shorter := ipv4MaskFromPrefix(length).Bits()
+		longer := ipv4MaskFromPrefix(length + 1).Bits()
+		require.Less(t, shorter, longer, "prefix length %d", length)
+		require.Equal(t, shorter, shorter&longer, "prefix length %d", length)
+	}
+}
+
+// verifies that masking with the prefix mask yields the same address the
+// standard library keeps when it applies a prefix length.
+func Test_IPv4MaskFromPrefix_AgreesWithNetipPrefix(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		length := rapid.IntRange(0, 32).Draw(t, "length")
+		prefix, err := address.Netip().Prefix(length)
+		require.NoError(t, err)
+		masked := address.Bits() & ipv4MaskFromPrefix(length).Bits()
+		require.Equal(t, prefix.Addr().As4(), ipv4AddrFromBits(masked).As4())
+	})
 }
 
 // verifies that the netip view is a valid zone-free IPv4 address and
@@ -138,6 +200,7 @@ func Test_IPv4Addr_Kernel_AllocationFree(t *testing.T) {
 		bytesKernelSink = address.AppendTo(buffer[:0])
 		_, okSink = ipv4AddrFromNetip(view)
 		netipKernelSink = address.Netip()
+		maskKernelSink = ipv4MaskFromPrefix(24)
 	})
 	require.Zero(t, int(allocs), "allocations per call")
 }
@@ -147,6 +210,7 @@ func Test_IPv4Addr_Kernel_AllocationFree(t *testing.T) {
 var (
 	address4Sink    [4]byte
 	address6Sink    ipv6Addr
+	maskKernelSink  ipv4Addr
 	wordKernelSink  uint32
 	bytesKernelSink []byte
 	okSink          bool

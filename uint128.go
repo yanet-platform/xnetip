@@ -228,11 +228,11 @@ func uint128Bit(n int) uint128 {
 // uint128MaskFromPrefix returns the mask whose top bits are ones and the
 // rest zero, for bits in 0 through 128.
 //
-// Callers validate the range: the public mask constructor rejects longer
-// prefixes with an error, this helper is only ever called with a length
-// a contiguous mask can have. The mask is the complement of all ones
-// shifted right by the length, so 0 yields the empty mask, 64 exactly
-// the high half and 128 all ones without a special case
+// Callers validate the range: the public constructors and the parser
+// reject longer prefixes with an error, this helper is only ever called
+// with a length a contiguous mask can have. The mask is the complement
+// of all ones shifted right by the length, so 0 yields the empty mask,
+// 64 exactly the high half and 128 all ones without a special case
 // (../netip/src/net.rs:68).
 func uint128MaskFromPrefix(bits int) uint128 {
 	return uint128{^uint64(0), ^uint64(0)}.Shr(uint(bits)).Not()

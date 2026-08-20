@@ -43,6 +43,19 @@ func ipv4AddrFromNetip(a netip.Addr) (addr ipv4Addr, ok bool) {
 	return ipv4AddrFrom4(a.As4()), true
 }
 
+// ipv4MaskFromPrefix returns the mask whose top bits are ones and the
+// rest zero, for bits in 0 through 32.
+//
+// Callers validate the range: the public constructors and the parser
+// reject longer prefixes with an error, this helper is only ever called
+// with a length a contiguous mask can have. The mask is the complement
+// of all ones shifted right by the length, and a shift by the full word
+// width is zero in Go, so 0 yields the empty mask and 32 all ones
+// without a special case (../netip/src/net.rs:50).
+func ipv4MaskFromPrefix(bits int) ipv4Addr {
+	return ipv4AddrFromBits(^(^uint32(0) >> uint(bits)))
+}
+
 // As4 returns the address as 4 bytes in network order.
 func (m ipv4Addr) As4() [4]byte {
 	var addr [4]byte
