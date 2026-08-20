@@ -610,3 +610,220 @@ func Test_IPNetworkFromAddr_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFromAddr(addr6) })
 	require.NoError(t, err)
 }
+
+// verifies that a same-family pair is accepted, the address bits
+// outside the mask are cleared and the pair's own family is kept.
+func Test_IPNetworkFrom_NormalizesAddressByMask(t *testing.T) {
+	cases := []struct {
+		name     string
+		addr     string
+		mask     string
+		wantAddr string
+		wantIs4  bool
+	}{
+		{name: "IPv4 contiguous mask clears host bits", addr: "192.168.1.1", mask: "255.255.255.0", wantAddr: "192.168.1.0", wantIs4: true},
+		{name: "IPv6 contiguous mask clears host bits", addr: "2001:db8::1", mask: "ffff:ffff::", wantAddr: "2001:db8::", wantIs4: false},
+		{name: "IPv4 universe from the all-zero mask", addr: "10.1.2.3", mask: "0.0.0.0", wantAddr: "0.0.0.0", wantIs4: true},
+		{name: "IPv6 universe from the all-zero mask", addr: "2001:db8::1", mask: "::", wantAddr: "::", wantIs4: false},
+		{name: "IPv4 mask 255.255.0.255 clears the hole in the third octet", addr: "192.168.7.1", mask: "255.255.0.255", wantAddr: "192.168.0.1", wantIs4: true},
+		{name: "IPv4 non-contiguous mask comes back verbatim", addr: "192.168.0.1", mask: "255.255.0.255", wantAddr: "192.168.0.1", wantIs4: true},
+		{name: "IPv6 two-run mask clears the low groups", addr: "2001:db8::1", mask: "ffff:ffff::ffff:ffff:0:0", wantAddr: "2001:db8::", wantIs4: false},
+		{name: "IPv4 alternating mask keeps every second bit", addr: "255.255.255.255", mask: "170.85.170.85", wantAddr: "170.85.170.85", wantIs4: true},
+		{name: "IPv6 hole straddling bit 64 is cleared", addr: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", mask: "ffff:ffff:ffff:ff00:00ff:ffff:ffff:ffff", wantAddr: "ffff:ffff:ffff:ff00:ff:ffff:ffff:ffff", wantIs4: false},
+		{name: "IPv4-mapped address with an IPv6 mask stays IPv6", addr: "::ffff:192.168.0.1", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00", wantAddr: "::ffff:192.168.0.0", wantIs4: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPNetworkFrom(
+				netip.MustParseAddr(testCase.addr),
+				netip.MustParseAddr(testCase.mask),
+			)
+			require.NoError(t, err)
+			require.Equal(t, testCase.wantIs4, network.Is4())
+			require.Equal(t, netip.MustParseAddr(testCase.wantAddr), network.Addr())
+			require.Equal(t, netip.MustParseAddr(testCase.mask), network.Mask())
+		})
+	}
+}
+
+// verifies that pairing an address with the all-ones mask of its
+// family builds the same host route as the host-route constructor.
+func Test_IPNetworkFrom_HostRouteEqualsFromAddr(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+		mask string
+	}{
+		{name: "IPv4 host route", addr: "10.0.0.1", mask: "255.255.255.255"},
+		{name: "IPv6 host route", addr: "::1", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPNetworkFrom(
+				netip.MustParseAddr(testCase.addr),
+				netip.MustParseAddr(testCase.mask),
+			)
+			require.NoError(t, err)
+			hostRoute, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr(testCase.addr))
+			require.NoError(t, err)
+			require.Equal(t, hostRoute, network)
+		})
+	}
+}
+
+// verifies that a mixed-family pair or the invalid zero address
+// yields the family-mismatch sentinel and the zero network.
+func Test_IPNetworkFrom_RejectsFamilyMismatch(t *testing.T) {
+	cases := []struct {
+		name string
+		addr netip.Addr
+		mask netip.Addr
+	}{
+		{name: "IPv4 address with IPv6 mask", addr: netip.MustParseAddr("10.0.0.1"), mask: netip.MustParseAddr("ffff::")},
+		{name: "IPv6 address with IPv4 mask", addr: netip.MustParseAddr("2001:db8::1"), mask: netip.MustParseAddr("255.0.0.0")},
+		{name: "IPv4-mapped address with IPv4 mask", addr: netip.MustParseAddr("::ffff:10.0.0.1"), mask: netip.MustParseAddr("255.0.0.0")},
+		{name: "invalid zero address", addr: netip.Addr{}, mask: netip.MustParseAddr("255.0.0.0")},
+		{name: "invalid zero mask", addr: netip.MustParseAddr("10.0.0.1"), mask: netip.Addr{}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPNetworkFrom(testCase.addr, testCase.mask)
+			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+			require.Equal(t, xnetip.IPNetwork{}, network)
+		})
+	}
+}
+
+// verifies that an IPv4 pair equals the lift of the concrete IPv4
+// constructor, pinning the mapped encoding, all-zero mask included.
+func Test_IPNetworkFrom_MatchesIPv4Lift(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+		mask string
+	}{
+		{name: "contiguous half mask", addr: "192.168.0.0", mask: "255.255.0.0"},
+		{name: "all-zero mask stays mapped", addr: "10.1.2.3", mask: "0.0.0.0"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			addr := netip.MustParseAddr(testCase.addr)
+			mask := netip.MustParseAddr(testCase.mask)
+			network, err := xnetip.IPNetworkFrom(addr, mask)
+			require.NoError(t, err)
+			require.True(t, network.Is4())
+			concrete, err := xnetip.IPv4NetworkFrom(addr, mask)
+			require.NoError(t, err)
+			require.Equal(t, xnetip.IPNetworkFrom4(concrete), network)
+		})
+	}
+}
+
+// verifies that every same-family pair of either family succeeds and
+// equals the lift of its family's concrete checked constructor.
+func Test_IPNetworkFrom_AgreesWithConcreteConstructorsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		if rapid.Bool().Draw(t, "is4") {
+			addr := genNetipAddr4.Draw(t, "addr4")
+			mask := genNetipAddr4.Draw(t, "mask4")
+			network, err := xnetip.IPNetworkFrom(addr, mask)
+			require.NoError(t, err)
+			concrete, err := xnetip.IPv4NetworkFrom(addr, mask)
+			require.NoError(t, err)
+			require.Equal(t, xnetip.IPNetworkFrom4(concrete), network)
+		} else {
+			addr := genNetipAddr6.Draw(t, "addr6")
+			mask := genNetipAddr6.Draw(t, "mask6")
+			network, err := xnetip.IPNetworkFrom(addr, mask)
+			require.NoError(t, err)
+			concrete, err := xnetip.IPv6NetworkFrom(addr, mask)
+			require.NoError(t, err)
+			require.Equal(t, xnetip.IPNetworkFrom6(concrete), network)
+		}
+	})
+}
+
+// verifies that every result is masked in its family's width and
+// that rebuilding a result from its own accessors is the identity.
+func Test_IPNetworkFrom_NormalizationIdempotentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var addr, mask, wantAddr netip.Addr
+		if rapid.Bool().Draw(t, "is4") {
+			addressBits := rapid.Uint32().Draw(t, "addr bits")
+			maskBits := rapid.Uint32().Draw(t, "mask bits")
+			addr = netipAddrFrom4Bits(addressBits)
+			mask = netipAddrFrom4Bits(maskBits)
+			wantAddr = netipAddrFrom4Bits(addressBits & maskBits)
+		} else {
+			addressHi := rapid.Uint64().Draw(t, "addr hi")
+			addressLo := rapid.Uint64().Draw(t, "addr lo")
+			maskHi := rapid.Uint64().Draw(t, "mask hi")
+			maskLo := rapid.Uint64().Draw(t, "mask lo")
+			addr = netipAddrFrom6Bits(addressHi, addressLo)
+			mask = netipAddrFrom6Bits(maskHi, maskLo)
+			wantAddr = netipAddrFrom6Bits(addressHi&maskHi, addressLo&maskLo)
+		}
+		network, err := xnetip.IPNetworkFrom(addr, mask)
+		require.NoError(t, err)
+		require.Equal(t, wantAddr, network.Addr())
+		require.Equal(t, mask, network.Mask())
+		rebuilt, err := xnetip.IPNetworkFrom(network.Addr(), network.Mask())
+		require.NoError(t, err)
+		require.Equal(t, network, rebuilt)
+	})
+}
+
+// verifies that a mixed-family pair, in either order, always yields
+// the family-mismatch sentinel and the zero network.
+func Test_IPNetworkFrom_RejectsMixedFamilyProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr4 := genNetipAddr4.Draw(t, "addr4")
+		addr6 := genNetipAddr6.Draw(t, "addr6")
+		addr, mask := addr4, addr6
+		if rapid.Bool().Draw(t, "v6 first") {
+			addr, mask = addr6, addr4
+		}
+		network, err := xnetip.IPNetworkFrom(addr, mask)
+		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+		require.Equal(t, xnetip.IPNetwork{}, network)
+	})
+}
+
+// verifies that normalization by a contiguous mask agrees with the
+// net/netip oracle for masking a prefix, in both families.
+func Test_IPNetworkFrom_MatchesNetipMaskedForPrefixMasks(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var addr, mask netip.Addr
+		var bits int
+		if rapid.Bool().Draw(t, "is4") {
+			addr = genNetipAddr4.Draw(t, "addr4")
+			bits = rapid.IntRange(0, 32).Draw(t, "bits")
+			mask = netipAddrFrom4Bits(^uint32(0) << (32 - bits))
+		} else {
+			addr = genNetipAddr6.Draw(t, "addr6")
+			bits = rapid.IntRange(0, 128).Draw(t, "bits")
+			if bits <= 64 {
+				mask = netipAddrFrom6Bits(^uint64(0)<<(64-bits), 0)
+			} else {
+				mask = netipAddrFrom6Bits(^uint64(0), ^uint64(0)<<(128-bits))
+			}
+		}
+		network, err := xnetip.IPNetworkFrom(addr, mask)
+		require.NoError(t, err)
+		require.Equal(t, netip.PrefixFrom(addr, bits).Masked().Addr(), network.Addr())
+	})
+}
+
+// verifies that the pair constructor allocates nothing on the success
+// path of either family.
+func Test_IPNetworkFrom_AllocationFree(t *testing.T) {
+	addr4 := netip.MustParseAddr("192.168.1.1")
+	mask4 := netip.MustParseAddr("255.255.0.255")
+	addr6 := netip.MustParseAddr("2001:db8::1")
+	mask6 := netip.MustParseAddr("ffff:ffff::")
+	var err error
+	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFrom(addr4, mask4) })
+	require.NoError(t, err)
+	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFrom(addr6, mask6) })
+	require.NoError(t, err)
+}
