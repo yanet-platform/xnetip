@@ -1663,6 +1663,92 @@ func Test_IPNetwork_Intersects_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { okSink = left4.Intersects(right6) })
 }
 
+// verifies that disjointness delegates within a family and always
+// holds across families.
+//
+// The family universes of the two families are disjoint even though
+// the stored 128-bit sets overlap — family first.
+func Test_IPNetwork_IsDisjoint_FamiliesAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  bool
+	}{
+		{name: "IPv4 disjoint", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: true},
+		{name: "IPv4 overlapping", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: false},
+		{name: "mixed families", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: true},
+		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("192.168.0.0/16"), want: true},
+		{name: "IPv6 disjoint", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("fe80::/10"), want: true},
+		{name: "universes of different families", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.IPNetwork{}, want: true},
+		{name: "IPv4 self", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv6 self", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsDisjoint(testCase.right))
+		})
+	}
+}
+
+// verifies that non-contiguous disjointness checks of both families
+// flow through the wrapper.
+func Test_IPNetwork_IsDisjoint_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  bool
+	}{
+		{name: "IPv4 pattern disjoint from block", left: xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPNetwork("11.0.0.0/255.0.0.0"), want: true},
+		{name: "IPv6 pattern overlapping block", left: xnetip.MustParseIPNetwork("2001::1/ffff::ffff"), right: xnetip.MustParseIPNetwork("2001:1::/32"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsDisjoint(testCase.right))
+		})
+	}
+}
+
+// verifies that disjointness is the exact complement of intersection,
+// mixed families included.
+//
+// Within a family the wrapped answer equals the concrete one, so the
+// mapped storage form preserves the relation.
+func Test_IPNetwork_IsDisjoint_ComplementOfIntersectsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPNetwork.Draw(t, "left")
+		right := genIPNetwork.Draw(t, "right")
+		require.Equal(t, !left.Intersects(right), left.IsDisjoint(right))
+		left4 := genIPv4Network.Draw(t, "left4")
+		right4 := genIPv4Network.Draw(t, "right4")
+		require.Equal(
+			t,
+			left4.IsDisjoint(right4),
+			xnetip.IPNetworkFrom4(left4).IsDisjoint(xnetip.IPNetworkFrom4(right4)),
+		)
+		left6 := genIPv6Network.Draw(t, "left6")
+		right6 := genIPv6Network.Draw(t, "right6")
+		require.Equal(
+			t,
+			left6.IsDisjoint(right6),
+			xnetip.IPNetworkFrom6(left6).IsDisjoint(xnetip.IPNetworkFrom6(right6)),
+		)
+	})
+}
+
+// verifies that the predicate allocates nothing in either family and
+// across families.
+func Test_IPNetwork_IsDisjoint_AllocationFree(t *testing.T) {
+	left4 := xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255")
+	right4 := xnetip.MustParseIPNetwork("11.0.0.0/255.0.0.0")
+	left6 := xnetip.MustParseIPNetwork("2001::1/ffff::ffff")
+	right6 := xnetip.MustParseIPNetwork("2001:1::/32")
+	requireNoAllocs(t, func() { okSink = left4.IsDisjoint(right4) })
+	requireNoAllocs(t, func() { okSink = left6.IsDisjoint(right6) })
+	requireNoAllocs(t, func() { okSink = left4.IsDisjoint(right6) })
+}
+
 // verifies that contiguity is judged in the network's own family, the
 // concrete types' positive and negative pins lifted through the wrap.
 func Test_IPNetwork_IsContiguous_JudgedInOwnFamily(t *testing.T) {

@@ -323,6 +323,14 @@ func (m IPNetwork) Intersects(other IPNetwork) bool {
 	return m.is4 == other.is4 && m.network.Intersects(other.network)
 }
 
+// IsDisjoint reports whether the two networks share no address.
+//
+// Networks of different families are always disjoint. Within a family
+// it is the logical complement of Intersects.
+func (m IPNetwork) IsDisjoint(other IPNetwork) bool {
+	return !m.Intersects(other)
+}
+
 // IsContiguous reports whether the mask, in the network's own family,
 // is a CIDR prefix mask: leading one bits followed only by zero bits.
 //
