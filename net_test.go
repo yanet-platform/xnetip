@@ -1234,3 +1234,132 @@ func Test_IPNetwork_IsContiguous_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { okSink = network4.IsContiguous() })
 	requireNoAllocs(t, func() { okSink = network6.IsContiguous() })
 }
+
+// verifies that a contiguous mask reports its family-native prefix
+// length.
+//
+// IPv4 answers 0 through 32 despite the mapped storage, IPv6 answers
+// 0 through 128, mapped IPv6 networks included.
+func Test_IPNetwork_Prefix_FamilyNativeLength(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+		want    int
+	}{
+		{name: "IPv4 /24", network: mustIPNetwork4(t, "192.168.1.0", "255.255.255.0"), want: 24},
+		{name: "IPv6 /40", network: mustIPNetwork6(t, "2a02:6b8::", "ffff:ffff:ff00::"), want: 40},
+		{name: "IPv6 host route /128", network: mustIPNetwork6(t, "2a02:6b8::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: 128},
+		{name: "IPv4 universe /0", network: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"), want: 0},
+		{name: "IPv4 host route /32", network: mustIPNetwork4(t, "10.0.0.1", "255.255.255.255"), want: 32},
+		{name: "IPv4 single leading bit /1", network: mustIPNetwork4(t, "128.0.0.0", "128.0.0.0"), want: 1},
+		{name: "IPv6 universe /0", network: mustIPNetwork6(t, "::", "::"), want: 0},
+		{name: "zero value is the IPv6 universe", network: xnetip.IPNetwork{}, want: 0},
+		{name: "mapped IPv6 network keeps its 128-bit length", network: mustIPNetwork6(t, "::ffff:8.8.8.0", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: 120},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.True(t, ok)
+			require.Equal(t, testCase.want, prefix)
+		})
+	}
+}
+
+// verifies that a non-contiguous mask has no prefix length in either
+// family and reports zero.
+func Test_IPNetwork_Prefix_NonContiguousHasNone(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+	}{
+		{name: "IPv4 hole in the middle", network: mustIPNetwork4(t, "10.0.0.1", "255.0.0.255")},
+		{name: "IPv4 alternating", network: mustIPNetwork4(t, "170.85.170.85", "170.85.170.85")},
+		{name: "IPv6 two runs", network: mustIPNetwork6(t, "2001:db8::1", "ffff:ffff::ffff")},
+		{name: "IPv6 hole ending at the half boundary", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff:ff00::ffff:ffff:0:0")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.False(t, ok)
+			require.Zero(t, prefix)
+		})
+	}
+}
+
+// verifies that wrapping an IPv4 network reports exactly the concrete
+// IPv4 length, value and presence alike.
+//
+// The mapped storage width must never leak into the answer.
+func Test_IPNetwork_Prefix_AgreesWithIPv4Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		wantPrefix, wantOk := network.Prefix()
+		prefix, ok := xnetip.IPNetworkFrom4(network).Prefix()
+		require.Equal(t, wantOk, ok)
+		require.Equal(t, wantPrefix, prefix)
+	})
+}
+
+// verifies that wrapping an IPv6 network reports exactly the concrete
+// IPv6 length, value and presence alike.
+func Test_IPNetwork_Prefix_AgreesWithIPv6Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		wantPrefix, wantOk := network.Prefix()
+		prefix, ok := xnetip.IPNetworkFrom6(network).Prefix()
+		require.Equal(t, wantOk, ok)
+		require.Equal(t, wantPrefix, prefix)
+	})
+}
+
+// verifies that a prefix length exists exactly for contiguous masks,
+// whatever the family, and that the absent case reports zero.
+func Test_IPNetwork_Prefix_SomeIffContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		prefix, ok := network.Prefix()
+		require.Equal(t, network.IsContiguous(), ok)
+		if !ok {
+			require.Zero(t, prefix)
+		}
+	})
+}
+
+// verifies that a network built from any address and length in either
+// family reports that same family-native length back.
+//
+// The sweep covers the whole 0 through 32 and 0 through 128 ranges
+// every run rather than sampling them.
+func Test_IPNetwork_Prefix_RoundTripsCIDRProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr4 := genNetipAddr4.Draw(t, "addr4")
+		for cidr := range 33 {
+			network, err := xnetip.IPNetworkFromCIDR(addr4, cidr)
+			require.NoError(t, err)
+			prefix, ok := network.Prefix()
+			require.True(t, ok)
+			require.Equal(t, cidr, prefix)
+		}
+		addr6 := genNetipAddr6.Draw(t, "addr6")
+		for cidr := range 129 {
+			network, err := xnetip.IPNetworkFromCIDR(addr6, cidr)
+			require.NoError(t, err)
+			prefix, ok := network.Prefix()
+			require.True(t, ok)
+			require.Equal(t, cidr, prefix)
+		}
+	})
+}
+
+// verifies that computing the prefix allocates nothing for either
+// family and either outcome.
+func Test_IPNetwork_Prefix_AllocationFree(t *testing.T) {
+	contiguous4 := mustIPNetwork4(t, "192.168.0.0", "255.255.0.0")
+	nonContiguous4 := mustIPNetwork4(t, "192.168.0.1", "255.255.0.255")
+	contiguous6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+	nonContiguous6 := mustIPNetwork6(t, "2001:db8::1", "ffff:ffff::ffff")
+	requireNoAllocs(t, func() { intSink, okSink = contiguous4.Prefix() })
+	requireNoAllocs(t, func() { intSink, okSink = nonContiguous4.Prefix() })
+	requireNoAllocs(t, func() { intSink, okSink = contiguous6.Prefix() })
+	requireNoAllocs(t, func() { intSink, okSink = nonContiguous6.Prefix() })
+}

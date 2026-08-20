@@ -201,6 +201,31 @@ func (m IPNetwork) IsContiguous() bool {
 	return m.network.IsContiguous()
 }
 
+// ipv4MappedPrefixBits is the width of the IPv4-mapped range
+// ::ffff:0:0/96.
+//
+// The stored mask of an IPv4 network pins this many leading one bits
+// above its 32 family bits.
+const ipv4MappedPrefixBits = 96
+
+// Prefix returns the family-native prefix length when the mask is
+// contiguous.
+//
+// For an IPv4 network the prefix is 0 through 32, for an IPv6 network
+// 0 through 128, in both cases the number of leading one bits of the
+// mask in that family. The second result is false for a non-contiguous
+// mask, in which case the first result is 0. The stored mask of an
+// IPv4 network carries the 96 mapped-range bits as leading ones above
+// its 32 family bits, so the family length is the 128-bit length of
+// the stored form minus that width.
+func (m IPNetwork) Prefix() (int, bool) {
+	prefix, ok := m.network.Prefix()
+	if ok && m.is4 {
+		return prefix - ipv4MappedPrefixBits, true
+	}
+	return prefix, ok
+}
+
 // ToIPv6Mapped embeds the network into IPv6 address space.
 //
 // An IPv4 network is returned as its IPv4-mapped IPv6 network (address
