@@ -38,6 +38,22 @@ func IPv6AddrFrom8(a, b, c, d, e, f, g, h uint16) IPv6Addr {
 	return IPv6Addr{uint128FromHalves(hi, lo)}
 }
 
+// IPv6AddrFromNetip converts a netip.Addr to IPv6Addr, dropping any zone.
+//
+// ok is false unless a.Is6() reports true: an IPv4 address and the zero
+// netip.Addr are not converted, while an IPv4-mapped address such as
+// ::ffff:1.2.3.4 is IPv6 and converts as its 16-byte form, never
+// unmapped. A zone is discarded silently because the addresses of this
+// package are zone-free by design — a zone only scopes link-local
+// forwarding and has no bearing on mask algebra. On failure the returned
+// address is the zero value.
+func IPv6AddrFromNetip(a netip.Addr) (addr IPv6Addr, ok bool) {
+	if !a.Is6() {
+		return IPv6Addr{}, false
+	}
+	return IPv6AddrFrom16(a.As16()), true
+}
+
 // As16 returns the address as 16 bytes in network order.
 func (m IPv6Addr) As16() [16]byte {
 	return m.bits.As16()
@@ -46,6 +62,15 @@ func (m IPv6Addr) As16() [16]byte {
 // Bits returns the address as two host-order 64-bit halves, hi first.
 func (m IPv6Addr) Bits() (hi, lo uint64) {
 	return m.bits.hi, m.bits.lo
+}
+
+// Netip returns the address as a netip.Addr (Is6 true, no zone).
+//
+// The view is always valid, so it can flow into every standard API that
+// takes a netip.Addr, and converting it back always succeeds. An
+// IPv4-mapped value keeps its 16-byte form (Is4In6, not Is4).
+func (m IPv6Addr) Netip() netip.Addr {
+	return netip.AddrFrom16(m.As16())
 }
 
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after other.

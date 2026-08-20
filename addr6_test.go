@@ -170,6 +170,140 @@ func Test_IPv6Addr_Construction_DoesNotAllocate(t *testing.T) {
 	})
 }
 
+// verifies that a plain IPv6 netip address converts to the address with
+// the same sixteen bytes.
+func Test_IPv6AddrFromNetip_ConvertsIPv6(t *testing.T) {
+	address, ok := xnetip.IPv6AddrFromNetip(netip.MustParseAddr("2001:db8::1"))
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv6Addr("2001:db8::1"), address)
+}
+
+// verifies that an IPv4 netip address is rejected with the zero address,
+// because the conversion never crosses the family boundary.
+func Test_IPv6AddrFromNetip_RejectsIPv4(t *testing.T) {
+	address, ok := xnetip.IPv6AddrFromNetip(netip.MustParseAddr("1.2.3.4"))
+	require.False(t, ok)
+	require.Equal(t, xnetip.IPv6Addr{}, address)
+}
+
+// verifies that an IPv4-mapped netip address converts as its sixteen
+// bytes: a mapped address is an IPv6 value and stays mapped.
+func Test_IPv6AddrFromNetip_ConvertsIPv4MappedAsIPv6(t *testing.T) {
+	address, ok := xnetip.IPv6AddrFromNetip(netip.MustParseAddr("::ffff:1.2.3.4"))
+	require.True(t, ok)
+	require.Equal(t, xnetip.IPv6AddrFrom8(0, 0, 0, 0, 0, 0xffff, 0x0102, 0x0304), address)
+}
+
+// verifies that a zone is dropped silently: the address converts to its
+// bytes and the zone is gone, because addresses here are zone-free.
+func Test_IPv6AddrFromNetip_DropsZone(t *testing.T) {
+	address, ok := xnetip.IPv6AddrFromNetip(netip.MustParseAddr("fe80::1%eth0"))
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv6Addr("fe80::1"), address)
+}
+
+// verifies that the zero netip address, which is invalid, is rejected
+// with the zero address.
+func Test_IPv6AddrFromNetip_RejectsZeroAddr(t *testing.T) {
+	address, ok := xnetip.IPv6AddrFromNetip(netip.Addr{})
+	require.False(t, ok)
+	require.Equal(t, xnetip.IPv6Addr{}, address)
+}
+
+// verifies that the netip view is a valid zone-free IPv6 address equal
+// to the one netip parses from the same text.
+func Test_IPv6Addr_Netip_IsIPv6WithoutZone(t *testing.T) {
+	view := xnetip.IPv6AddrFrom8(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1).Netip()
+	require.Equal(t, netip.MustParseAddr("2001:db8::1"), view)
+	require.True(t, view.Is6())
+	require.True(t, view.IsValid())
+	require.Empty(t, view.Zone())
+}
+
+// verifies that the netip view of a mapped address keeps the mapped
+// form: the 4in6 range, not the IPv4 family, and the mapped text.
+func Test_IPv6Addr_Netip_KeepsMappedForm(t *testing.T) {
+	view := xnetip.MustParseIPv6Addr("::ffff:1.2.3.4").Netip()
+	require.True(t, view.Is4In6())
+	require.False(t, view.Is4())
+	require.Equal(t, "::ffff:1.2.3.4", view.String())
+}
+
+// verifies that the zero value converts to the unspecified netip address
+// and back, because the zero value is a real address.
+func Test_IPv6Addr_Netip_ZeroValueRoundTrips(t *testing.T) {
+	view := xnetip.IPv6Addr{}.Netip()
+	require.Equal(t, netip.MustParseAddr("::"), view)
+	address, ok := xnetip.IPv6AddrFromNetip(view)
+	require.True(t, ok)
+	require.Equal(t, xnetip.IPv6Addr{}, address)
+}
+
+// verifies that the all-ones address survives the round trip through the
+// netip view.
+func Test_IPv6AddrFromNetip_RoundTripsAllOnes(t *testing.T) {
+	allOnes := xnetip.MustParseIPv6Addr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+	address, ok := xnetip.IPv6AddrFromNetip(allOnes.Netip())
+	require.True(t, ok)
+	require.Equal(t, allOnes, address)
+}
+
+// verifies that converting the netip view back yields the address, for
+// every address.
+func Test_IPv6AddrFromNetip_RoundTripsThroughNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		back, ok := xnetip.IPv6AddrFromNetip(address.Netip())
+		require.True(t, ok)
+		require.Equal(t, address, back)
+	})
+}
+
+// verifies that the conversion accepts every 16-byte netip address,
+// zoned or not, and agrees with the byte constructor on the value.
+func Test_IPv6AddrFromNetip_AgreesWithFrom16(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		octets := [16]byte(rapid.SliceOfN(rapid.Byte(), 16, 16).Draw(t, "octets"))
+		address, ok := xnetip.IPv6AddrFromNetip(netip.AddrFrom16(octets))
+		require.True(t, ok)
+		require.Equal(t, xnetip.IPv6AddrFrom16(octets), address)
+		zoned, ok := xnetip.IPv6AddrFromNetip(netip.AddrFrom16(octets).WithZone("z"))
+		require.True(t, ok)
+		require.Equal(t, xnetip.IPv6AddrFrom16(octets), zoned)
+	})
+}
+
+// verifies that every 4-byte netip address is rejected, because the
+// 4-byte form is IPv4 whatever bytes it holds.
+func Test_IPv6AddrFromNetip_RejectsEvery4ByteAddr(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		octets := [4]byte(rapid.SliceOfN(rapid.Byte(), 4, 4).Draw(t, "octets"))
+		_, ok := xnetip.IPv6AddrFromNetip(netip.AddrFrom4(octets))
+		require.False(t, ok)
+	})
+}
+
+// verifies that the netip view prints exactly what the address prints,
+// so the two formatting paths agree on every address, mapped included.
+func Test_IPv6Addr_Netip_AgreesWithStringForm(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		require.Equal(t, address.String(), address.Netip().String())
+	})
+}
+
+// verifies that the conversion from a netip address does not allocate.
+func Test_IPv6AddrFromNetip_DoesNotAllocate(t *testing.T) {
+	peer := netip.MustParseAddr("2001:db8::1")
+	requireNoAllocs(t, func() { ipv6AddrSink, boolSink = xnetip.IPv6AddrFromNetip(peer) })
+}
+
+// verifies that the netip view does not allocate.
+func Test_IPv6Addr_Netip_DoesNotAllocate(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("2001:db8::1")
+	requireNoAllocs(t, func() { netipAddrSink = address.Netip() })
+}
+
 // verifies that compare is the numeric order of the 128-bit pattern.
 //
 // The high half is compared first and the low half only breaks its ties,
