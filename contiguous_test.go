@@ -2062,3 +2062,180 @@ func Test_ContiguousFromCIDR_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { contiguousSink, errSink = xnetip.ContiguousFromCIDR(addr4, 24) })
 	requireNoAllocs(t, func() { contiguousSink, errSink = xnetip.ContiguousFromCIDR(addr6, 64) })
 }
+
+// verifies that a prefix with host bits set converts to its masked
+// block, the same network the equivalent text parses to.
+func Test_ContiguousFromPrefix4_ClearsHostBits(t *testing.T) {
+	block, ok := xnetip.ContiguousFromPrefix4(netip.MustParsePrefix("192.168.1.5/24"))
+	require.True(t, ok)
+	require.Equal(t, mustContiguous4(t, "192.168.1.0/24"), block)
+}
+
+// verifies that both IPv4 boundary lengths convert: the universe
+// prefix and a host route.
+func Test_ContiguousFromPrefix4_Boundaries(t *testing.T) {
+	universe, ok := xnetip.ContiguousFromPrefix4(netip.MustParsePrefix("0.0.0.0/0"))
+	require.True(t, ok)
+	require.Equal(t, mustContiguous4(t, "0.0.0.0/0"), universe)
+	host, ok := xnetip.ContiguousFromPrefix4(netip.MustParsePrefix("192.168.1.5/32"))
+	require.True(t, ok)
+	require.Equal(t, mustContiguous4(t, "192.168.1.5/32"), host)
+}
+
+// verifies that the invalid zero prefix and every non-Is4 prefix are
+// refused with the zero block.
+func Test_ContiguousFromPrefix4_Rejections(t *testing.T) {
+	for _, prefix := range []netip.Prefix{
+		{},
+		netip.MustParsePrefix("2001:db8::/32"),
+		netip.MustParsePrefix("::ffff:10.0.0.0/104"),
+	} {
+		block, ok := xnetip.ContiguousFromPrefix4(prefix)
+		require.False(t, ok, prefix.String())
+		require.Equal(t, xnetip.Contiguous[xnetip.Network4]{}, block)
+	}
+}
+
+// verifies that a prefix with host bits set converts to its masked
+// block, the same network the equivalent text parses to.
+func Test_ContiguousFromPrefix6_ClearsHostBits(t *testing.T) {
+	block, ok := xnetip.ContiguousFromPrefix6(netip.MustParsePrefix("2001:db8::1/64"))
+	require.True(t, ok)
+	require.Equal(t, mustContiguous6(t, "2001:db8::/64"), block)
+}
+
+// verifies that both IPv6 boundary lengths convert: the universe
+// prefix and a host route.
+func Test_ContiguousFromPrefix6_Boundaries(t *testing.T) {
+	universe, ok := xnetip.ContiguousFromPrefix6(netip.MustParsePrefix("::/0"))
+	require.True(t, ok)
+	require.Equal(t, mustContiguous6(t, "::/0"), universe)
+	host, ok := xnetip.ContiguousFromPrefix6(netip.MustParsePrefix("2001:db8::1/128"))
+	require.True(t, ok)
+	require.Equal(t, mustContiguous6(t, "2001:db8::1/128"), host)
+}
+
+// verifies that the invalid zero prefix and an Is4 prefix are
+// refused while an IPv4-mapped IPv6 prefix converts.
+func Test_ContiguousFromPrefix6_Rejections(t *testing.T) {
+	for _, prefix := range []netip.Prefix{{}, netip.MustParsePrefix("10.0.0.0/8")} {
+		block, ok := xnetip.ContiguousFromPrefix6(prefix)
+		require.False(t, ok, prefix.String())
+		require.Equal(t, xnetip.Contiguous[xnetip.Network6]{}, block)
+	}
+	mapped, ok := xnetip.ContiguousFromPrefix6(netip.MustParsePrefix("::ffff:10.0.0.0/104"))
+	require.True(t, ok)
+	require.Equal(t, mustContiguous6(t, "::ffff:10.0.0.0/104"), mapped)
+}
+
+// verifies that the family follows the prefix address: an Is4 prefix
+// makes an IPv4 block and an IPv4-mapped IPv6 one stays IPv6.
+func Test_ContiguousFromPrefix_SelectsFamilyByAddress(t *testing.T) {
+	blockV4, ok := xnetip.ContiguousFromPrefix(netip.MustParsePrefix("192.168.1.5/24"))
+	require.True(t, ok)
+	require.Equal(t, mustContiguous(t, "192.168.1.0/24"), blockV4)
+	_, ok = blockV4.Network().IPv4()
+	require.True(t, ok)
+	blockMapped, ok := xnetip.ContiguousFromPrefix(netip.MustParsePrefix("::ffff:10.0.0.0/104"))
+	require.True(t, ok)
+	require.Equal(t, mustContiguous(t, "::ffff:10.0.0.0/104"), blockMapped)
+	_, ok = blockMapped.Network().IPv6()
+	require.True(t, ok)
+}
+
+// verifies that only the invalid zero prefix is refused by the
+// family-agnostic conversion.
+func Test_ContiguousFromPrefix_RejectsZeroPrefix(t *testing.T) {
+	block, ok := xnetip.ContiguousFromPrefix(netip.Prefix{})
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network]{}, block)
+}
+
+// verifies that every valid IPv4 prefix converts, with the block's
+// prefix view and the conversion inverse to each other.
+func Test_ContiguousFromPrefix4_BijectionProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefix := genIPv4Prefix.Draw(t, "prefix")
+		block, ok := xnetip.ContiguousFromPrefix4(prefix)
+		require.True(t, ok)
+		require.Equal(t, prefix.Masked(), block.Prefix())
+		draw := genContiguous4.Draw(t, "block")
+		back, ok := xnetip.ContiguousFromPrefix4(draw.Prefix())
+		require.True(t, ok)
+		require.Equal(t, draw, back)
+	})
+}
+
+// verifies that every valid IPv6 prefix converts, with the block's
+// prefix view and the conversion inverse to each other.
+func Test_ContiguousFromPrefix6_BijectionProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefix := genIPv6Prefix.Draw(t, "prefix")
+		block, ok := xnetip.ContiguousFromPrefix6(prefix)
+		require.True(t, ok)
+		require.Equal(t, prefix.Masked(), block.Prefix())
+		draw := genContiguous6.Draw(t, "block")
+		back, ok := xnetip.ContiguousFromPrefix6(draw.Prefix())
+		require.True(t, ok)
+		require.Equal(t, draw, back)
+	})
+}
+
+// verifies that every valid prefix of either family converts, with
+// the block's prefix view and the conversion inverse to each other.
+func Test_ContiguousFromPrefix_BijectionProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefix := genIPv4Prefix.Draw(t, "prefix4")
+		if rapid.Bool().Draw(t, "ipv6") {
+			prefix = genIPv6Prefix.Draw(t, "prefix6")
+		}
+		block, ok := xnetip.ContiguousFromPrefix(prefix)
+		require.True(t, ok)
+		require.Equal(t, prefix.Masked(), block.Prefix())
+		draw := genContiguous.Draw(t, "block")
+		back, ok := xnetip.ContiguousFromPrefix(draw.Prefix())
+		require.True(t, ok)
+		require.Equal(t, draw, back)
+	})
+}
+
+// verifies that the conversion equals the network conversion
+// followed by the exact wrap in every family.
+func Test_ContiguousFromPrefix_MatchesTypedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefix4 := genIPv4Prefix.Draw(t, "prefix4")
+		network4, ok := xnetip.Network4FromPrefix(prefix4)
+		require.True(t, ok)
+		twoStep4, ok := xnetip.ContiguousFrom(network4)
+		require.True(t, ok)
+		block4, ok := xnetip.ContiguousFromPrefix4(prefix4)
+		require.True(t, ok)
+		require.Equal(t, twoStep4, block4)
+		prefix6 := genIPv6Prefix.Draw(t, "prefix6")
+		network6, ok := xnetip.Network6FromPrefix(prefix6)
+		require.True(t, ok)
+		twoStep6, ok := xnetip.ContiguousFrom(network6)
+		require.True(t, ok)
+		block6, ok := xnetip.ContiguousFromPrefix6(prefix6)
+		require.True(t, ok)
+		require.Equal(t, twoStep6, block6)
+		network, ok := xnetip.NetworkFromPrefix(prefix6)
+		require.True(t, ok)
+		twoStep, ok := xnetip.ContiguousFrom(network)
+		require.True(t, ok)
+		block, ok := xnetip.ContiguousFromPrefix(prefix6)
+		require.True(t, ok)
+		require.Equal(t, twoStep, block)
+	})
+}
+
+// verifies that the accept path of each prefix conversion is
+// allocation-free.
+func Test_ContiguousFromPrefix_AllocationFree(t *testing.T) {
+	prefix4 := netip.MustParsePrefix("192.168.1.0/24")
+	prefix6 := netip.MustParsePrefix("2001:db8::/64")
+	requireNoAllocs(t, func() { contiguous4Sink, okSink = xnetip.ContiguousFromPrefix4(prefix4) })
+	requireNoAllocs(t, func() { contiguous6Sink, okSink = xnetip.ContiguousFromPrefix6(prefix6) })
+	requireNoAllocs(t, func() { contiguousSink, okSink = xnetip.ContiguousFromPrefix(prefix4) })
+	requireNoAllocs(t, func() { contiguousSink, okSink = xnetip.ContiguousFromPrefix(prefix6) })
+}

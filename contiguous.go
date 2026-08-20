@@ -95,6 +95,62 @@ func ContiguousFromCIDR(addr netip.Addr, bits int) (Contiguous[Network], error) 
 	return Contiguous[Network]{network: network}, nil
 }
 
+// ContiguousFromPrefix4 converts a netip.Prefix into an IPv4 CIDR
+// block, host bits cleared.
+//
+// ok is false when the prefix is invalid or its address is not Is4 —
+// an IPv4-mapped prefix is IPv6, convert it through
+// ContiguousFromPrefix6 instead. A valid prefix always carries a
+// contiguous mask, so the conversion accepts every valid Is4 prefix
+// and is the exact inverse of Prefix: the round trip through either
+// direction is the identity on masked prefixes.
+func ContiguousFromPrefix4(p netip.Prefix) (Contiguous[Network4], bool) {
+	network, ok := Network4FromPrefix(p)
+	if !ok {
+		return Contiguous[Network4]{}, false
+	}
+	// A mask built from a prefix length is contiguous by
+	// construction, so the block wraps without revalidation.
+	return Contiguous[Network4]{network: network}, true
+}
+
+// ContiguousFromPrefix6 converts a netip.Prefix into an IPv6 CIDR
+// block, host bits cleared.
+//
+// ok is false when the prefix is invalid or its address is Is4 — an
+// IPv4-mapped IPv6 prefix is IPv6 and is accepted. A valid prefix
+// always carries a contiguous mask, so the conversion accepts every
+// valid Is6 prefix and is the exact inverse of Prefix: the round
+// trip through either direction is the identity on masked prefixes.
+func ContiguousFromPrefix6(p netip.Prefix) (Contiguous[Network6], bool) {
+	network, ok := Network6FromPrefix(p)
+	if !ok {
+		return Contiguous[Network6]{}, false
+	}
+	// A mask built from a prefix length is contiguous by
+	// construction, so the block wraps without revalidation.
+	return Contiguous[Network6]{network: network}, true
+}
+
+// ContiguousFromPrefix converts a netip.Prefix into a CIDR block in
+// the prefix address's own family, host bits cleared.
+//
+// An Is4 prefix becomes an IPv4 block, anything else — an
+// IPv4-mapped IPv6 prefix included — an IPv6 one, as in netip. ok is
+// false only for the invalid zero prefix: a valid prefix always
+// carries a contiguous mask, so the conversion is the exact inverse
+// of Prefix and the round trip through either direction is the
+// identity on masked prefixes.
+func ContiguousFromPrefix(p netip.Prefix) (Contiguous[Network], bool) {
+	network, ok := NetworkFromPrefix(p)
+	if !ok {
+		return Contiguous[Network]{}, false
+	}
+	// A mask built from a prefix length is contiguous by
+	// construction, so the block wraps without revalidation.
+	return Contiguous[Network]{network: network}, true
+}
+
 // ParseContiguous4 parses an IPv4 CIDR block in prefix,
 // explicit-mask or bare address notation.
 //
