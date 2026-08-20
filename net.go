@@ -1,6 +1,7 @@
 package xnetip
 
 import (
+	"iter"
 	"net/netip"
 	"strings"
 )
@@ -269,6 +270,33 @@ func (m IPNetwork) LastAddr() netip.Addr {
 // whole-word count is the family count.
 func (m IPNetwork) NumHostBits() int {
 	return m.network.NumHostBits()
+}
+
+// Addrs returns every address of the network in host-index order,
+// each carrying the network's address family.
+//
+// An IPv4 network yields Is4 addresses, an IPv6 network Is6 ones,
+// zone-free, in exactly the order of IPv4Network.Addrs and
+// IPv6Network.Addrs. The number of addresses is 1 << NumHostBits().
+func (m IPNetwork) Addrs() iter.Seq[netip.Addr] {
+	// The dispatch lives inside a single returned closure so a range
+	// over it stays a direct call in both families.
+	return func(yield func(netip.Addr) bool) {
+		// An IPv4 network must unwrap before iterating.
+		//
+		// The stored IPv4-mapped form would yield addresses of the
+		// wrong family. The mapped-storage invariant makes the low
+		// 32 stored bits the IPv4 network, already normalized.
+		if m.is4 {
+			network := IPv4Network{
+				addr: ipv4AddrFromBits(uint32(m.network.addr.bits.lo)),
+				mask: ipv4AddrFromBits(uint32(m.network.mask.bits.lo)),
+			}
+			network.Addrs()(yield)
+			return
+		}
+		m.network.Addrs()(yield)
+	}
 }
 
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
