@@ -68,6 +68,27 @@ func IPv4NetworkFromCIDR(addr netip.Addr, bits int) (IPv4Network, error) {
 	return fromBits4(addrKernel, ipv4MaskFromPrefix(bits)), nil
 }
 
+// IPv4NetworkFromAddr returns the host route that contains exactly
+// addr.
+//
+// The mask is all ones (/32), so the result is normalized by
+// construction and no address bit is cleared. addr must be Is4: an
+// IPv6 address (IPv4-mapped included) or the invalid zero netip.Addr
+// is rejected with ErrAddrFamilyMismatch.
+func IPv4NetworkFromAddr(addr netip.Addr) (IPv4Network, error) {
+	addrKernel, ok := ipv4AddrFromNetip(addr)
+	if !ok {
+		return IPv4Network{}, wrapParseError("IPv4NetworkFromAddr", addr.String(), ErrAddrFamilyMismatch, nil)
+	}
+	return IPv4Network{addr: addrKernel, mask: ipv4AllBits}, nil
+}
+
+// ipv4AllBits is the all-ones mask, the mask of a host route.
+//
+// Pairing an address with it keeps every address bit, so a host route
+// is normalized by construction (../netip/src/net.rs:27).
+var ipv4AllBits = ipv4AddrFromBits(^uint32(0))
+
 // Addr returns the network address (already normalized by the mask) as
 // an Is4 netip.Addr.
 func (m IPv4Network) Addr() netip.Addr {

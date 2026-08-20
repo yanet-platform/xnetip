@@ -366,3 +366,121 @@ func Test_IPv4NetworkFromCIDR_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { networkSink, err = xnetip.IPv4NetworkFromCIDR(addr, 24) })
 	require.NoError(t, err)
 }
+
+// verifies that the host-route constructor pairs the address with the
+// all-ones mask without clearing a single address bit.
+//
+// A non-contiguous mask table is not applicable to this constructor:
+// the mask is fixed to all ones, the universe of bits, so the
+// alternating-pattern address below pins bit preservation instead.
+func Test_IPv4NetworkFromAddr_BuildsHostRoute(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+	}{
+		{name: "loopback host route", addr: "127.0.0.1"},
+		{name: "private address host route", addr: "192.168.1.1"},
+		{name: "unspecified address", addr: "0.0.0.0"},
+		{name: "broadcast address", addr: "255.255.255.255"},
+		{name: "alternating bit pattern", addr: "170.85.170.85"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPv4NetworkFromAddr(netip.MustParseAddr(testCase.addr))
+			require.NoError(t, err)
+			require.Equal(t, netip.MustParseAddr(testCase.addr), network.Addr())
+			require.Equal(t, netip.MustParseAddr("255.255.255.255"), network.Mask())
+		})
+	}
+}
+
+// verifies that the host route carries the exact bit pattern of its
+// address and the all-ones mask pattern.
+func Test_IPv4NetworkFromAddr_PreservesBitPattern(t *testing.T) {
+	network, err := xnetip.IPv4NetworkFromAddr(netipAddrFrom4Bits(0x0A000001))
+	require.NoError(t, err)
+	require.Equal(t, netipAddrFrom4Bits(0x0A000001), network.Addr())
+	require.Equal(t, netipAddrFrom4Bits(0xFFFFFFFF), network.Mask())
+}
+
+// verifies that the host route equals the same network built through
+// the checked normalizing constructor.
+func Test_IPv4NetworkFromAddr_EqualsCheckedConstructor(t *testing.T) {
+	fromAddr, err := xnetip.IPv4NetworkFromAddr(netip.MustParseAddr("10.0.0.1"))
+	require.NoError(t, err)
+	fromPair, err := xnetip.IPv4NetworkFrom(
+		netip.MustParseAddr("10.0.0.1"),
+		netip.MustParseAddr("255.255.255.255"),
+	)
+	require.NoError(t, err)
+	require.Equal(t, fromPair, fromAddr)
+}
+
+// verifies that a non-Is4 address, IPv4-mapped included, yields the
+// family-mismatch sentinel and the zero network.
+func Test_IPv4NetworkFromAddr_RejectsForeignFamily(t *testing.T) {
+	cases := []struct {
+		name string
+		addr netip.Addr
+	}{
+		{name: "IPv6 address", addr: netip.MustParseAddr("2001:db8::1")},
+		{name: "IPv4-mapped IPv6 address", addr: netip.MustParseAddr("::ffff:10.0.0.1")},
+		{name: "invalid zero address", addr: netip.Addr{}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPv4NetworkFromAddr(testCase.addr)
+			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+			require.Equal(t, xnetip.IPv4Network{}, network)
+		})
+	}
+}
+
+// verifies that every Is4 address lifts into its host route with the
+// address preserved and the mask all ones.
+//
+// The result must also equal the same network built through the
+// checked normalizing constructor, so the two entry points agree.
+func Test_IPv4NetworkFromAddr_HostRouteProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr")
+		network, err := xnetip.IPv4NetworkFromAddr(addr)
+		require.NoError(t, err)
+		require.Equal(t, addr, network.Addr())
+		require.Equal(t, netipAddrFrom4Bits(^uint32(0)), network.Mask())
+		fromPair, err := xnetip.IPv4NetworkFrom(addr, netipAddrFrom4Bits(^uint32(0)))
+		require.NoError(t, err)
+		require.Equal(t, fromPair, network)
+	})
+}
+
+// verifies that every Is6 address, whatever its shape, is rejected
+// with the family-mismatch sentinel.
+func Test_IPv4NetworkFromAddr_RejectsIs6Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr6.Draw(t, "addr")
+		network, err := xnetip.IPv4NetworkFromAddr(addr)
+		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+		require.Equal(t, xnetip.IPv4Network{}, network)
+	})
+}
+
+// verifies that the host route agrees with the net/netip oracle for a
+// full-length masked prefix.
+func Test_IPv4NetworkFromAddr_MatchesNetipHostPrefix(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr")
+		network, err := xnetip.IPv4NetworkFromAddr(addr)
+		require.NoError(t, err)
+		require.Equal(t, netip.PrefixFrom(addr, 32).Masked().Addr(), network.Addr())
+	})
+}
+
+// verifies that the host-route constructor allocates nothing on the
+// success path, per the allocation-free runtime contract.
+func Test_IPv4NetworkFromAddr_AllocationFree(t *testing.T) {
+	addr := netip.MustParseAddr("192.168.1.5")
+	var err error
+	requireNoAllocs(t, func() { networkSink, err = xnetip.IPv4NetworkFromAddr(addr) })
+	require.NoError(t, err)
+}
