@@ -256,6 +256,35 @@ func (m IPv6Network) AppendTo(b []byte) []byte {
 	return m.mask.AppendTo(b)
 }
 
+// MarshalText implements encoding.TextMarshaler.
+//
+// The text is the String form of the network: a compressed address,
+// "/" and either a prefix length (contiguous mask) or a colon-form
+// mask (non-contiguous mask). It never fails and allocates only the
+// returned slice.
+func (m IPv6Network) MarshalText() ([]byte, error) {
+	return m.AppendTo(make([]byte, 0, len("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"))), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+//
+// The text must be accepted by ParseIPv6Network, so a zone suffix is
+// rejected. Empty text wraps ErrEmptyInput rather than yielding the
+// zero value the way it yields the invalid zero netip.Prefix: the zero
+// IPv6Network is the valid network ::/0, so empty text would silently
+// hide a missing field. The receiver is untouched on any error.
+func (m *IPv6Network) UnmarshalText(text []byte) error {
+	if len(text) == 0 {
+		return wrapParseError("IPv6Network.UnmarshalText", "", ErrEmptyInput, nil)
+	}
+	network, err := ParseIPv6Network(string(text))
+	if err != nil {
+		return err
+	}
+	*m = network
+	return nil
+}
+
 // IsIPv4MappedIPv6 reports whether this network is an IPv4-mapped IPv6
 // network.
 //

@@ -3,6 +3,7 @@ package xnetip_test
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"math"
 	"math/bits"
 	"net/netip"
@@ -1738,4 +1739,189 @@ func BenchmarkParseIPv6Network_Reject(b *testing.B) {
 	for b.Loop() {
 		network6Sink, errSink = xnetip.ParseIPv6Network("::/129")
 	}
+}
+
+// verifies that the marshaled text is the string form: prefix length
+// or colon-form mask by contiguity, suffix always present.
+func Test_IPv6Network_MarshalText_MatchesStringForm(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "contiguous prefix form", input: "2001:db8::/32", want: "2001:db8::/32"},
+		{name: "host route keeps the suffix", input: "::1/128", want: "::1/128"},
+		{name: "universe", input: "::/0", want: "::/0"},
+		{name: "all ones", input: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128", want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128"},
+		{name: "mapped address stays IPv6", input: "::ffff:1.2.3.4/120", want: "::ffff:1.2.3.0/120"},
+		{name: "non-contiguous colon form", input: "2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0", want: "2a02:6b8:c00::1234:0:0/ffff:ffff:ff00:0:ffff:ffff::"},
+		{name: "hole straddling bit 64", input: "2001:db8::/ffff:ffff:ffff:ff00:ff:ffff::", want: "2001:db8::/ffff:ffff:ffff:ff00:ff:ffff::"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			text, err := xnetip.MustParseIPv6Network(testCase.input).MarshalText()
+			require.NoError(t, err)
+			require.Equal(t, testCase.want, string(text))
+		})
+	}
+}
+
+// verifies that unmarshaling accepts every parser form, normalizes the
+// address under the mask and lands the value in the receiver.
+func Test_IPv6Network_UnmarshalText_AcceptsParserForms(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "prefix form", input: "2a02:6b8:c00::/40", want: "2a02:6b8:c00::/40"},
+		{name: "host bits normalized", input: "2001:db8::1/32", want: "2001:db8::/32"},
+		{name: "bare address", input: "2a02:6b8::2:242", want: "2a02:6b8::2:242/128"},
+		{name: "colon non-contiguous mask", input: "2001:db8::1/ffff:ffff::ffff", want: "2001:db8::1/ffff:ffff::ffff"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var network xnetip.IPv6Network
+			require.NoError(t, network.UnmarshalText([]byte(testCase.input)))
+			require.Equal(t, xnetip.MustParseIPv6Network(testCase.want), network)
+		})
+	}
+}
+
+// verifies that empty text is an error, because the zero value is the
+// valid universe network and must not appear out of a missing field.
+func Test_IPv6Network_UnmarshalText_EmptyTextIsError(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("2001:db8::/32")
+	err := network.UnmarshalText(nil)
+	require.ErrorIs(t, err, xnetip.ErrEmptyInput)
+	require.Equal(t, xnetip.MustParseIPv6Network("2001:db8::/32"), network)
+}
+
+// verifies that a failed unmarshal reports the parser's sentinel and
+// leaves the receiver untouched.
+func Test_IPv6Network_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		sentinel error
+	}{
+		{name: "zone", input: "fe80::1%eth0/64", sentinel: xnetip.ErrZone},
+		{name: "IPv4 text", input: "10.0.0.0/8", sentinel: xnetip.ErrAddrFamilyMismatch},
+		{name: "prefix overflow", input: "2001:db8::/129", sentinel: xnetip.ErrCIDROverflow},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseIPv6Network("2a02:6b8:c00::/40")
+			err := network.UnmarshalText([]byte(testCase.input))
+			require.ErrorIs(t, err, testCase.sentinel)
+			require.Equal(t, xnetip.MustParseIPv6Network("2a02:6b8:c00::/40"), network)
+		})
+	}
+}
+
+// verifies that a struct field round-trips through JSON as its text
+// form, non-contiguous masks included.
+func Test_IPv6Network_MarshalText_JSONStructRoundTrip(t *testing.T) {
+	type wrapper struct {
+		N xnetip.IPv6Network
+	}
+	cases := []struct {
+		name     string
+		network  string
+		wantJSON string
+	}{
+		{name: "contiguous", network: "2001:db8::/32", wantJSON: `{"N":"2001:db8::/32"}`},
+		{name: "non-contiguous", network: "2001:db8::/ffff:ffff::ffff:ffff:0:0", wantJSON: `{"N":"2001:db8::/ffff:ffff::ffff:ffff:0:0"}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			value := wrapper{N: xnetip.MustParseIPv6Network(testCase.network)}
+			encoded, err := json.Marshal(value)
+			require.NoError(t, err)
+			require.Equal(t, testCase.wantJSON, string(encoded))
+			var decoded wrapper
+			require.NoError(t, json.Unmarshal(encoded, &decoded))
+			require.Equal(t, value, decoded)
+		})
+	}
+}
+
+// verifies that the type works as a JSON map key, which encoding/json
+// routes through the text marshaler pair.
+func Test_IPv6Network_MarshalText_JSONMapKeyRoundTrip(t *testing.T) {
+	value := map[xnetip.IPv6Network]int{xnetip.MustParseIPv6Network("2001:db8::/32"): 1}
+	encoded, err := json.Marshal(value)
+	require.NoError(t, err)
+	require.Equal(t, `{"2001:db8::/32":1}`, string(encoded))
+	var decoded map[xnetip.IPv6Network]int
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, value, decoded)
+}
+
+// verifies that unmarshaling the marshaled text recovers the network
+// exactly and that the text is byte-identical to the string form.
+func Test_IPv6Network_MarshalText_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		text, err := network.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, []byte(network.String()), text)
+		var back xnetip.IPv6Network
+		require.NoError(t, back.UnmarshalText(text))
+		require.Equal(t, network, back)
+	})
+}
+
+// verifies that a JSON struct round trip preserves the network for
+// every mask shape.
+func Test_IPv6Network_MarshalText_JSONRoundTripProperty(t *testing.T) {
+	type wrapper struct {
+		N xnetip.IPv6Network
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		value := wrapper{N: genIPv6Network.Draw(t, "network")}
+		encoded, err := json.Marshal(value)
+		require.NoError(t, err)
+		var decoded wrapper
+		require.NoError(t, json.Unmarshal(encoded, &decoded))
+		require.Equal(t, value, decoded)
+	})
+}
+
+// verifies that on contiguous networks the marshaled text is
+// byte-identical to the netip prefix marshaling of the same network.
+func Test_IPv6Network_MarshalText_MatchesNetipPrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		bits, ok := network.PrefixLen()
+		if !ok {
+			return
+		}
+		stdText, err := netip.PrefixFrom(network.Addr(), bits).MarshalText()
+		require.NoError(t, err)
+		text, err := network.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, stdText, text)
+	})
+}
+
+// verifies the deliberate divergence from std: empty text unmarshals
+// into a zero netip prefix but is an error here.
+//
+// The zero netip prefix is invalid and safe to produce, while the zero
+// network here is the whole IPv6 universe.
+func Test_IPv6Network_UnmarshalText_EmptyTextDivergesFromNetip(t *testing.T) {
+	var stdPrefix netip.Prefix
+	require.NoError(t, stdPrefix.UnmarshalText(nil))
+	var network xnetip.IPv6Network
+	require.Error(t, network.UnmarshalText(nil))
+}
+
+// verifies that marshaling allocates exactly the returned slice,
+// whatever the mask's shape.
+func Test_IPv6Network_MarshalText_SingleAllocation(t *testing.T) {
+	contiguous := xnetip.MustParseIPv6Network("2001:db8::/32")
+	nonContiguous := xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff::ffff:ffff:0:0")
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = contiguous.MarshalText() })))
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = nonContiguous.MarshalText() })))
 }
