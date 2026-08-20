@@ -1925,3 +1925,218 @@ func Test_IPv6Network_MarshalText_SingleAllocation(t *testing.T) {
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = contiguous.MarshalText() })))
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = nonContiguous.MarshalText() })))
 }
+
+// verifies that a valid IPv6 netip.Prefix converts into the network
+// with the same address set, host bits cleared.
+func Test_IPv6NetworkFromPrefix_ConvertsValidPrefixes(t *testing.T) {
+	cases := []struct {
+		name   string
+		prefix netip.Prefix
+		want   xnetip.IPv6Network
+	}{
+		{
+			name:   "already masked /32",
+			prefix: netip.MustParsePrefix("2001:db8::/32"),
+			want:   xnetip.MustParseIPv6Network("2001:db8::/32"),
+		},
+		{
+			name:   "host bits cleared",
+			prefix: netip.MustParsePrefix("2001:db8::1/32"),
+			want:   xnetip.MustParseIPv6Network("2001:db8::/32"),
+		},
+		{
+			name:   "/0 is the zero value",
+			prefix: netip.MustParsePrefix("::/0"),
+			want:   xnetip.IPv6Network{},
+		},
+		{
+			name:   "host route /128",
+			prefix: netip.MustParsePrefix("::1/128"),
+			want:   xnetip.MustParseIPv6Network("::1/128"),
+		},
+		{
+			name:   "/64 run ends at the half boundary",
+			prefix: netip.MustParsePrefix("2001:db8:1:2::/64"),
+			want:   mustIPv6Network(t, "2001:db8:1:2::", "ffff:ffff:ffff:ffff::"),
+		},
+		{
+			name:   "unmasked PrefixFrom input",
+			prefix: netip.PrefixFrom(netip.MustParseAddr("2001:db8::ff"), 120),
+			want:   xnetip.MustParseIPv6Network("2001:db8::/120"),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, ok := xnetip.IPv6NetworkFromPrefix(testCase.prefix)
+			require.True(t, ok)
+			require.Equal(t, testCase.want, network)
+		})
+	}
+}
+
+// verifies that an IPv4-mapped prefix is IPv6 here and converts into
+// the mapped network, the netip family rule.
+func Test_IPv6NetworkFromPrefix_AcceptsIPv4MappedPrefix(t *testing.T) {
+	network, ok := xnetip.IPv6NetworkFromPrefix(netip.MustParsePrefix("::ffff:10.0.0.0/104"))
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv6Network("::ffff:10.0.0.0/104"), network)
+	require.True(t, network.IsIPv4MappedIPv6())
+}
+
+// verifies that the invalid zero prefix and a prefix whose address is
+// Is4 are rejected.
+func Test_IPv6NetworkFromPrefix_RejectsInvalidAndForeignFamily(t *testing.T) {
+	cases := []struct {
+		name   string
+		prefix netip.Prefix
+	}{
+		{name: "invalid zero prefix", prefix: netip.Prefix{}},
+		{name: "IPv4 prefix", prefix: netip.MustParsePrefix("10.0.0.0/8")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, ok := xnetip.IPv6NetworkFromPrefix(testCase.prefix)
+			require.False(t, ok)
+			require.Equal(t, xnetip.IPv6Network{}, network)
+		})
+	}
+}
+
+// verifies that a contiguous network converts to the already-masked
+// netip.Prefix carrying the same address set.
+func Test_IPv6Network_Prefix_ContiguousForms(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    netip.Prefix
+	}{
+		{
+			name:    "/40",
+			network: xnetip.MustParseIPv6Network("2a02:6b8:c00::/40"),
+			want:    netip.MustParsePrefix("2a02:6b8:c00::/40"),
+		},
+		{
+			name:    "universe /0",
+			network: xnetip.MustParseIPv6Network("::/0"),
+			want:    netip.MustParsePrefix("::/0"),
+		},
+		{
+			name:    "host route /128 is a single IP",
+			network: xnetip.MustParseIPv6Network("::1/128"),
+			want:    netip.MustParsePrefix("::1/128"),
+		},
+		{
+			name:    "IPv4-mapped network stays IPv6",
+			network: xnetip.MustParseIPv6Network("::ffff:10.0.0.0/104"),
+			want:    netip.MustParsePrefix("::ffff:10.0.0.0/104"),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.True(t, ok)
+			require.Equal(t, testCase.want, prefix)
+			require.Equal(t, prefix.Masked(), prefix)
+		})
+	}
+	singleIP, ok := xnetip.MustParseIPv6Network("::1/128").Prefix()
+	require.True(t, ok)
+	require.True(t, singleIP.IsSingleIP())
+}
+
+// verifies that a non-contiguous mask has no prefix form and answers
+// the invalid zero netip.Prefix, the hole straddling bit 64 included.
+func Test_IPv6Network_Prefix_NonContiguousHasNone(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+	}{
+		{name: "two runs", network: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ff00::ffff:ffff:0:0")},
+		{name: "hole straddling bit 64", network: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ffff:ff00:ff:ffff::")},
+		{name: "alternating", network: xnetip.MustParseIPv6Network("::/ffff:0:ffff:0:ffff:0:ffff:0")},
+		{name: "single low bit", network: xnetip.MustParseIPv6Network("::/::1")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.False(t, ok)
+			require.Equal(t, netip.Prefix{}, prefix)
+		})
+	}
+}
+
+// verifies that any valid IPv6 prefix converts and converts back to
+// its masked self, with the result normalized and contiguous.
+func Test_IPv6NetworkFromPrefix_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		stdPrefix := genIPv6Prefix.Draw(t, "prefix")
+		network, ok := xnetip.IPv6NetworkFromPrefix(stdPrefix)
+		require.True(t, ok)
+		require.True(t, network.IsContiguous())
+		require.Equal(t, stdPrefix.Masked().Addr(), network.Addr())
+		back, ok := network.Prefix()
+		require.True(t, ok)
+		require.Equal(t, stdPrefix.Masked(), back)
+	})
+}
+
+// verifies that a prefix form exists exactly for contiguous masks,
+// whatever the drawn mask shape.
+func Test_IPv6Network_Prefix_SomeIffContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		prefix, ok := network.Prefix()
+		require.Equal(t, network.IsContiguous(), ok)
+		if !ok {
+			require.Equal(t, netip.Prefix{}, prefix)
+		}
+	})
+}
+
+// verifies that a contiguous network survives the round trip through
+// netip.Prefix unchanged.
+func Test_IPv6Network_Prefix_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		stdPrefix, ok := network.Prefix()
+		if !ok {
+			return
+		}
+		back, ok := xnetip.IPv6NetworkFromPrefix(stdPrefix)
+		require.True(t, ok)
+		require.Equal(t, network, back)
+	})
+}
+
+// verifies that the converted prefix length agrees with the network's
+// own prefix length, the net/netip view of the same mask.
+func Test_IPv6Network_Prefix_BitsMatchPrefixLenProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		stdPrefix, ok := network.Prefix()
+		if !ok {
+			return
+		}
+		bits, bitsOk := network.PrefixLen()
+		require.True(t, bitsOk)
+		require.Equal(t, bits, stdPrefix.Bits())
+	})
+}
+
+// verifies that both conversion directions allocate nothing on any
+// outcome.
+func Test_IPv6NetworkFromPrefix_AllocationFree(t *testing.T) {
+	valid := netip.MustParsePrefix("2001:db8::/32")
+	foreign := netip.MustParsePrefix("10.0.0.0/8")
+	requireNoAllocs(t, func() { network6Sink, okSink = xnetip.IPv6NetworkFromPrefix(valid) })
+	requireNoAllocs(t, func() { network6Sink, okSink = xnetip.IPv6NetworkFromPrefix(foreign) })
+}
+
+// verifies that converting out to a netip.Prefix allocates nothing,
+// whatever the mask's shape.
+func Test_IPv6Network_Prefix_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseIPv6Network("2a02:6b8:c00::/40")
+	nonContiguous := xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ff00::ffff:ffff:0:0")
+	requireNoAllocs(t, func() { prefixSink, okSink = contiguous.Prefix() })
+	requireNoAllocs(t, func() { prefixSink, okSink = nonContiguous.Prefix() })
+}

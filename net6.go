@@ -74,6 +74,28 @@ func IPv6NetworkFromCIDR(addr netip.Addr, bits int) (IPv6Network, error) {
 	return fromBits6(addrKernel, ipv6Addr{uint128MaskFromPrefix(bits)}), nil
 }
 
+// IPv6NetworkFromPrefix converts a netip.Prefix into an IPv6Network.
+//
+// The result is normalized: host bits of the prefix address are
+// cleared, the same network netip.Prefix.Masked would report. An
+// IPv4-mapped IPv6 prefix (::ffff:a.b.c.d/n) is IPv6 and is accepted,
+// and a zone never appears because netip.Prefix carries none. ok is
+// false when the prefix is invalid or its address is Is4 — convert
+// that one through IPv4NetworkFromPrefix instead. The inverse of
+// Prefix.
+func IPv6NetworkFromPrefix(p netip.Prefix) (IPv6Network, bool) {
+	if !p.IsValid() || !p.Addr().Is6() {
+		return IPv6Network{}, false
+	}
+	// A valid Is6 prefix carries a length within 0 through 128, so the
+	// constructor cannot fail; its error answers false, not a panic.
+	network, err := IPv6NetworkFromCIDR(p.Addr(), p.Bits())
+	if err != nil {
+		return IPv6Network{}, false
+	}
+	return network, true
+}
+
 // IPv6NetworkFromAddr returns the host route that contains exactly
 // addr.
 //
@@ -230,6 +252,20 @@ func (m IPv6Network) PrefixLen() (int, bool) {
 		return 0, false
 	}
 	return m.mask.bits.LeadingOnes(), true
+}
+
+// Prefix returns the network as a netip.Prefix.
+//
+// ok is false when the mask is not contiguous, because netip.Prefix
+// can only express prefix lengths, and the first result is then the
+// invalid zero netip.Prefix. The returned prefix is already masked
+// and carries no zone. The inverse of IPv6NetworkFromPrefix.
+func (m IPv6Network) Prefix() (netip.Prefix, bool) {
+	bits, ok := m.PrefixLen()
+	if !ok {
+		return netip.Prefix{}, false
+	}
+	return netip.PrefixFrom(m.Addr(), bits), true
 }
 
 // String returns the text form of the network, see AppendTo.
