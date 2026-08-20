@@ -70,6 +70,28 @@ func IPv6NetworkFromCIDR(addr netip.Addr, bits int) (IPv6Network, error) {
 	return fromBits6(addrKernel, ipv6Addr{uint128MaskFromPrefix(bits)}), nil
 }
 
+// IPv6NetworkFromAddr returns the host route that contains exactly
+// addr.
+//
+// The mask is all ones (/128), so the result is normalized by
+// construction and no address bit is cleared. addr must be Is6 (an
+// IPv4-mapped address is IPv6, a zone is dropped silently): an Is4
+// address or the invalid zero netip.Addr is rejected with
+// ErrAddrFamilyMismatch.
+func IPv6NetworkFromAddr(addr netip.Addr) (IPv6Network, error) {
+	addrKernel, ok := ipv6AddrFromNetip(addr)
+	if !ok {
+		return IPv6Network{}, wrapParseError("IPv6NetworkFromAddr", addr.String(), ErrAddrFamilyMismatch, nil)
+	}
+	return IPv6Network{addr: addrKernel, mask: ipv6AllBits}, nil
+}
+
+// ipv6AllBits is the all-ones mask, the mask of a host route.
+//
+// Pairing an address with it keeps every address bit, so a host route
+// is normalized by construction (../netip/src/net.rs:28).
+var ipv6AllBits = ipv6AddrFromBits(^uint64(0), ^uint64(0))
+
 // Addr returns the network address (already normalized by the mask) as
 // an Is6 netip.Addr.
 func (m IPv6Network) Addr() netip.Addr {

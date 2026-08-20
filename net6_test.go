@@ -2,6 +2,7 @@ package xnetip_test
 
 import (
 	"encoding/binary"
+	"math"
 	"net/netip"
 	"testing"
 
@@ -600,5 +601,123 @@ func Test_IPv6NetworkFromCIDR_AllocationFree(t *testing.T) {
 	addr := netip.MustParseAddr("2001:db8::1")
 	var err error
 	requireNoAllocs(t, func() { network6Sink, err = xnetip.IPv6NetworkFromCIDR(addr, 64) })
+	require.NoError(t, err)
+}
+
+// verifies that the host-route constructor pairs the address with the
+// all-ones mask without clearing a single address bit.
+//
+// A non-contiguous mask table is not applicable to this constructor:
+// the mask is fixed to all ones, the universe of bits, so the case
+// with set bits on both halves pins that neither half is dropped.
+func Test_IPv6NetworkFromAddr_BuildsHostRoute(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+	}{
+		{name: "documentation host route", addr: "2001:db8::1"},
+		{name: "loopback", addr: "::1"},
+		{name: "unspecified address", addr: "::"},
+		{name: "all ones address", addr: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+		{name: "bits on both halves", addr: "2a02:6b8:c00:1:2:3:4:1"},
+		{name: "IPv4-mapped address stays IPv6", addr: "::ffff:192.168.0.1"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPv6NetworkFromAddr(netip.MustParseAddr(testCase.addr))
+			require.NoError(t, err)
+			require.Equal(t, netip.MustParseAddr(testCase.addr), network.Addr())
+			require.Equal(t, netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), network.Mask())
+		})
+	}
+}
+
+// verifies that the host route carries the exact bit pattern of its
+// address on both halves and the all-ones mask pattern.
+func Test_IPv6NetworkFromAddr_PreservesBitPattern(t *testing.T) {
+	network, err := xnetip.IPv6NetworkFromAddr(netipAddrFrom6Bits(0x20010DB800000000, 0x1))
+	require.NoError(t, err)
+	require.Equal(t, netipAddrFrom6Bits(0x20010DB800000000, 0x1), network.Addr())
+	require.Equal(t, netipAddrFrom6Bits(math.MaxUint64, math.MaxUint64), network.Mask())
+}
+
+// verifies that the host route equals the same network built through
+// the checked normalizing constructor.
+func Test_IPv6NetworkFromAddr_EqualsCheckedConstructor(t *testing.T) {
+	fromAddr, err := xnetip.IPv6NetworkFromAddr(netip.MustParseAddr("2001:db8::1"))
+	require.NoError(t, err)
+	fromPair, err := xnetip.IPv6NetworkFrom(
+		netip.MustParseAddr("2001:db8::1"),
+		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
+	)
+	require.NoError(t, err)
+	require.Equal(t, fromPair, fromAddr)
+}
+
+// verifies that an Is4 address or the invalid zero address yields the
+// family-mismatch sentinel and the zero network.
+func Test_IPv6NetworkFromAddr_RejectsForeignFamily(t *testing.T) {
+	cases := []struct {
+		name string
+		addr netip.Addr
+	}{
+		{name: "IPv4 address", addr: netip.MustParseAddr("1.2.3.4")},
+		{name: "invalid zero address", addr: netip.Addr{}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPv6NetworkFromAddr(testCase.addr)
+			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+			require.Equal(t, xnetip.IPv6Network{}, network)
+		})
+	}
+}
+
+// verifies that every Is6 address lifts into its host route with the
+// address preserved and the mask all ones.
+//
+// The result must also equal the same network built through the
+// checked normalizing constructor, so the two entry points agree.
+func Test_IPv6NetworkFromAddr_HostRouteProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr6.Draw(t, "addr")
+		network, err := xnetip.IPv6NetworkFromAddr(addr)
+		require.NoError(t, err)
+		require.Equal(t, addr, network.Addr())
+		require.Equal(t, netipAddrFrom6Bits(math.MaxUint64, math.MaxUint64), network.Mask())
+		fromPair, err := xnetip.IPv6NetworkFrom(addr, netipAddrFrom6Bits(math.MaxUint64, math.MaxUint64))
+		require.NoError(t, err)
+		require.Equal(t, fromPair, network)
+	})
+}
+
+// verifies that every Is4 address is rejected with the family-mismatch
+// sentinel.
+func Test_IPv6NetworkFromAddr_RejectsIs4Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr")
+		network, err := xnetip.IPv6NetworkFromAddr(addr)
+		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+		require.Equal(t, xnetip.IPv6Network{}, network)
+	})
+}
+
+// verifies that the host route agrees with the net/netip oracle for a
+// full-length masked prefix.
+func Test_IPv6NetworkFromAddr_MatchesNetipHostPrefix(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr6.Draw(t, "addr")
+		network, err := xnetip.IPv6NetworkFromAddr(addr)
+		require.NoError(t, err)
+		require.Equal(t, netip.PrefixFrom(addr, 128).Masked().Addr(), network.Addr())
+	})
+}
+
+// verifies that the host-route constructor allocates nothing on the
+// success path, per the allocation-free runtime contract.
+func Test_IPv6NetworkFromAddr_AllocationFree(t *testing.T) {
+	addr := netip.MustParseAddr("2001:db8::1")
+	var err error
+	requireNoAllocs(t, func() { network6Sink, err = xnetip.IPv6NetworkFromAddr(addr) })
 	require.NoError(t, err)
 }
