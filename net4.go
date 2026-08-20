@@ -72,3 +72,8 @@ func (m IPv4Network) ToIPv6Mapped() IPv6Network {
 	addrHi, addrLo := m.addr.ToIPv6Mapped().Bits()
 	return IPv6NetworkFromBits(addrHi, addrLo, ^uint64(0), 0xffffffff_00000000|uint64(m.mask.Bits()))
 }
+
+// IPNetwork returns this IPv4 network as an IPNetwork.
+func (m IPv4Network) IPNetwork() IPNetwork {
+	return IPNetworkFrom4(m)
+}

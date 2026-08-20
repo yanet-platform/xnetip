@@ -95,3 +95,8 @@ func (m IPv6Network) ToIPv4Mapped() (IPv4Network, bool) {
 	_, maskLo := m.mask.Bits()
 	return IPv4NetworkFromBits(uint32(addrLo), uint32(maskLo)), true
 }
+
+// IPNetwork returns this IPv6 network as an IPNetwork.
+func (m IPv6Network) IPNetwork() IPNetwork {
+	return IPNetworkFrom6(m)
+}

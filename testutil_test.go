@@ -234,14 +234,28 @@ var genIPv6Prefix = rapid.Custom(func(t *rapid.T) netip.Prefix {
 	return netip.PrefixFrom(address, bits)
 })
 
+// genIPNetwork draws a family-agnostic network, wrapping an IPv4 or an
+// IPv6 draw with equal probability.
+//
+// Both branches reuse the concrete network generators, so every mask
+// shape and boundary pattern they draw flows through, and each drawn
+// value has already passed their normalization assertions.
+var genIPNetwork = rapid.Custom(func(t *rapid.T) xnetip.IPNetwork {
+	if rapid.Bool().Draw(t, "is4") {
+		return xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
+	}
+	return xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+})
+
 // Sinks keep the measured closures' results alive, so the compiler cannot
 // optimise the work under test away.
 var (
-	wordSink     uint32
-	word64Sink   uint64
-	bytesSink    []byte
-	networkSink  xnetip.IPv4Network
-	network6Sink xnetip.IPv6Network
-	addrSink     netip.Addr
-	okSink       bool
+	wordSink      uint32
+	word64Sink    uint64
+	bytesSink     []byte
+	networkSink   xnetip.IPv4Network
+	network6Sink  xnetip.IPv6Network
+	ipNetworkSink xnetip.IPNetwork
+	addrSink      netip.Addr
+	okSink        bool
 )
