@@ -4320,3 +4320,126 @@ func Test_Network_SupernetFor_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = four[0].SupernetFor(four[1:]) })
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = six[0].SupernetFor(six[1:]) })
 }
+
+// verifies that the mask is truncated at its first zero bit with the
+// address family preserved.
+func Test_Network_ToContiguous_TruncatesKeepingFamily(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		want    string
+		wantIs4 bool
+	}{
+		{name: "IPv4 two-run mask", input: "192.168.0.1/255.255.0.255", want: "192.168.0.0/16", wantIs4: true},
+		{name: "IPv6 geo mask", input: "2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0", want: "2001:db8::/40", wantIs4: false},
+		{name: "IPv4 already contiguous", input: "10.0.0.0/8", want: "10.0.0.0/8", wantIs4: true},
+		{name: "IPv6 already contiguous", input: "2001:db8::/32", want: "2001:db8::/32", wantIs4: false},
+		{name: "IPv4 universe", input: "0.0.0.0/0", want: "0.0.0.0/0", wantIs4: true},
+		{name: "IPv6 universe", input: "::/0", want: "::/0", wantIs4: false},
+		{name: "IPv4 mask with empty leading run", input: "0.0.0.1/0.0.0.255", want: "0.0.0.0/0", wantIs4: true},
+		{name: "IPv4-mapped network stays IPv6", input: "::ffff:192.168.0.1/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff0f", want: "::ffff:192.168.0.0/120", wantIs4: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			block := xnetip.MustParseNetwork(testCase.input).ToContiguous()
+			require.Equal(t, xnetip.MustParseContiguous(testCase.want), block)
+			require.Equal(t, testCase.wantIs4, block.Network().Is4())
+		})
+	}
+}
+
+// verifies that the zero network truncates to the zero wrapper.
+func Test_Network_ToContiguous_ZeroValue(t *testing.T) {
+	require.Equal(t, xnetip.Contiguous[xnetip.Network]{}, xnetip.Network{}.ToContiguous())
+}
+
+// verifies that a non-contiguous mask of either family keeps only
+// its leading run of ones.
+func Test_Network_ToContiguous_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "IPv4 alternating mask", input: "170.85.170.85/170.85.170.85", want: "128.0.0.0/1"},
+		{name: "IPv6 alternating groups", input: "2001:0:db8:0:1:0:2:0/ffff:0:ffff:0:ffff:0:ffff:0", want: "2001::/16"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseNetwork(testCase.input)
+			require.Equal(t, xnetip.MustParseContiguous(testCase.want), network.ToContiguous())
+		})
+	}
+}
+
+// verifies that truncating the family-agnostic form is exactly the
+// concrete truncation lifted into it, for both families.
+//
+// The IPv4 half is the delegation argument of the mapped storage:
+// the stored mask pins its top 96 bits, so truncating the stored
+// form truncates the IPv4 mask exactly.
+func Test_Network_ToContiguous_MatchesConcreteProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network4 := genNetwork4.Draw(t, "network4")
+		require.Equal(
+			t,
+			xnetip.NetworkFrom4(network4.ToContiguous().Network()),
+			xnetip.NetworkFrom4(network4).ToContiguous().Network(),
+		)
+		network6 := genNetwork6.Draw(t, "network6")
+		require.Equal(
+			t,
+			xnetip.NetworkFrom6(network6.ToContiguous().Network()),
+			xnetip.NetworkFrom6(network6).ToContiguous().Network(),
+		)
+	})
+}
+
+// verifies that every truncation keeps the address family and yields
+// a contiguous network, pinning the blind wrap.
+func Test_Network_ToContiguous_FamilyAndContiguityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork.Draw(t, "network")
+		block := network.ToContiguous()
+		require.Equal(t, network.Is4(), block.Network().Is4())
+		require.True(t, block.Network().IsContiguous())
+	})
+}
+
+// verifies that truncating an already truncated network changes
+// nothing.
+func Test_Network_ToContiguous_IdempotentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork.Draw(t, "network")
+		block := network.ToContiguous()
+		require.Equal(t, block, block.Network().ToContiguous())
+	})
+}
+
+// verifies that the block always contains the network it widened.
+func Test_Network_ToContiguous_ContainsOriginalProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork.Draw(t, "network")
+		require.True(t, network.ToContiguous().Network().Contains(network))
+	})
+}
+
+// verifies that on contiguous input the widening conversion equals
+// the exact one and changes nothing.
+func Test_Network_ToContiguous_AgreesWithContiguousFromProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := genContiguous.Draw(t, "block")
+		require.Equal(t, block, block.Network().ToContiguous())
+		exact, ok := xnetip.ContiguousFrom(block.Network())
+		require.True(t, ok)
+		require.Equal(t, exact, block.Network().ToContiguous())
+	})
+}
+
+// verifies that truncation allocates nothing for either family.
+func Test_Network_ToContiguous_AllocationFree(t *testing.T) {
+	ipv4 := xnetip.MustParseNetwork("192.168.0.1/255.255.0.255")
+	ipv6 := xnetip.MustParseNetwork("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")
+	requireNoAllocs(t, func() { contiguousSink = ipv4.ToContiguous() })
+	requireNoAllocs(t, func() { contiguousSink = ipv6.ToContiguous() })
+}

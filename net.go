@@ -657,6 +657,27 @@ func (m Network) Prefix() (netip.Prefix, bool) {
 	return m.network.Prefix()
 }
 
+// ToContiguous returns the CIDR block whose mask is the leading run
+// of one bits of this mask, keeping the address family.
+//
+// See Network4.ToContiguous and Network6.ToContiguous for the
+// per-family contract. An IPv4 network stays an IPv4 network. The
+// exact, non-widening conversion is ContiguousFrom.
+func (m Network) ToContiguous() Contiguous[Network] {
+	// One truncation of the stored form serves both families and
+	// keeps the family flag.
+	//
+	// The mapped mask of an IPv4 network pins its top 96 bits as
+	// ones, so the stored leading run is 96 plus the IPv4 run:
+	// truncating it truncates the IPv4 mask exactly, keeps those top
+	// mask bits and leaves the mapped address prefix untouched, so
+	// the storage invariant survives.
+	return Contiguous[Network]{network: Network{
+		network: m.network.ToContiguous().Network(),
+		is4:     m.is4,
+	}}
+}
+
 // String returns the text form of the network, see AppendTo.
 func (m Network) String() string {
 	// The buffer covers the longest form of either family, so the
