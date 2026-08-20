@@ -296,6 +296,23 @@ var genIPv6Prefix = rapid.Custom(func(t *rapid.T) netip.Prefix {
 	return netip.PrefixFrom(address, bits)
 })
 
+// genIPv6BicontiguousNetwork draws a network whose mask is a product
+// of a high-half prefix and a low-half prefix.
+//
+// Both per-half lengths are uniform over 0 through 64 and the address
+// is uniform, so the draws cover the degenerate shapes — a contiguous
+// mask, an empty half, a host route — alongside the two-run ones.
+var genIPv6BicontiguousNetwork = rapid.Custom(func(t *rapid.T) xnetip.IPv6Network {
+	hiPrefix := rapid.IntRange(0, 64).Draw(t, "hi prefix")
+	loPrefix := rapid.IntRange(0, 64).Draw(t, "lo prefix")
+	network, err := xnetip.IPv6NetworkFrom(
+		netipAddrFrom6Bits(rapid.Uint64().Draw(t, "addr hi"), rapid.Uint64().Draw(t, "addr lo")),
+		netipAddrFrom6Bits(^uint64(0)<<(64-hiPrefix), ^uint64(0)<<(64-loPrefix)),
+	)
+	require.NoError(t, err)
+	return network
+})
+
 // genIPNetwork draws a family-agnostic network, wrapping an IPv4 or an
 // IPv6 draw with equal probability.
 //

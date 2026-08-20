@@ -3240,3 +3240,131 @@ func Test_IPv6Network_LastAddr_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { addrSink = contiguous.LastAddr() })
 	requireNoAllocs(t, func() { addrSink = nonContiguous.LastAddr() })
 }
+
+// verifies that masks made of one leading run per 64-bit half are
+// bi-contiguous, the fully contiguous and boundary shapes included.
+func Test_IPv6Network_IsBicontiguous_PerHalfLeadingRuns(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    bool
+	}{
+		{name: "/40 by /32 classifier mask", network: xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), want: true},
+		{name: "/40 by /16 classifier mask", network: xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0:0/ffff:ffff:ff00::ffff:0:0:0"), want: true},
+		{name: "zero mask", network: xnetip.MustParseIPv6Network("::/::"), want: true},
+		{name: "all-ones mask of a host route", network: xnetip.MustParseIPv6Network("::1"), want: true},
+		{name: "lone bit at the top of the low half", network: mustIPv6Network(t, "::", "::8000:0:0:0"), want: true},
+		{name: "contiguous /40", network: xnetip.MustParseIPv6Network("2a02:6b8:c00::/40"), want: true},
+		{name: "contiguous /64", network: xnetip.MustParseIPv6Network("2001:db8::/64"), want: true},
+		{name: "contiguous /65", network: xnetip.MustParseIPv6Network("2001:db8::/65"), want: true},
+		{name: "lone bit at the very bottom", network: mustIPv6Network(t, "::", "::1"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.IsBicontiguous())
+		})
+	}
+}
+
+// verifies that a run ending inside a half breaks bi-contiguity while
+// a mask living entirely in the low half keeps it.
+func Test_IPv6Network_IsBicontiguous_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    bool
+	}{
+		{name: "hole inside the low half", network: xnetip.MustParseIPv6Network("2a02:6b8:0:0:1234:5678::/ffff:ffff:0:0:f0f0:f0f0:f0f0:f0f0"), want: false},
+		{name: "hole inside the high half", network: mustIPv6Network(t, "::", "f0f0:f0f0:f0f0:f0f0::"), want: false},
+		{name: "low run below the top of the low half", network: mustIPv6Network(t, "::", "ffff:ffff:ffff:ffff:0:ffff::"), want: false},
+		{name: "alternating mask", network: mustIPv6Network(t, "::", "aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"), want: false},
+		{name: "low run in the middle under a full high half", network: mustIPv6Network(t, "::", "ffff:ffff:ffff:ffff:00ff:ff00::"), want: false},
+		{name: "empty high half with a full low half", network: mustIPv6Network(t, "::", "::ffff:ffff:ffff:ffff"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.IsBicontiguous())
+		})
+	}
+}
+
+// referenceIsBicontiguous is the independent per-half oracle for the
+// run-top formula.
+//
+// Each 64-bit half must be a run of leading ones on its own, checked
+// with the contiguity trick applied separately per half.
+func referenceIsBicontiguous(maskHi, maskLo uint64) bool {
+	isContiguous64 := func(mask uint64) bool { return mask|(mask-1) == ^uint64(0) }
+	return isContiguous64(maskHi) && isContiguous64(maskLo)
+}
+
+// verifies that the predicate agrees with the per-half oracle on
+// every mask shape the network generator draws.
+func Test_IPv6Network_IsBicontiguous_MatchesReferenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		maskBytes := network.Mask().As16()
+		maskHi := binary.BigEndian.Uint64(maskBytes[:8])
+		maskLo := binary.BigEndian.Uint64(maskBytes[8:])
+		require.Equal(t, referenceIsBicontiguous(maskHi, maskLo), network.IsBicontiguous())
+	})
+}
+
+// verifies constructively that every product of a high-half prefix
+// and a low-half prefix is bi-contiguous, by exhausting all pairs.
+func Test_IPv6Network_IsBicontiguous_AcceptsEveryPrefixPair(t *testing.T) {
+	for hiPrefix := range 65 {
+		for loPrefix := range 65 {
+			network, err := xnetip.IPv6NetworkFrom(
+				netipAddrFrom6Bits(0x2a0206b80c000000, 0x123400000000abcd),
+				netipAddrFrom6Bits(^uint64(0)<<(64-hiPrefix), ^uint64(0)<<(64-loPrefix)),
+			)
+			require.NoError(t, err)
+			require.True(t, network.IsBicontiguous(), "hi %d lo %d", hiPrefix, loPrefix)
+		}
+	}
+}
+
+// verifies that every contiguous mask is bi-contiguous: its low half
+// is all ones or all zeros, both single leading runs.
+func Test_IPv6Network_IsBicontiguous_ImpliedByContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		if network.IsContiguous() {
+			require.True(t, network.IsBicontiguous())
+		}
+	})
+}
+
+// verifies that every draw of the bi-contiguous generator satisfies
+// the predicate, whatever the address.
+func Test_IPv6Network_IsBicontiguous_GeneratorDrawsSatisfyProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6BicontiguousNetwork.Draw(t, "network")
+		require.True(t, network.IsBicontiguous())
+	})
+}
+
+// verifies that the predicate allocates nothing on either outcome.
+func Test_IPv6Network_IsBicontiguous_AllocationFree(t *testing.T) {
+	bicontiguous := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
+	nonBicontiguous := mustIPv6Network(t, "::", "f0f0:f0f0:f0f0:f0f0::")
+	requireNoAllocs(t, func() { okSink = bicontiguous.IsBicontiguous() })
+	requireNoAllocs(t, func() { okSink = nonBicontiguous.IsBicontiguous() })
+}
+
+func BenchmarkIPv6Network_IsBicontiguous_Bicontiguous(b *testing.B) {
+	network := xnetip.MustParseIPv6Network("2a02:1a1:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = network.IsBicontiguous()
+	}
+}
+
+func BenchmarkIPv6Network_IsBicontiguous_NonBicontiguous(b *testing.B) {
+	network := mustIPv6Network(b, "f0f0:f0f0:f0f0:f0f0::", "f0f0:f0f0:f0f0:f0f0::")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = network.IsBicontiguous()
+	}
+}

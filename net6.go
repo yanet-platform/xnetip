@@ -360,6 +360,23 @@ func (m IPv6Network) IsContiguous() bool {
 	return m.mask.bits.IsContiguousMask()
 }
 
+// IsBicontiguous reports whether each 64-bit half of the mask is a
+// run of leading ones on its own.
+//
+// Such a mask describes a product of a high-half prefix and a
+// low-half prefix, the shape of site-by-subnet classifiers. Every
+// contiguous mask is bi-contiguous — its low half is all ones or all
+// zeros — but the converse is false. The check uses the run-top
+// property: a set bit whose upper neighbour is clear ends a maximal
+// run of ones, and the mask is bi-contiguous exactly when every run
+// ends at bit 127 or at bit 63, so clearing those two positions from
+// the run tops must leave nothing.
+func (m IPv6Network) IsBicontiguous() bool {
+	mask := m.mask.bits
+	runTops := mask.AndNot(mask.Shr(1))
+	return runTops.AndNot(uint128FromHalves(1<<63, 1<<63)).IsZero()
+}
+
 // PrefixLen returns the prefix length of the mask when the mask is
 // contiguous.
 //
