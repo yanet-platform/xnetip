@@ -415,6 +415,54 @@ func (m Network6) IsDisjoint(other Network6) bool {
 	return !m.Intersects(other)
 }
 
+// Difference returns the networks whose union is the set difference
+// m \ other: every address of m that is not in other.
+//
+// The parts are pairwise disjoint and masks may be non-contiguous.
+// With d the mask bits fixed by the intersection but free in m, there
+// are exactly popcount(d) parts when the two overlap, none when m is
+// a subset of other, and m itself when they are disjoint — the
+// minimum number of networks that can represent the difference.
+// Parts are yielded from the most significant bit of d downwards,
+// each mask adding one more bit of d. The sequence is allocation-free
+// and re-iterable.
+func (m Network6) Difference(other Network6) iter.Seq[Network6] {
+	return func(yield func(Network6) bool) {
+		// Disjoint operands share nothing, so the difference is the
+		// whole receiver, yielded as is.
+		intersected, ok := m.Intersection(other)
+		if !ok {
+			yield(m)
+			return
+		}
+		// The peel flips one pending bit of the intersection address
+		// per step, highest first, and fixes it into the growing mask.
+		//
+		// Every pending bit is fixed by the intersection but free in
+		// the receiver, so each flip names the part of the receiver
+		// that agrees with the overlap on the bits above and differs
+		// at the flipped one: the parts are pairwise disjoint and
+		// cover the difference exactly. No pending bit means the
+		// receiver is a subset and nothing is yielded. The masking
+		// AND normalizes each part's address.
+		addr := intersected.addr.bits
+		mask := m.mask.bits
+		remaining := intersected.mask.bits.AndNot(mask)
+		for !remaining.IsZero() {
+			bit := uint128Bit(127 - remaining.LeadingZeros())
+			mask = mask.Or(bit)
+			part := Network6{
+				addr: addr6{addr.Xor(bit).And(mask)},
+				mask: addr6{mask},
+			}
+			if !yield(part) {
+				return
+			}
+			remaining = remaining.Xor(bit)
+		}
+	}
+}
+
 // IsAdjacent reports whether the two networks share a mask and differ
 // in exactly one masked bit.
 //

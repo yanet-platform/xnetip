@@ -1714,6 +1714,485 @@ func Test_Network6_IsDisjoint_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { okSink = left.IsDisjoint(right) })
 }
 
+// verifies that disjoint operands yield the source network once.
+//
+// With nothing shared, the difference is the whole minuend. The
+// suites for this sequence are forward-only: the back-end pins of a
+// double-ended cursor have no iter.Seq analogue, so none appear
+// here.
+func Test_Network6_Difference_DisjointYieldsSource(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001:db8::/32")
+	other := xnetip.MustParseNetwork6("fe80::/10")
+	require.Equal(t, []xnetip.Network6{source}, slices.Collect(source.Difference(other)))
+}
+
+// verifies that subtracting a superset leaves nothing.
+func Test_Network6_Difference_SubsetIsEmpty(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001:db8::/64")
+	other := xnetip.MustParseNetwork6("2001:db8::/48")
+	require.Empty(t, slices.Collect(source.Difference(other)))
+}
+
+// verifies that a network minus itself is empty.
+func Test_Network6_Difference_SelfIsEmpty(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001:db8::/32")
+	require.Empty(t, slices.Collect(source.Difference(source)))
+}
+
+// verifies that subtracting a /64 from its /48 superset yields 16
+// networks satisfying every part invariant.
+func Test_Network6_Difference_SupersetInvariants(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001:db8::/48")
+	other := xnetip.MustParseNetwork6("2001:db8::/64")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 16)
+	requireIPv6DifferenceParts(t, source, other, parts)
+}
+
+// requireIPv6DifferenceParts asserts the invariants every difference
+// part must satisfy.
+//
+// Each part must lie inside the source and be disjoint from the
+// subtracted network, and the parts must be pairwise disjoint.
+func requireIPv6DifferenceParts(t require.TestingT, source, other xnetip.Network6, parts []xnetip.Network6) {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	for _, part := range parts {
+		require.True(t, source.Contains(part), "part %v not in source", part)
+		require.True(t, part.IsDisjoint(other), "part %v intersects the other network", part)
+	}
+	for first := range parts {
+		for second := first + 1; second < len(parts); second++ {
+			require.True(t, parts[first].IsDisjoint(parts[second]),
+				"parts %v and %v overlap", parts[first], parts[second])
+		}
+	}
+}
+
+// verifies that the universe minus one host peels one contiguous
+// network per address bit, 64 on each side of the half boundary.
+func Test_Network6_Difference_UniverseMinusHost(t *testing.T) {
+	source := xnetip.MustParseNetwork6("::/0")
+	other := xnetip.MustParseNetwork6("2001:db8::1/128")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 128)
+	for _, part := range parts {
+		require.True(t, part.IsContiguous(), "part %v not contiguous", part)
+		require.True(t, source.Contains(part), "part %v not in source", part)
+		require.True(t, part.IsDisjoint(other), "part %v intersects the host", part)
+	}
+}
+
+// verifies that a host route minus the universe is empty.
+func Test_Network6_Difference_HostMinusUniverse(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001:db8::1/128")
+	other := xnetip.MustParseNetwork6("::/0")
+	require.Empty(t, slices.Collect(source.Difference(other)))
+}
+
+// verifies that two equal host routes leave nothing.
+func Test_Network6_Difference_HostsSame(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001:db8::1/128")
+	other := xnetip.MustParseNetwork6("2001:db8::1/128")
+	require.Empty(t, slices.Collect(source.Difference(other)))
+}
+
+// verifies that two different host routes yield the source alone.
+func Test_Network6_Difference_HostsDifferent(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001:db8::1/128")
+	other := xnetip.MustParseNetwork6("2001:db8::2/128")
+	require.Equal(t, []xnetip.Network6{source}, slices.Collect(source.Difference(other)))
+}
+
+// verifies the documented peel order on a hand-checked head and tail.
+//
+// The universe minus one host starts at /1 with the host's top bit
+// flipped, walks one prefix length per step and ends at the /128
+// flipping the host's last bit.
+func Test_Network6_Difference_UniverseMinusHostExactHeadAndTail(t *testing.T) {
+	source := xnetip.MustParseNetwork6("::/0")
+	other := xnetip.MustParseNetwork6("2001:db8::1/128")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 128)
+	require.Equal(t, xnetip.MustParseNetwork6("8000::/1"), parts[0])
+	require.Equal(t, xnetip.MustParseNetwork6("4000::/2"), parts[1])
+	require.Equal(t, xnetip.MustParseNetwork6("::/3"), parts[2])
+	require.Equal(t, xnetip.MustParseNetwork6("3000::/4"), parts[3])
+	require.Equal(t, xnetip.MustParseNetwork6("2001:db8::/128"), parts[127])
+}
+
+// verifies the exact-count contract across all three branches.
+//
+// The count is the popcount of the extra intersection bits when the
+// operands overlap, one when they are disjoint and zero for a subset
+// — non-contiguous masks included.
+func Test_Network6_Difference_CountFixedCases(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		other  string
+		want   int
+	}{
+		{name: "overlapping /48 minus /64", source: "2001:db8::/48", other: "2001:db8::/64", want: 16},
+		{name: "disjoint", source: "2001:db8::/32", other: "fe80::/10", want: 1},
+		{name: "subset", source: "2001:db8::/64", other: "2001:db8::/48", want: 0},
+		{name: "non-contiguous low-byte hole", source: "2001::/ffff::", other: "2001::1/ffff::ff", want: 8},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			source := xnetip.MustParseNetwork6(testCase.source)
+			other := xnetip.MustParseNetwork6(testCase.other)
+			require.Len(t, slices.Collect(source.Difference(other)), testCase.want)
+		})
+	}
+}
+
+// verifies that breaking out of the loop stops the sequence after
+// exactly the consumed items.
+func Test_Network6_Difference_EarlyBreakStops(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001:db8::/48")
+	other := xnetip.MustParseNetwork6("2001:db8::/64")
+	consumed := 0
+	for range source.Difference(other) {
+		consumed++
+		if consumed == 2 {
+			break
+		}
+	}
+	require.Equal(t, 2, consumed)
+}
+
+// verifies that the same sequence value can be ranged twice and
+// yields identical items both times.
+func Test_Network6_Difference_ReIterable(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001:db8::/48")
+	other := xnetip.MustParseNetwork6("2001:db8::/64")
+	sequence := source.Difference(other)
+	firstPass := slices.Collect(sequence)
+	secondPass := slices.Collect(sequence)
+	require.Equal(t, firstPass, secondPass)
+}
+
+// verifies the exact peel of a non-contiguous pair.
+//
+// The low-byte hole in the subtrahend mask is peeled bit by bit,
+// highest first, every part keeping the source's non-contiguous
+// shape; the first part and the final two are pinned by hand.
+func Test_Network6_Difference_NonContiguousLowBytePeel(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001::/ffff::")
+	other := xnetip.MustParseNetwork6("2001::1/ffff::ff")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 8)
+	require.Equal(t, xnetip.MustParseNetwork6("2001::80/ffff::80"), parts[0])
+	require.Equal(t, xnetip.MustParseNetwork6("2001::2/ffff::fe"), parts[6])
+	require.Equal(t, xnetip.MustParseNetwork6("2001::/ffff::ff"), parts[7])
+	requireIPv6DifferenceParts(t, source, other, parts)
+}
+
+// verifies a peel whose pending bits straddle the 64-bit half
+// boundary.
+//
+// The subtrahend fixes bits 64 through 79 and bit 63 beyond the
+// source mask, so the walk crosses from the high half into the low
+// half with no seam: 17 parts, the first peeling bit 79 and the last
+// peeling bit 63.
+func Test_Network6_Difference_StraddlesHalfBoundary(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2001:db8::/ffff:ffff::")
+	other := xnetip.MustParseNetwork6("2001:db8:0:1:8000::/ffff:ffff:0:ffff:8000::")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 17)
+	require.Equal(t, xnetip.MustParseNetwork6("2001:db8:0:8000::/ffff:ffff:0:8000::"), parts[0])
+	require.Equal(t, xnetip.MustParseNetwork6("2001:db8:0:1::/ffff:ffff:0:ffff:8000::"), parts[16])
+	requireIPv6DifferenceParts(t, source, other, parts)
+}
+
+// verifies the peel on an alternating subtrahend mask spanning both
+// halves: one part per set mask bit, the first pinned by hand.
+func Test_Network6_Difference_UniverseMinusAlternatingHost(t *testing.T) {
+	source := xnetip.MustParseNetwork6("::/0")
+	other := xnetip.MustParseNetwork6("1::/aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 64)
+	require.Equal(t, xnetip.MustParseNetwork6("8000::/8000::"), parts[0])
+	requireIPv6DifferenceParts(t, source, other, parts)
+}
+
+// verifies a two-run source mask against a subtrahend extending its
+// lower run: the peel is confined to the extension bits.
+func Test_Network6_Difference_TwoRunMasksOnBoth(t *testing.T) {
+	source := xnetip.MustParseNetwork6("2a02:6b8::/ffff:ffff::ffff:ffff:0:0")
+	other := xnetip.MustParseNetwork6("2a02:6b8::1:0/ffff:ffff::ffff:ffff:ffff:0")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 16)
+	requireIPv6DifferenceParts(t, source, other, parts)
+}
+
+// verifies that every difference part lies inside the source network.
+func Test_Network6_Difference_PartsInSourceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork6.Draw(t, "source")
+		other := genNetwork6.Draw(t, "other")
+		for part := range source.Difference(other) {
+			require.True(t, source.Contains(part), "part %v not in source %v", part, source)
+		}
+	})
+}
+
+// verifies that every difference part is disjoint from the subtracted
+// network.
+func Test_Network6_Difference_PartsDisjointFromOtherProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork6.Draw(t, "source")
+		other := genNetwork6.Draw(t, "other")
+		for part := range source.Difference(other) {
+			require.True(t, part.IsDisjoint(other), "part %v intersects %v", part, other)
+		}
+	})
+}
+
+// verifies that the difference parts are pairwise disjoint.
+func Test_Network6_Difference_PairwiseDisjointProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork6.Draw(t, "source")
+		other := genNetwork6.Draw(t, "other")
+		parts := slices.Collect(source.Difference(other))
+		for first := range parts {
+			for second := first + 1; second < len(parts); second++ {
+				require.True(t, parts[first].IsDisjoint(parts[second]),
+					"parts %v and %v overlap", parts[first], parts[second])
+			}
+		}
+	})
+}
+
+// verifies that any network minus itself is empty.
+func Test_Network6_Difference_SelfIsEmptyProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork6.Draw(t, "source")
+		require.Empty(t, slices.Collect(source.Difference(source)))
+	})
+}
+
+// verifies completeness by counting.
+//
+// The parts' sizes plus the intersection's size add up to the
+// source's size, which together with the pairwise-disjoint and
+// inside-the-source invariants proves the union of the parts is
+// exactly the set difference. The source is bounded to 62 host bits
+// so every size fits an unsigned 64-bit count.
+func Test_Network6_Difference_CompletenessProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork6.Filter(func(network xnetip.Network6) bool {
+			return network.NumHostBits() <= 62
+		}).Draw(t, "source")
+		other := genNetwork6.Draw(t, "other")
+		sourceSize := uint64(1) << source.NumHostBits()
+		intersectionSize := uint64(0)
+		if intersected, ok := source.Intersection(other); ok {
+			intersectionSize = uint64(1) << intersected.NumHostBits()
+		}
+		differenceSize := uint64(0)
+		for part := range source.Difference(other) {
+			differenceSize += uint64(1) << part.NumHostBits()
+		}
+		require.Equal(t, sourceSize, differenceSize+intersectionSize)
+	})
+}
+
+// verifies the three-branch count rule.
+//
+// The sequence holds exactly one part per extra intersection bit
+// when the operands overlap, a lone part when they are disjoint and
+// no parts for a subset.
+func Test_Network6_Difference_CountMatchesPopcountProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork6.Draw(t, "source")
+		other := genNetwork6.Draw(t, "other")
+		want := 1
+		if intersected, ok := source.Intersection(other); ok {
+			_, _, sourceMaskHi, sourceMaskLo := ipv6NetworkBits(source)
+			_, _, intersectionMaskHi, intersectionMaskLo := ipv6NetworkBits(intersected)
+			want = bits.OnesCount64(intersectionMaskHi&^sourceMaskHi) +
+				bits.OnesCount64(intersectionMaskLo&^sourceMaskLo)
+		}
+		require.Len(t, slices.Collect(source.Difference(other)), want)
+	})
+}
+
+// verifies that every yielded part satisfies the network invariant
+// of a zero address outside the mask.
+//
+// The peel step constructs parts directly instead of going through a
+// normalizing constructor, so the invariant is pinned here.
+func Test_Network6_Difference_ItemsAreNormalizedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork6.Draw(t, "source")
+		other := genNetwork6.Draw(t, "other")
+		for part := range source.Difference(other) {
+			addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(part)
+			require.Equal(t, addrHi&maskHi, addrHi, "part %v not normalized", part)
+			require.Equal(t, addrLo&maskLo, addrLo, "part %v not normalized", part)
+		}
+	})
+}
+
+// verifies the documented peel order over the bits `d` fixed by the
+// intersection but free in the source.
+//
+// Each part's mask grows the already-peeled set by exactly one bit
+// of `d`, always the highest pending one across the half boundary,
+// until all of `d` is covered.
+func Test_Network6_Difference_PeelOrderProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork6.Draw(t, "source")
+		other := genNetwork6.Draw(t, "other")
+		_, _, sourceMaskHi, sourceMaskLo := ipv6NetworkBits(source)
+		intersected, ok := source.Intersection(other)
+		if !ok {
+			require.Equal(t, []xnetip.Network6{source}, slices.Collect(source.Difference(other)))
+			return
+		}
+		_, _, intersectionMaskHi, intersectionMaskLo := ipv6NetworkBits(intersected)
+		dHi := intersectionMaskHi &^ sourceMaskHi
+		dLo := intersectionMaskLo &^ sourceMaskLo
+		peeledHi, peeledLo := uint64(0), uint64(0)
+		for part := range source.Difference(other) {
+			_, _, maskHi, maskLo := ipv6NetworkBits(part)
+			extraHi, extraLo := maskHi&^sourceMaskHi, maskLo&^sourceMaskLo
+			newHi, newLo := extraHi&^peeledHi, extraLo&^peeledLo
+			pendingHi, pendingLo := dHi&^peeledHi, dLo&^peeledLo
+			wantHi, wantLo := uint64(0), uint64(0)
+			if pendingHi != 0 {
+				wantHi = uint64(1) << (63 - bits.LeadingZeros64(pendingHi))
+			} else {
+				wantLo = uint64(1) << (63 - bits.LeadingZeros64(pendingLo))
+			}
+			require.Zero(t, extraHi&^dHi, "part %v adds bits outside d", part)
+			require.Zero(t, extraLo&^dLo, "part %v adds bits outside d", part)
+			require.Equal(t, peeledHi, extraHi&peeledHi, "part %v drops peeled bits", part)
+			require.Equal(t, peeledLo, extraLo&peeledLo, "part %v drops peeled bits", part)
+			require.Equal(t, 1, bits.OnesCount64(newHi)+bits.OnesCount64(newLo),
+				"part %v adds more than one bit", part)
+			require.Equal(t, wantHi, newHi, "part %v peels a non-highest pending bit", part)
+			require.Equal(t, wantLo, newLo, "part %v peels a non-highest pending bit", part)
+			peeledHi, peeledLo = extraHi, extraLo
+		}
+		require.Equal(t, dHi, peeledHi)
+		require.Equal(t, dLo, peeledLo)
+	})
+}
+
+// ipv6NetworkMembers lists every address of a small network by
+// scattering each host index over the mask's zero bits.
+//
+// It is the simple oracle the brute-force membership checks loop
+// over, independent of the address iterators. Addresses are pairs of
+// host-order 64-bit halves, high half first.
+func ipv6NetworkMembers(addrHi, addrLo, maskHi, maskLo uint64) [][2]uint64 {
+	hostBits := [][2]uint64{}
+	for bit := uint64(1); bit != 0; bit <<= 1 {
+		if maskLo&bit == 0 {
+			hostBits = append(hostBits, [2]uint64{0, bit})
+		}
+	}
+	for bit := uint64(1); bit != 0; bit <<= 1 {
+		if maskHi&bit == 0 {
+			hostBits = append(hostBits, [2]uint64{bit, 0})
+		}
+	}
+	members := [][2]uint64{}
+	for index := range 1 << len(hostBits) {
+		hi, lo := addrHi, addrLo
+		for position, halves := range hostBits {
+			if index&(1<<position) != 0 {
+				hi |= halves[0]
+				lo |= halves[1]
+			}
+		}
+		members = append(members, [2]uint64{hi, lo})
+	}
+	return members
+}
+
+// verifies membership by brute force on small sources: the parts
+// cover exactly the source members outside the other network.
+func Test_Network6_Difference_BruteForceMembershipProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork6.Filter(func(network xnetip.Network6) bool {
+			return network.NumHostBits() <= 12
+		}).Draw(t, "source")
+		other := genNetwork6.Draw(t, "other")
+		parts := slices.Collect(source.Difference(other))
+		sourceAddrHi, sourceAddrLo, sourceMaskHi, sourceMaskLo := ipv6NetworkBits(source)
+		otherAddrHi, otherAddrLo, otherMaskHi, otherMaskLo := ipv6NetworkBits(other)
+		for _, member := range ipv6NetworkMembers(sourceAddrHi, sourceAddrLo, sourceMaskHi, sourceMaskLo) {
+			inOther := member[0]&otherMaskHi == otherAddrHi && member[1]&otherMaskLo == otherAddrLo
+			inParts := false
+			for _, part := range parts {
+				partAddrHi, partAddrLo, partMaskHi, partMaskLo := ipv6NetworkBits(part)
+				if member[0]&partMaskHi == partAddrHi && member[1]&partMaskLo == partAddrLo {
+					inParts = true
+					break
+				}
+			}
+			require.Equal(t, !inOther, inParts, "member %#x %#x miscovered", member[0], member[1])
+		}
+	})
+}
+
+// verifies mapped parity with the IPv4 peel.
+//
+// Mapping both operands into the IPv4-mapped range yields the IPv4
+// parts mapped, in the same order, pinning identical control flow
+// across the families.
+func Test_Network6_Difference_MappedParityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork4.Draw(t, "source")
+		other := genNetwork4.Draw(t, "other")
+		mappedParts := slices.Collect(source.ToIPv6Mapped().Difference(other.ToIPv6Mapped()))
+		parts := slices.Collect(source.Difference(other))
+		require.Len(t, mappedParts, len(parts))
+		for idx, part := range parts {
+			require.Equal(t, part.ToIPv6Mapped(), mappedParts[idx])
+		}
+	})
+}
+
+// verifies that consuming the sequence with a range loop allocates
+// nothing.
+func Test_Network6_Difference_AllocationFree(t *testing.T) {
+	source := xnetip.MustParseNetwork6("::/0")
+	other := xnetip.MustParseNetwork6("2001:db8::1/128")
+	requireNoAllocs(t, func() {
+		for part := range source.Difference(other) {
+			network6Sink = part
+		}
+	})
+}
+
+func BenchmarkNetwork6_Difference_UniverseMinusHost(b *testing.B) {
+	source := xnetip.MustParseNetwork6("::/0")
+	other := xnetip.MustParseNetwork6("2001:db8::1/128")
+	b.ReportAllocs()
+	for b.Loop() {
+		for part := range source.Difference(other) {
+			network6Sink = part
+		}
+	}
+}
+
+func BenchmarkNetwork6_Difference_UniverseMinusAlternatingHost(b *testing.B) {
+	source := xnetip.MustParseNetwork6("::/0")
+	other := xnetip.MustParseNetwork6("1::/aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa")
+	b.ReportAllocs()
+	for b.Loop() {
+		for part := range source.Difference(other) {
+			network6Sink = part
+		}
+	}
+}
+
 // verifies that adjacency needs the same mask and exactly one
 // differing masked bit, anywhere in the mask.
 //
