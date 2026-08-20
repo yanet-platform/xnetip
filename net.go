@@ -454,6 +454,34 @@ func (m IPNetwork) MergeByLowestMaskBit(other IPNetwork) (IPNetwork, bool) {
 	return IPNetwork{network: network, is4: m.is4}, true
 }
 
+// SupernetFor returns the smallest network containing this network
+// and every network in nets.
+//
+// Any element of the other address family makes ok false: no network
+// spans both families, so a mixed slice has no supernet and yields
+// false rather than a silently narrowed answer. Within one family
+// the result is exactly the IPv4Network or IPv6Network fold and
+// keeps that family. An empty slice returns the network itself. On
+// ok=false the returned value is the zero IPNetwork.
+func (m IPNetwork) SupernetFor(nets []IPNetwork) (IPNetwork, bool) {
+	// The family check rides the fold loop, so one pass both rejects
+	// a foreign element and folds a same-family one.
+	//
+	// For a same-family slice the 128-bit fold of the stored forms is
+	// exact: mapped storage pins the top 96 address and mask bits to
+	// the same values on every operand, so those mask bits survive
+	// every fold step, the result stays IPv4-mapped and its low 32
+	// bits are exactly the IPv4 fold.
+	mask := m.network.mask.bits
+	for idx := range nets {
+		if nets[idx].is4 != m.is4 {
+			return IPNetwork{}, false
+		}
+		mask = nets[idx].network.supernetMask(m.network.addr, mask)
+	}
+	return IPNetwork{network: fromBits6(m.network.addr, ipv6Addr{mask}), is4: m.is4}, true
+}
+
 // IsContiguous reports whether the mask, in the network's own family,
 // is a CIDR prefix mask: leading one bits followed only by zero bits.
 //

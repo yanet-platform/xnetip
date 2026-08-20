@@ -3589,3 +3589,143 @@ func Test_IPNetwork_MergeByLowestMaskBit_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = four.MergeByLowestMaskBit(fourBuddy) })
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = six.MergeByLowestMaskBit(sixBuddy) })
 }
+
+// verifies that the fold works within either family, never across
+// families, and keeps the family of its inputs.
+func Test_IPNetwork_SupernetFor_FamiliesAndBoundary(t *testing.T) {
+	cases := []struct {
+		name     string
+		receiver xnetip.IPNetwork
+		nets     []xnetip.IPNetwork
+		want     xnetip.IPNetwork
+		ok       bool
+	}{
+		{name: "IPv4 halves fold to the /24", receiver: xnetip.MustParseIPNetwork("192.0.2.0/25"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("192.0.2.128/25")}, want: xnetip.MustParseIPNetwork("192.0.2.0/24"), ok: true},
+		{name: "IPv6 pair folds to the shared /32", receiver: xnetip.MustParseIPNetwork("2001:db8:1::/32"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("2001:db8:2::/39")}, want: xnetip.MustParseIPNetwork("2001:db8::/32"), ok: true},
+		{name: "empty slice returns the IPv4 receiver", receiver: xnetip.MustParseIPNetwork("10.0.0.0/8"), nets: nil, want: xnetip.MustParseIPNetwork("10.0.0.0/8"), ok: true},
+		{name: "empty slice returns the IPv6 receiver", receiver: xnetip.MustParseIPNetwork("2001:db8::/32"), nets: nil, want: xnetip.MustParseIPNetwork("2001:db8::/32"), ok: true},
+		{name: "mixed slice with an IPv4 receiver", receiver: xnetip.MustParseIPNetwork("10.0.0.0/8"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("10.1.0.0/16"), xnetip.MustParseIPNetwork("2001:db8::/32")}, ok: false},
+		{name: "mixed slice with an IPv6 receiver", receiver: xnetip.MustParseIPNetwork("2001:db8::/32"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("10.0.0.0/8")}, ok: false},
+		{name: "mapped IPv6 element is foreign to an IPv4 receiver", receiver: xnetip.MustParseIPNetwork("10.0.0.0/8"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104")}, ok: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			result, ok := testCase.receiver.SupernetFor(testCase.nets)
+			require.Equal(t, testCase.ok, ok)
+			require.Equal(t, testCase.want, result)
+		})
+	}
+}
+
+// verifies that an IPv4 fold whose result mask turns non-contiguous
+// stays an IPv4 network.
+func Test_IPNetwork_SupernetFor_NonContiguousResultKeepsFamily(t *testing.T) {
+	receiver := xnetip.MustParseIPNetwork("10.0.0.0/24")
+	result, ok := receiver.SupernetFor([]xnetip.IPNetwork{xnetip.MustParseIPNetwork("10.1.0.0/24")})
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPNetwork("10.0.0.0/255.254.255.0"), result)
+	require.True(t, result.Is4())
+}
+
+// verifies that non-contiguous folds of both families flow through
+// the wrapper.
+func Test_IPNetwork_SupernetFor_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name     string
+		receiver xnetip.IPNetwork
+		nets     []xnetip.IPNetwork
+		want     xnetip.IPNetwork
+	}{
+		{name: "IPv4 two-run networks crossing the first octet", receiver: xnetip.MustParseIPNetwork("10.40.0.1/255.255.0.255"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("10.40.0.2/255.255.0.255"), xnetip.MustParseIPNetwork("11.40.0.3/255.255.0.255")}, want: xnetip.MustParseIPNetwork("10.40.0.0/254.255.0.252")},
+		{name: "IPv6 two-run networks sharing the high runs", receiver: xnetip.MustParseIPNetwork("2a02:6b8:c00::48aa:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("2a02:6b8:c00::4707:0:0/ffff:ffff:ff00::ffff:ffff:0:0")}, want: xnetip.MustParseIPNetwork("2a02:6b8:c00::4002:0:0/ffff:ffff:ff00:0:ffff:f052::")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			result, ok := testCase.receiver.SupernetFor(testCase.nets)
+			require.True(t, ok)
+			require.Equal(t, testCase.want, result)
+		})
+	}
+}
+
+// verifies that the wrapped fold equals the concrete answer lifted
+// into the wrapper, keeps the family and contains every input.
+//
+// The equality is bit-exact on the stored form, so for IPv4 it also
+// pins the mapped-storage invariant of the result.
+func Test_IPNetwork_SupernetFor_AgreesWithConcreteProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		receiver4 := genIPv4Network.Draw(t, "receiver4")
+		nets4 := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "nets4")
+		wrapped4 := make([]xnetip.IPNetwork, len(nets4))
+		for idx, network := range nets4 {
+			wrapped4[idx] = xnetip.IPNetworkFrom4(network)
+		}
+		result4, ok4 := xnetip.IPNetworkFrom4(receiver4).SupernetFor(wrapped4)
+		require.True(t, ok4)
+		require.Equal(t, xnetip.IPNetworkFrom4(receiver4.SupernetFor(nets4)), result4)
+		require.True(t, result4.Is4())
+		require.True(t, result4.Contains(xnetip.IPNetworkFrom4(receiver4)))
+		for _, network := range wrapped4 {
+			require.True(t, result4.Contains(network), "element %v", network)
+		}
+		receiver6 := genIPv6Network.Draw(t, "receiver6")
+		nets6 := rapid.SliceOfN(genIPv6Network, 0, 32).Draw(t, "nets6")
+		wrapped6 := make([]xnetip.IPNetwork, len(nets6))
+		for idx, network := range nets6 {
+			wrapped6[idx] = xnetip.IPNetworkFrom6(network)
+		}
+		result6, ok6 := xnetip.IPNetworkFrom6(receiver6).SupernetFor(wrapped6)
+		require.True(t, ok6)
+		require.Equal(t, xnetip.IPNetworkFrom6(receiver6.SupernetFor(nets6)), result6)
+		require.True(t, result6.Is6())
+		require.True(t, result6.Contains(xnetip.IPNetworkFrom6(receiver6)))
+		for _, network := range wrapped6 {
+			require.True(t, result6.Contains(network), "element %v", network)
+		}
+	})
+}
+
+// verifies that one foreign-family element anywhere in the slice
+// makes the fold report false, in both family directions.
+func Test_IPNetwork_SupernetFor_MixedSliceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		nets4 := rapid.SliceOfN(genIPv4Network, 0, 31).Draw(t, "nets4")
+		mixed4 := make([]xnetip.IPNetwork, len(nets4))
+		for idx, network := range nets4 {
+			mixed4[idx] = xnetip.IPNetworkFrom4(network)
+		}
+		foreign6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "foreign6"))
+		position4 := rapid.IntRange(0, len(mixed4)).Draw(t, "position4")
+		mixed4 = slices.Insert(mixed4, position4, foreign6)
+		result, ok := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "receiver4")).SupernetFor(mixed4)
+		require.False(t, ok)
+		require.Equal(t, xnetip.IPNetwork{}, result)
+		nets6 := rapid.SliceOfN(genIPv6Network, 0, 31).Draw(t, "nets6")
+		mixed6 := make([]xnetip.IPNetwork, len(nets6))
+		for idx, network := range nets6 {
+			mixed6[idx] = xnetip.IPNetworkFrom6(network)
+		}
+		foreign4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "foreign4"))
+		position6 := rapid.IntRange(0, len(mixed6)).Draw(t, "position6")
+		mixed6 = slices.Insert(mixed6, position6, foreign4)
+		result, ok = xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "receiver6")).SupernetFor(mixed6)
+		require.False(t, ok)
+		require.Equal(t, xnetip.IPNetwork{}, result)
+	})
+}
+
+// verifies that the fold allocates nothing over a 64-element
+// same-family slice, in either family.
+func Test_IPNetwork_SupernetFor_AllocationFree(t *testing.T) {
+	four := make([]xnetip.IPNetwork, 0, 64)
+	for _, network := range ipv4RelatedNetworks(t, 64) {
+		four = append(four, xnetip.IPNetworkFrom4(network))
+	}
+	six := make([]xnetip.IPNetwork, 0, 64)
+	for _, network := range ipv6RelatedNetworks(t, 64) {
+		six = append(six, xnetip.IPNetworkFrom6(network))
+	}
+	requireNoAllocs(t, func() { ipNetworkSink, okSink = four[0].SupernetFor(four[1:]) })
+	requireNoAllocs(t, func() { ipNetworkSink, okSink = six[0].SupernetFor(six[1:]) })
+}
