@@ -30,6 +30,19 @@ func IPv4AddrFromBits(bits uint32) IPv4Addr {
 	return IPv4Addr{bits}
 }
 
+// IPv4AddrFromNetip converts a netip.Addr to IPv4Addr.
+//
+// ok is false unless a.Is4() reports true: an IPv6 address, including an
+// IPv4-mapped one such as ::ffff:1.2.3.4, is not converted (use Unmap on
+// the netip side first if that is intended), and the zero netip.Addr is
+// rejected. On failure the returned address is the zero value.
+func IPv4AddrFromNetip(a netip.Addr) (addr IPv4Addr, ok bool) {
+	if !a.Is4() {
+		return IPv4Addr{}, false
+	}
+	return IPv4AddrFrom4(a.As4()), true
+}
+
 // As4 returns the address as 4 bytes in network order.
 func (m IPv4Addr) As4() [4]byte {
 	var addr [4]byte
@@ -40,6 +53,14 @@ func (m IPv4Addr) As4() [4]byte {
 // Bits returns the address as a host-order 32-bit integer.
 func (m IPv4Addr) Bits() uint32 {
 	return m.bits
+}
+
+// Netip returns the address as a netip.Addr (Is4 true, no zone).
+//
+// The view is always valid, so it can flow into every standard API that
+// takes a netip.Addr, and converting it back always succeeds.
+func (m IPv4Addr) Netip() netip.Addr {
+	return netip.AddrFrom4(m.As4())
 }
 
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after other.

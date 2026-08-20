@@ -12,6 +12,7 @@ package xnetip_test
 
 import (
 	"math"
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -116,11 +117,13 @@ func (m *failRecorder) FailNow() { m.failedNow = true }
 // Sinks keep the measured closures' results alive, so the compiler cannot
 // optimise the work under test away.
 var (
-	wordSink     uint32
-	intSink      int
-	bytesSink    []byte
-	stringSink   string
-	errSink      error
-	ipv4AddrSink xnetip.IPv4Addr
-	ipv6AddrSink xnetip.IPv6Addr
+	wordSink      uint32
+	intSink       int
+	boolSink      bool
+	bytesSink     []byte
+	stringSink    string
+	errSink       error
+	ipv4AddrSink  xnetip.IPv4Addr
+	ipv6AddrSink  xnetip.IPv6Addr
+	netipAddrSink netip.Addr
 )

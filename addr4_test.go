@@ -111,6 +111,120 @@ func Test_IPv4Addr_Construction_DoesNotAllocate(t *testing.T) {
 	})
 }
 
+// verifies that a plain IPv4 netip address converts to the address with
+// the same four octets.
+func Test_IPv4AddrFromNetip_ConvertsIPv4(t *testing.T) {
+	address, ok := xnetip.IPv4AddrFromNetip(netip.MustParseAddr("192.168.0.1"))
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv4Addr("192.168.0.1"), address)
+}
+
+// verifies that an IPv6 netip address is rejected with the zero address,
+// because the conversion never crosses the family boundary.
+func Test_IPv4AddrFromNetip_RejectsIPv6(t *testing.T) {
+	address, ok := xnetip.IPv4AddrFromNetip(netip.MustParseAddr("2001:db8::1"))
+	require.False(t, ok)
+	require.Equal(t, xnetip.IPv4Addr{}, address)
+}
+
+// verifies that an IPv4-mapped netip address is rejected: a mapped
+// address is an IPv6 value, so the caller must unmap it first on purpose.
+func Test_IPv4AddrFromNetip_RejectsIPv4Mapped(t *testing.T) {
+	address, ok := xnetip.IPv4AddrFromNetip(netip.MustParseAddr("::ffff:1.2.3.4"))
+	require.False(t, ok)
+	require.Equal(t, xnetip.IPv4Addr{}, address)
+}
+
+// verifies that the zero netip address, which is invalid, is rejected
+// with the zero address.
+func Test_IPv4AddrFromNetip_RejectsZeroAddr(t *testing.T) {
+	address, ok := xnetip.IPv4AddrFromNetip(netip.Addr{})
+	require.False(t, ok)
+	require.Equal(t, xnetip.IPv4Addr{}, address)
+}
+
+// verifies that the netip view is a valid zone-free IPv4 address equal
+// to the one netip parses from the same text.
+func Test_IPv4Addr_Netip_IsIPv4WithoutZone(t *testing.T) {
+	view := xnetip.IPv4AddrFrom4([4]byte{10, 0, 0, 1}).Netip()
+	require.Equal(t, netip.MustParseAddr("10.0.0.1"), view)
+	require.True(t, view.Is4())
+	require.True(t, view.IsValid())
+	require.Empty(t, view.Zone())
+}
+
+// verifies that the zero value converts to the unspecified netip address
+// and back, because the zero value is a real address.
+func Test_IPv4Addr_Netip_ZeroValueRoundTrips(t *testing.T) {
+	view := xnetip.IPv4Addr{}.Netip()
+	require.Equal(t, netip.MustParseAddr("0.0.0.0"), view)
+	address, ok := xnetip.IPv4AddrFromNetip(view)
+	require.True(t, ok)
+	require.Equal(t, xnetip.IPv4Addr{}, address)
+}
+
+// verifies that the all-ones broadcast address survives the round trip
+// through the netip view.
+func Test_IPv4AddrFromNetip_RoundTripsBroadcast(t *testing.T) {
+	broadcast := xnetip.MustParseIPv4Addr("255.255.255.255")
+	address, ok := xnetip.IPv4AddrFromNetip(broadcast.Netip())
+	require.True(t, ok)
+	require.Equal(t, broadcast, address)
+}
+
+// verifies that converting the netip view back yields the address, for
+// every address.
+func Test_IPv4AddrFromNetip_RoundTripsThroughNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		back, ok := xnetip.IPv4AddrFromNetip(address.Netip())
+		require.True(t, ok)
+		require.Equal(t, address, back)
+	})
+}
+
+// verifies that the conversion accepts every 4-byte netip address and
+// agrees with the byte constructor on the value.
+func Test_IPv4AddrFromNetip_AgreesWithFrom4(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		octets := [4]byte(rapid.SliceOfN(rapid.Byte(), 4, 4).Draw(t, "octets"))
+		address, ok := xnetip.IPv4AddrFromNetip(netip.AddrFrom4(octets))
+		require.True(t, ok)
+		require.Equal(t, xnetip.IPv4AddrFrom4(octets), address)
+	})
+}
+
+// verifies that every 16-byte netip address is rejected, mapped or not,
+// because the 16-byte form is IPv6 whatever bytes it holds.
+func Test_IPv4AddrFromNetip_RejectsEvery16ByteAddr(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		octets := [16]byte(rapid.SliceOfN(rapid.Byte(), 16, 16).Draw(t, "octets"))
+		_, ok := xnetip.IPv4AddrFromNetip(netip.AddrFrom16(octets))
+		require.False(t, ok)
+	})
+}
+
+// verifies that the netip view prints exactly what the address prints,
+// so the two formatting paths agree on every address.
+func Test_IPv4Addr_Netip_AgreesWithStringForm(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		require.Equal(t, address.String(), address.Netip().String())
+	})
+}
+
+// verifies that the conversion from a netip address does not allocate.
+func Test_IPv4AddrFromNetip_DoesNotAllocate(t *testing.T) {
+	peer := netip.MustParseAddr("192.168.0.1")
+	requireNoAllocs(t, func() { ipv4AddrSink, boolSink = xnetip.IPv4AddrFromNetip(peer) })
+}
+
+// verifies that the netip view does not allocate.
+func Test_IPv4Addr_Netip_DoesNotAllocate(t *testing.T) {
+	address := xnetip.MustParseIPv4Addr("192.168.0.1")
+	requireNoAllocs(t, func() { netipAddrSink = address.Netip() })
+}
+
 // verifies that compare is the numeric order of the 32-bit pattern.
 //
 // The first octet dominates, lower octets break ties, the top bit is not
