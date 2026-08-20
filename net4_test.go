@@ -3655,3 +3655,249 @@ func BenchmarkIPv4Network_MergeByLowestMaskBit_Containment(b *testing.B) {
 		networkSink, okSink = left.MergeByLowestMaskBit(right)
 	}
 }
+
+// supernetForReferenceIPv4 is the plain fold oracle for the supernet
+// computation.
+//
+// It keeps a mask bit only when every input masks it and agrees with
+// the receiver's address on it, and re-normalizes the address through
+// the checked constructor.
+func supernetForReferenceIPv4(t require.TestingT, receiver xnetip.IPv4Network, nets []xnetip.IPv4Network) xnetip.IPv4Network {
+	addr, mask := ipv4NetworkBits(receiver)
+	for _, network := range nets {
+		otherAddr, otherMask := ipv4NetworkBits(network)
+		mask &= otherMask &^ (addr ^ otherAddr)
+	}
+	oracle, err := xnetip.IPv4NetworkFrom(
+		netipAddrFrom4Bits(addr&mask),
+		netipAddrFrom4Bits(mask),
+	)
+	require.NoError(t, err)
+	return oracle
+}
+
+// ipv4RelatedNetworks returns count consecutive /28 blocks under
+// 10.0.0.0/16, so a fold over them never collapses the mask to zero.
+func ipv4RelatedNetworks(t require.TestingT, count int) []xnetip.IPv4Network {
+	networks := make([]xnetip.IPv4Network, count)
+	for idx := range networks {
+		network, err := xnetip.IPv4NetworkFromCIDR(netipAddrFrom4Bits(0x0A000000|uint32(idx)*16), 28)
+		require.NoError(t, err)
+		networks[idx] = network
+	}
+	return networks
+}
+
+// ipv4RelatedNonContiguousNetworks returns count networks under the
+// two-run mask 255.255.0.255.
+//
+// The addresses spread over the second and fourth octets, so a fold
+// over them exercises the two-run shape without collapsing the mask
+// to zero.
+func ipv4RelatedNonContiguousNetworks(t require.TestingT, count int) []xnetip.IPv4Network {
+	networks := make([]xnetip.IPv4Network, count)
+	for idx := range networks {
+		addr := 0x0A000000 | (uint32(idx)>>8&0xFF)<<16 | uint32(idx)&0xFF
+		network, err := xnetip.IPv4NetworkFrom(
+			netipAddrFrom4Bits(addr),
+			netipAddrFrom4Bits(0xFFFF00FF),
+		)
+		require.NoError(t, err)
+		networks[idx] = network
+	}
+	return networks
+}
+
+// verifies that the fold keeps exactly the mask bits every input
+// masks and agrees on, over the ported reference cases.
+func Test_IPv4Network_SupernetFor_UnitAndBoundary(t *testing.T) {
+	cases := []struct {
+		name     string
+		receiver xnetip.IPv4Network
+		nets     []xnetip.IPv4Network
+		want     xnetip.IPv4Network
+	}{
+		{name: "two /25 halves fold to the /24", receiver: xnetip.MustParseIPv4Network("192.0.2.0/25"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("192.0.2.128/25")}, want: xnetip.MustParseIPv4Network("192.0.2.0/24")},
+		{name: "two /25 halves reversed", receiver: xnetip.MustParseIPv4Network("192.0.2.128/25"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("192.0.2.0/25")}, want: xnetip.MustParseIPv4Network("192.0.2.0/24")},
+		{name: "equal networks yield themselves", receiver: xnetip.MustParseIPv4Network("192.0.2.128/25"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("192.0.2.128/25")}, want: xnetip.MustParseIPv4Network("192.0.2.128/25")},
+		{name: "wider CIDR absorbs the receiver", receiver: xnetip.MustParseIPv4Network("10.0.0.0/24"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.0.0.0/16")}, want: xnetip.MustParseIPv4Network("10.0.0.0/16")},
+		{name: "wider CIDR absorbs the element", receiver: xnetip.MustParseIPv4Network("10.0.0.0/16"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.0.0.0/24")}, want: xnetip.MustParseIPv4Network("10.0.0.0/16")},
+		{name: "empty slice returns the receiver", receiver: xnetip.MustParseIPv4Network("10.0.0.0/8"), nets: nil, want: xnetip.MustParseIPv4Network("10.0.0.0/8")},
+		{name: "default route receiver stays the default route", receiver: xnetip.MustParseIPv4Network("0.0.0.0/0"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.0.0.0/8")}, want: xnetip.MustParseIPv4Network("0.0.0.0/0")},
+		{name: "contiguous inputs leave a hole off the mask boundary", receiver: xnetip.MustParseIPv4Network("10.0.0.0/24"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.1.0.0/24")}, want: xnetip.MustParseIPv4Network("10.0.0.0/255.254.255.0")},
+		{name: "three hosts differing in the third octet", receiver: xnetip.MustParseIPv4Network("10.40.101.1/32"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.40.102.1/32"), xnetip.MustParseIPv4Network("10.40.103.1/32")}, want: xnetip.MustParseIPv4Network("10.40.100.1/255.255.252.255")},
+		{name: "three hosts crossing the first octet", receiver: xnetip.MustParseIPv4Network("10.40.101.1/32"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.40.102.1/32"), xnetip.MustParseIPv4Network("11.40.103.1/32")}, want: xnetip.MustParseIPv4Network("10.40.100.1/254.255.252.255")},
+		{name: "five /24 blocks far apart", receiver: xnetip.MustParseIPv4Network("192.168.0.0/24"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("192.168.1.0/24"), xnetip.MustParseIPv4Network("192.168.2.0/24"), xnetip.MustParseIPv4Network("192.168.100.0/24"), xnetip.MustParseIPv4Network("192.168.200.0/24")}, want: xnetip.MustParseIPv4Network("192.168.0.0/255.255.16.0")},
+		{name: "top-bit disagreement clears the top mask bits", receiver: xnetip.MustParseIPv4Network("128.0.0.0/24"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("192.0.0.0/24"), xnetip.MustParseIPv4Network("65.0.0.0/24")}, want: xnetip.MustParseIPv4Network("0.0.0.0/62.255.255.0")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.receiver.SupernetFor(testCase.nets))
+		})
+	}
+}
+
+// verifies that a complete set of sibling blocks folds to their
+// common parent, from every choice of receiver.
+func Test_IPv4Network_SupernetFor_SiblingBlocksFoldToParent(t *testing.T) {
+	parent := xnetip.MustParseIPv4Network("192.0.2.0/24")
+	blocks := make([]xnetip.IPv4Network, 8)
+	for idx := range blocks {
+		network, err := xnetip.IPv4NetworkFromCIDR(netipAddrFrom4Bits(0xC0000200|uint32(idx)*32), 27)
+		require.NoError(t, err)
+		blocks[idx] = network
+	}
+	for receiverIdx, receiver := range blocks {
+		others := slices.Concat(blocks[:receiverIdx], blocks[receiverIdx+1:])
+		require.Equal(t, parent, receiver.SupernetFor(others), "receiver %v", receiver)
+	}
+	halves := make([]xnetip.IPv4Network, 16)
+	for idx := range halves {
+		network, err := xnetip.IPv4NetworkFromCIDR(netipAddrFrom4Bits(0xC0000200|uint32(idx)*16), 28)
+		require.NoError(t, err)
+		halves[idx] = network
+	}
+	require.Equal(t, parent, halves[0].SupernetFor(halves[1:]))
+}
+
+// verifies that non-contiguous inputs fold bit by bit: holes of the
+// input masks and address disagreements both clear result bits.
+func Test_IPv4Network_SupernetFor_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name     string
+		receiver xnetip.IPv4Network
+		nets     []xnetip.IPv4Network
+		want     xnetip.IPv4Network
+	}{
+		{name: "three two-run networks crossing the first octet", receiver: xnetip.MustParseIPv4Network("10.40.0.1/255.255.0.255"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.40.0.2/255.255.0.255"), xnetip.MustParseIPv4Network("11.40.0.3/255.255.0.255")}, want: xnetip.MustParseIPv4Network("10.40.0.0/254.255.0.252")},
+		{name: "alternating addresses disagree on every bit", receiver: xnetip.MustParseIPv4Network("170.170.170.170/255.255.255.255"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("85.85.85.85/255.255.255.255")}, want: xnetip.MustParseIPv4Network("0.0.0.0/0")},
+		{name: "mask of the input narrows the result", receiver: xnetip.MustParseIPv4Network("10.0.0.0/255.255.255.0"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")}, want: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.receiver.SupernetFor(testCase.nets))
+		})
+	}
+}
+
+// verifies that the fold agrees with the simple oracle on random
+// receivers and slices.
+func Test_IPv4Network_SupernetFor_MatchesReferenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		receiver := genIPv4Network.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "nets")
+		require.Equal(t, supernetForReferenceIPv4(t, receiver, nets), receiver.SupernetFor(nets))
+	})
+}
+
+// verifies that the result is normalized and contains the receiver
+// and every element.
+func Test_IPv4Network_SupernetFor_ContainsAllProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		receiver := genIPv4Network.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "nets")
+		result := receiver.SupernetFor(nets)
+		resultAddr, resultMask := ipv4NetworkBits(result)
+		require.Equal(t, resultAddr, resultAddr&resultMask)
+		require.True(t, result.Contains(receiver))
+		for _, network := range nets {
+			require.True(t, result.Contains(network), "element %v", network)
+		}
+	})
+}
+
+// verifies bit-level maximality: every kept mask bit is masked and
+// agreed on by every input.
+//
+// Conversely, every dropped bit of the receiver's mask has an input
+// that either leaves the bit unmasked or disagrees with the receiver
+// on it, so no further bit could have been kept.
+func Test_IPv4Network_SupernetFor_MaximalityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		receiver := genIPv4Network.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "nets")
+		result := receiver.SupernetFor(nets)
+		receiverAddr, receiverMask := ipv4NetworkBits(receiver)
+		_, resultMask := ipv4NetworkBits(result)
+		for bit := range 32 {
+			probe := uint32(1) << bit
+			switch {
+			case resultMask&probe != 0:
+				require.NotZero(t, receiverMask&probe, "kept bit %d outside the receiver mask", bit)
+				for _, network := range nets {
+					addr, mask := ipv4NetworkBits(network)
+					require.NotZero(t, mask&probe, "kept bit %d unmasked by %v", bit, network)
+					require.Equal(t, receiverAddr&probe, addr&probe, "kept bit %d disagreed on by %v", bit, network)
+				}
+			case receiverMask&probe != 0:
+				dropped := false
+				for _, network := range nets {
+					addr, mask := ipv4NetworkBits(network)
+					if mask&probe == 0 || addr&probe != receiverAddr&probe {
+						dropped = true
+					}
+				}
+				require.True(t, dropped, "bit %d dropped with no input forcing it", bit)
+			}
+		}
+	})
+}
+
+// verifies that the fold does not depend on the order of the slice.
+func Test_IPv4Network_SupernetFor_OrderIndependenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		receiver := genIPv4Network.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "nets")
+		shuffled := rapid.Permutation(nets).Draw(t, "shuffled")
+		require.Equal(t, receiver.SupernetFor(nets), receiver.SupernetFor(shuffled))
+	})
+}
+
+// verifies that whenever two networks merge, the merged network is
+// exactly the supernet of one for the other.
+func Test_IPv4Network_SupernetFor_AgreesWithMergeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		if merged, ok := left.Merge(right); ok {
+			require.Equal(t, merged, left.SupernetFor([]xnetip.IPv4Network{right}))
+		}
+		pair := genIPv4LowestBitSiblingPair.Draw(t, "pair")
+		merged, ok := pair[0].Merge(pair[1])
+		require.True(t, ok)
+		require.Equal(t, merged, pair[0].SupernetFor(pair[1:]))
+	})
+}
+
+// verifies that the fold allocates nothing over a 64-element slice,
+// whatever the mask's shape.
+func Test_IPv4Network_SupernetFor_AllocationFree(t *testing.T) {
+	related := ipv4RelatedNetworks(t, 64)
+	nonContiguous := ipv4RelatedNonContiguousNetworks(t, 64)
+	requireNoAllocs(t, func() { networkSink = related[0].SupernetFor(related[1:]) })
+	requireNoAllocs(t, func() { networkSink = nonContiguous[0].SupernetFor(nonContiguous[1:]) })
+}
+
+func BenchmarkIPv4Network_SupernetFor_64x28(b *testing.B) {
+	nets := ipv4RelatedNetworks(b, 64)
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink = nets[0].SupernetFor(nets[1:])
+	}
+}
+
+func BenchmarkIPv4Network_SupernetFor_1024x28(b *testing.B) {
+	nets := ipv4RelatedNetworks(b, 1024)
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink = nets[0].SupernetFor(nets[1:])
+	}
+}
+
+func BenchmarkIPv4Network_SupernetFor_1024xNonContiguous(b *testing.B) {
+	nets := ipv4RelatedNonContiguousNetworks(b, 1024)
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink = nets[0].SupernetFor(nets[1:])
+	}
+}
