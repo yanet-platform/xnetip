@@ -73,6 +73,135 @@ func (m IPv6Addr) Netip() netip.Addr {
 	return netip.AddrFrom16(m.As16())
 }
 
+// IsUnspecified reports whether the address is ::.
+//
+// The IPv4-mapped ::ffff:0.0.0.0 is a different 128-bit value and is not
+// unspecified, as in net/netip.
+func (m IPv6Addr) IsUnspecified() bool {
+	return m.bits.IsZero()
+}
+
+// Is4In6 reports whether the address is IPv4-mapped, that is in
+// ::ffff:0:0/96 (RFC 4291 section 2.5.5.2).
+//
+// The classification predicates of this type follow net/netip and judge
+// a mapped address by its embedded IPv4 part.
+func (m IPv6Addr) Is4In6() bool {
+	return m.bits.hi == 0 && m.bits.lo>>32 == 0xffff
+}
+
+// IsLoopback reports whether the address is ::1, or an IPv4-mapped
+// address whose IPv4 part is loopback (net/netip semantics).
+func (m IPv6Addr) IsLoopback() bool {
+	if m.Is4In6() {
+		return IPv4AddrFromBits(uint32(m.bits.lo)).IsLoopback()
+	}
+	return m.bits.hi == 0 && m.bits.lo == 1
+}
+
+// IsPrivate reports whether the address is in fc00::/7 (RFC 4193), or an
+// IPv4-mapped address whose IPv4 part is RFC 1918 private.
+//
+// A private address still counts as global unicast, exactly as in
+// net/netip.
+func (m IPv6Addr) IsPrivate() bool {
+	if m.Is4In6() {
+		return IPv4AddrFromBits(uint32(m.bits.lo)).IsPrivate()
+	}
+	return uint8(m.bits.hi>>56)&0xfe == 0xfc
+}
+
+// IsMulticast reports whether the address is in ff00::/8, or an
+// IPv4-mapped address whose IPv4 part is in 224.0.0.0/4.
+func (m IPv6Addr) IsMulticast() bool {
+	if m.Is4In6() {
+		return IPv4AddrFromBits(uint32(m.bits.lo)).IsMulticast()
+	}
+	return m.bits.hi>>56 == 0xff
+}
+
+// IsLinkLocalUnicast reports whether the address is in fe80::/10, or an
+// IPv4-mapped address whose IPv4 part is in 169.254.0.0/16.
+func (m IPv6Addr) IsLinkLocalUnicast() bool {
+	if m.Is4In6() {
+		return IPv4AddrFromBits(uint32(m.bits.lo)).IsLinkLocalUnicast()
+	}
+	return uint16(m.bits.hi>>48)&0xffc0 == 0xfe80
+}
+
+// IsLinkLocalMulticast reports whether the address is a link-local
+// multicast address, scope 2 in the first group.
+//
+// An IPv4-mapped address qualifies when its IPv4 part is in
+// 224.0.0.0/24, the net/netip rule.
+func (m IPv6Addr) IsLinkLocalMulticast() bool {
+	if m.Is4In6() {
+		return IPv4AddrFromBits(uint32(m.bits.lo)).IsLinkLocalMulticast()
+	}
+	return uint16(m.bits.hi>>48)&0xff0f == 0xff02
+}
+
+// IsInterfaceLocalMulticast reports whether the address is an
+// interface-local multicast address (scope 1 in the first group).
+//
+// It is always false for an IPv4-mapped address: the scope is an
+// IPv6-only concept and net/netip answers the same way.
+func (m IPv6Addr) IsInterfaceLocalMulticast() bool {
+	if m.Is4In6() {
+		return false
+	}
+	return uint16(m.bits.hi>>48)&0xff0f == 0xff01
+}
+
+// IsGlobalUnicast reports whether the address is global unicast in the
+// sense of net/netip and package net.
+//
+// It is false for ::, loopback, multicast and link-local unicast
+// addresses. An IPv4-mapped address is judged by its IPv4 part, which
+// also excludes the mapped 0.0.0.0 and 255.255.255.255. Unique local
+// addresses (fc00::/7) count as global unicast, exactly as in net/netip.
+func (m IPv6Addr) IsGlobalUnicast() bool {
+	if m.Is4In6() {
+		return IPv4AddrFromBits(uint32(m.bits.lo)).IsGlobalUnicast()
+	}
+	return !m.bits.IsZero() &&
+		!m.IsLoopback() &&
+		!m.IsMulticast() &&
+		!m.IsLinkLocalUnicast()
+}
+
+// Next returns the address one above m, in the numeric order of Compare.
+//
+// The second result is false when m is the all-ones address
+// ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff, which has no next address.
+// Unlike netip.Addr.Next, the end is reported with the comma-ok form
+// rather than an invalid address, because every IPv6Addr value is a real
+// address.
+func (m IPv6Addr) Next() (IPv6Addr, bool) {
+	if m.bits.IsMax() {
+		return IPv6Addr{}, false
+	}
+	return IPv6Addr{m.bits.AddOne()}, true
+}
+
+// Prev returns the address one below m, in the numeric order of Compare.
+//
+// The second result is false when m is ::, which has no previous
+// address. Unlike netip.Addr.Prev, the end is reported with the comma-ok
+// form rather than an invalid address, because every IPv6Addr value is a
+// real address.
+func (m IPv6Addr) Prev() (IPv6Addr, bool) {
+	if m.bits.IsZero() {
+		return IPv6Addr{}, false
+	}
+	return IPv6Addr{m.bits.SubOne()}, true
+}
+
+// BitLen returns 128, the number of bits in an IPv6 address.
+func (m IPv6Addr) BitLen() int {
+	return 128
+}
+
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after other.
 //
 // The order is the numeric order of the 128-bit address, high half first

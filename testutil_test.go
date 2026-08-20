@@ -73,13 +73,15 @@ var genIPv4Addr = rapid.Custom(func(t *rapid.T) xnetip.IPv4Addr {
 	return xnetip.IPv4AddrFromBits(rapid.SampledFrom(boundaries).Draw(t, "boundary"))
 })
 
-// genIPv6Addr draws an IPv6 address: uniform over the 128-bit space, with
-// one draw in ten on a boundary pattern and one in ten IPv4-mapped.
+// genIPv6Addr draws an IPv6 address: uniform over the 128-bit space,
+// with three draws in ten on a boundary, mapped or edge-group shape.
 //
 // The fixed shapes are the two extremes, each half alone at its extreme,
-// the top bit alone, the bottom bit alone, and a mapped address with a
-// random IPv4 part — the patterns the IPv6 mask generators later build
-// from, including the masks straddling bit 64. They are drawn explicitly
+// the top bit alone, the bottom bit alone, a mapped address with a random
+// IPv4 part, and addresses whose first group sits on either side of a
+// classification range edge (fe80::/10, ff00::/8, fc00::/7 and the
+// multicast scopes) — the patterns the IPv6 mask generators later build
+// from and the predicate suites classify. They are drawn explicitly
 // because shrinking walks towards zero and rarely stops at the other
 // boundaries.
 var genIPv6Addr = rapid.Custom(func(t *rapid.T) xnetip.IPv6Addr {
@@ -98,6 +100,14 @@ var genIPv6Addr = rapid.Custom(func(t *rapid.T) xnetip.IPv6Addr {
 	case 1:
 		mapped := 0x0000ffff00000000 | uint64(rapid.Uint32().Draw(t, "mapped"))
 		return xnetip.IPv6AddrFromBits(0, mapped)
+	case 2:
+		groups := []uint64{
+			0xfbff, 0xfc00, 0xfdff, 0xfe00, 0xfe7f, 0xfe80, 0xfebf, 0xfec0,
+			0xfeff, 0xff00, 0xff01, 0xff02, 0xff0f, 0xff11, 0xff12, 0xffff,
+		}
+		group := rapid.SampledFrom(groups).Draw(t, "group")
+		tail := rapid.Uint64Range(0, 1<<48-1).Draw(t, "tail")
+		return xnetip.IPv6AddrFromBits(group<<48|tail, rapid.Uint64().Draw(t, "lo"))
 	default:
 		return xnetip.IPv6AddrFromBits(rapid.Uint64().Draw(t, "hi"), rapid.Uint64().Draw(t, "lo"))
 	}

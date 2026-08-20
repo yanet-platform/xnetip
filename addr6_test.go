@@ -304,6 +304,265 @@ func Test_IPv6Addr_Netip_DoesNotAllocate(t *testing.T) {
 	requireNoAllocs(t, func() { netipAddrSink = address.Netip() })
 }
 
+// verifies that only :: is unspecified: the IPv4-mapped zero is a
+// different address and neither is global unicast.
+func Test_IPv6Addr_IsUnspecified_OnlyAllZeros(t *testing.T) {
+	unspecified := xnetip.MustParseIPv6Addr("::")
+	require.True(t, unspecified.IsUnspecified())
+	require.False(t, unspecified.IsGlobalUnicast())
+	mappedZero := xnetip.MustParseIPv6Addr("::ffff:0.0.0.0")
+	require.False(t, mappedZero.IsUnspecified())
+	require.False(t, mappedZero.IsGlobalUnicast())
+	require.False(t, xnetip.MustParseIPv6Addr("::1").IsUnspecified())
+}
+
+// verifies that the mapped range test accepts exactly ::ffff:0:0/96,
+// rejecting the deprecated IPv4-compatible form and near-miss prefixes.
+func Test_IPv6Addr_Is4In6_MatchesMappedRange(t *testing.T) {
+	for _, text := range []string{"::ffff:1.2.3.4", "::ffff:0:0"} {
+		require.True(t, xnetip.MustParseIPv6Addr(text).Is4In6(), text)
+	}
+	negatives := []string{"::1.2.3.4", "::fffe:1.2.3.4", "64:ff9b::1.2.3.4", "1::ffff:1.2.3.4"}
+	for _, text := range negatives {
+		require.False(t, xnetip.MustParseIPv6Addr(text).Is4In6(), text)
+	}
+}
+
+// verifies that loopback is ::1 or a mapped IPv4 loopback, the net/netip
+// rule that classifies the mapped range by its IPv4 part.
+func Test_IPv6Addr_IsLoopback_MatchesLoopbackAndMappedLoopback(t *testing.T) {
+	loopback := xnetip.MustParseIPv6Addr("::1")
+	require.True(t, loopback.IsLoopback())
+	require.False(t, loopback.IsGlobalUnicast())
+	require.True(t, xnetip.MustParseIPv6Addr("::ffff:127.0.0.1").IsLoopback())
+	require.False(t, xnetip.MustParseIPv6Addr("::2").IsLoopback())
+	require.False(t, xnetip.MustParseIPv6Addr("::1:0").IsLoopback())
+}
+
+// verifies that private is the unique-local fc00::/7 range or a mapped
+// RFC 1918 address, and that private still counts as global unicast.
+func Test_IPv6Addr_IsPrivate_MatchesUniqueLocalAndMappedRFC1918(t *testing.T) {
+	for _, text := range []string{"fc00::1", "fdff:ffff::1"} {
+		address := xnetip.MustParseIPv6Addr(text)
+		require.True(t, address.IsPrivate(), text)
+		require.True(t, address.IsGlobalUnicast(), text)
+	}
+	for _, text := range []string{"fbff::1", "fe00::1"} {
+		require.False(t, xnetip.MustParseIPv6Addr(text).IsPrivate(), text)
+	}
+	for _, text := range []string{"::ffff:10.1.2.3", "::ffff:192.168.0.1"} {
+		require.True(t, xnetip.MustParseIPv6Addr(text).IsPrivate(), text)
+	}
+}
+
+// verifies that multicast is the ff00::/8 range or a mapped 224.0.0.0/4
+// address.
+func Test_IPv6Addr_IsMulticast_MatchesFF00Slash8(t *testing.T) {
+	for _, text := range []string{"ff00::1", "ffff::1", "::ffff:224.0.0.1"} {
+		require.True(t, xnetip.MustParseIPv6Addr(text).IsMulticast(), text)
+	}
+	require.False(t, xnetip.MustParseIPv6Addr("feff:ffff::").IsMulticast())
+}
+
+// verifies that the two multicast scopes never overlap: interface-local
+// is scope 1, link-local is scope 2, whatever the flag bits say.
+func Test_IPv6Addr_MulticastScopes_AreDisjoint(t *testing.T) {
+	for _, text := range []string{"ff01::1", "ff11::1"} {
+		address := xnetip.MustParseIPv6Addr(text)
+		require.True(t, address.IsInterfaceLocalMulticast(), text)
+		require.False(t, address.IsLinkLocalMulticast(), text)
+	}
+	for _, text := range []string{"ff02::1", "ff12::1"} {
+		address := xnetip.MustParseIPv6Addr(text)
+		require.True(t, address.IsLinkLocalMulticast(), text)
+		require.False(t, address.IsInterfaceLocalMulticast(), text)
+	}
+}
+
+// verifies that a mapped 224.0.0.0/24 address is link-local multicast but
+// never interface-local multicast, which stays an IPv6-only concept.
+func Test_IPv6Addr_MappedMulticast_FollowsIPv4Rules(t *testing.T) {
+	mapped := xnetip.MustParseIPv6Addr("::ffff:224.0.0.1")
+	require.True(t, mapped.IsMulticast())
+	require.True(t, mapped.IsLinkLocalMulticast())
+	require.False(t, mapped.IsInterfaceLocalMulticast())
+}
+
+// verifies that link-local unicast is the fe80::/10 range or a mapped
+// 169.254.0.0/16 address, and that its members are not global unicast.
+func Test_IPv6Addr_IsLinkLocalUnicast_MatchesFE80Slash10(t *testing.T) {
+	for _, text := range []string{"fe80::1", "febf:ffff::1"} {
+		address := xnetip.MustParseIPv6Addr(text)
+		require.True(t, address.IsLinkLocalUnicast(), text)
+		require.False(t, address.IsGlobalUnicast(), text)
+	}
+	for _, text := range []string{"fe7f::1", "fec0::1"} {
+		require.False(t, xnetip.MustParseIPv6Addr(text).IsLinkLocalUnicast(), text)
+	}
+	require.True(t, xnetip.MustParseIPv6Addr("::ffff:169.254.1.1").IsLinkLocalUnicast())
+}
+
+// verifies that global unicast excludes the special ranges and includes
+// plain public addresses with every other predicate false.
+//
+// The excluded ranges are ::, loopback, multicast, link-local unicast
+// and, through the mapped rule, the IPv4 unspecified and broadcast
+// addresses.
+func Test_IPv6Addr_IsGlobalUnicast_ExcludesSpecialRanges(t *testing.T) {
+	excluded := []string{"::", "::1", "fe80::1", "ff02::1", "::ffff:0.0.0.0", "::ffff:255.255.255.255"}
+	for _, text := range excluded {
+		require.False(t, xnetip.MustParseIPv6Addr(text).IsGlobalUnicast(), text)
+	}
+	for _, text := range []string{"2001:db8::1", "2a02:6b8::1"} {
+		address := xnetip.MustParseIPv6Addr(text)
+		require.True(t, address.IsGlobalUnicast(), text)
+		require.False(t, address.IsUnspecified(), text)
+		require.False(t, address.IsLoopback(), text)
+		require.False(t, address.IsPrivate(), text)
+		require.False(t, address.IsMulticast(), text)
+		require.False(t, address.IsLinkLocalUnicast(), text)
+		require.False(t, address.IsLinkLocalMulticast(), text)
+		require.False(t, address.IsInterfaceLocalMulticast(), text)
+		require.False(t, address.Is4In6(), text)
+	}
+}
+
+// verifies that the increment carries from the low half into the high
+// half at the 64-bit boundary.
+func Test_IPv6Addr_Next_CarriesAcrossHalfBoundary(t *testing.T) {
+	next, ok := xnetip.MustParseIPv6Addr("::ffff:ffff:ffff:ffff").Next()
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv6Addr("0:0:0:1::"), next)
+}
+
+// verifies that the address above the all-ones address does not exist
+// and is reported with the zero value and false, not by wrapping.
+func Test_IPv6Addr_Next_FailsAtAllOnes(t *testing.T) {
+	next, ok := xnetip.MustParseIPv6Addr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").Next()
+	require.False(t, ok)
+	require.Equal(t, xnetip.IPv6Addr{}, next)
+}
+
+// verifies that the decrement borrows from the high half into the low
+// half at the 64-bit boundary.
+func Test_IPv6Addr_Prev_BorrowsAcrossHalfBoundary(t *testing.T) {
+	prev, ok := xnetip.MustParseIPv6Addr("0:0:0:1::").Prev()
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv6Addr("::ffff:ffff:ffff:ffff"), prev)
+}
+
+// verifies that the address below :: does not exist and is reported with
+// the zero value and false, not by wrapping.
+func Test_IPv6Addr_Prev_FailsAtZero(t *testing.T) {
+	prev, ok := xnetip.MustParseIPv6Addr("::").Prev()
+	require.False(t, ok)
+	require.Equal(t, xnetip.IPv6Addr{}, prev)
+}
+
+// verifies that the bit length is the constant 128 for every address.
+func Test_IPv6Addr_BitLen_Is128(t *testing.T) {
+	require.Equal(t, 128, xnetip.IPv6Addr{}.BitLen())
+	rapid.Check(t, func(t *rapid.T) {
+		require.Equal(t, 128, genIPv6Addr.Draw(t, "address").BitLen())
+	})
+}
+
+// verifies that every predicate agrees with net/netip on every address.
+//
+// The generator mixes in IPv4-mapped addresses and first groups on both
+// sides of every classification range edge, so the differential suite
+// exercises the mapped branch and the boundary groups, not only uniform
+// luck.
+func Test_IPv6Addr_Predicates_MatchNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		oracle := netip.AddrFrom16(address.As16())
+		require.Equal(t, oracle.IsUnspecified(), address.IsUnspecified())
+		require.Equal(t, oracle.Is4In6(), address.Is4In6())
+		require.Equal(t, oracle.IsLoopback(), address.IsLoopback())
+		require.Equal(t, oracle.IsPrivate(), address.IsPrivate())
+		require.Equal(t, oracle.IsMulticast(), address.IsMulticast())
+		require.Equal(t, oracle.IsLinkLocalUnicast(), address.IsLinkLocalUnicast())
+		require.Equal(t, oracle.IsLinkLocalMulticast(), address.IsLinkLocalMulticast())
+		require.Equal(t, oracle.IsInterfaceLocalMulticast(), address.IsInterfaceLocalMulticast())
+		require.Equal(t, oracle.IsGlobalUnicast(), address.IsGlobalUnicast())
+	})
+}
+
+// verifies that the increment agrees with net/netip: it exists exactly
+// when netip's next address is valid and then holds the same bytes.
+func Test_IPv6Addr_Next_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		next, ok := address.Next()
+		oracle := netip.AddrFrom16(address.As16()).Next()
+		require.Equal(t, oracle.IsValid(), ok)
+		if ok {
+			require.Equal(t, oracle.As16(), next.As16())
+		}
+	})
+}
+
+// verifies that the decrement agrees with net/netip: it exists exactly
+// when netip's previous address is valid and then holds the same bytes.
+func Test_IPv6Addr_Prev_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		prev, ok := address.Prev()
+		oracle := netip.AddrFrom16(address.As16()).Prev()
+		require.Equal(t, oracle.IsValid(), ok)
+		if ok {
+			require.Equal(t, oracle.As16(), prev.As16())
+		}
+	})
+}
+
+// verifies that the decrement undoes the increment whenever the
+// increment exists.
+func Test_IPv6Addr_Next_ThenPrev_RoundTrips(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		next, ok := address.Next()
+		if !ok {
+			t.Skip("no next address")
+		}
+		prev, ok := next.Prev()
+		require.True(t, ok)
+		require.Equal(t, address, prev)
+	})
+}
+
+// verifies that the increment carries into the high half for every
+// address whose low half is all ones.
+func Test_IPv6Addr_Next_CarriesForEveryFullLowHalf(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		hi := rapid.Uint64Range(0, math.MaxUint64-1).Draw(t, "hi")
+		next, ok := xnetip.IPv6AddrFromBits(hi, math.MaxUint64).Next()
+		require.True(t, ok)
+		require.Equal(t, xnetip.IPv6AddrFromBits(hi+1, 0), next)
+	})
+}
+
+// verifies that the predicates, the increment and the decrement do not
+// allocate.
+func Test_IPv6Addr_Predicates_DoNotAllocate(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("2001:db8::1")
+	requireNoAllocs(t, func() {
+		boolSink = address.IsUnspecified()
+		boolSink = address.Is4In6()
+		boolSink = address.IsLoopback()
+		boolSink = address.IsPrivate()
+		boolSink = address.IsMulticast()
+		boolSink = address.IsLinkLocalUnicast()
+		boolSink = address.IsLinkLocalMulticast()
+		boolSink = address.IsInterfaceLocalMulticast()
+		boolSink = address.IsGlobalUnicast()
+		ipv6AddrSink, boolSink = address.Next()
+		ipv6AddrSink, boolSink = address.Prev()
+		intSink = address.BitLen()
+	})
+}
+
 // verifies that compare is the numeric order of the 128-bit pattern.
 //
 // The high half is compared first and the low half only breaks its ties,
