@@ -1,6 +1,9 @@
 package xnetip
 
-import "net/netip"
+import (
+	"net/netip"
+	"strings"
+)
 
 // IPNetwork is an IPv4 or IPv6 network with a mask of arbitrary shape.
 //
@@ -108,6 +111,49 @@ func IPNetworkFromCIDR(addr netip.Addr, bits int) (IPNetwork, error) {
 		input := cidrInput(addr, bits)
 		return IPNetwork{}, wrapParseError("IPNetworkFromCIDR", input, ErrAddrFamilyMismatch, nil)
 	}
+}
+
+// ParseIPNetwork parses an IPv4 or IPv6 network in CIDR,
+// explicit-mask or bare address notation.
+//
+// The address part selects the family and the mask must be of the same
+// family: "10.0.0.0/8", "10.0.0.0/255.0.255.0", "2001:db8::/32",
+// "2001:db8::/ffff:ffff::ffff:ffff:0:0", "10.0.0.1" and "2001:db8::1"
+// are all accepted. An IPv4-mapped address such as "::ffff:192.0.2.0"
+// is IPv6, so the network stays IPv6. Text whose address part is no
+// address of either family wraps ErrParse with the net/netip cause;
+// past that point the per-family grammar and errors are those of
+// ParseIPv4Network and ParseIPv6Network.
+func ParseIPNetwork(s string) (IPNetwork, error) {
+	addrText, suffix, hasSuffix := strings.Cut(s, "/")
+	addr, err := netip.ParseAddr(addrText)
+	if err != nil {
+		return IPNetwork{}, wrapParseError("ParseIPNetwork", s, ErrParse, err)
+	}
+	if addr.Is4() {
+		network, err := parseIPv4NetworkParts("ParseIPNetwork", s, addr, suffix, hasSuffix)
+		if err != nil {
+			return IPNetwork{}, err
+		}
+		return IPNetworkFrom4(network), nil
+	}
+	network, err := parseIPv6NetworkParts("ParseIPNetwork", s, addr, suffix, hasSuffix)
+	if err != nil {
+		return IPNetwork{}, err
+	}
+	return IPNetworkFrom6(network), nil
+}
+
+// MustParseIPNetwork calls ParseIPNetwork and panics on error.
+//
+// It is intended for tests and package-level constants built from
+// literals.
+func MustParseIPNetwork(s string) IPNetwork {
+	network, err := ParseIPNetwork(s)
+	if err != nil {
+		panic(err)
+	}
+	return network
 }
 
 // Is4 reports whether the network is IPv4.

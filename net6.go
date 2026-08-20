@@ -124,9 +124,9 @@ func ParseIPv6Network(s string) (IPv6Network, error) {
 // mask second, so a digits-only suffix past the limit is an overflow,
 // never a mask attempt. A missing suffix is a host route.
 func parseIPv6NetworkParts(function, input string, addr netip.Addr, suffix string, hasSuffix bool) (IPv6Network, error) {
-	addrKernel, kernelErr := ipv6ParsedKernel(addr)
-	if kernelErr != nil {
-		return IPv6Network{}, wrapParseError(function, input, kernelErr, nil)
+	addrKernel, err := ipv6ParsedKernel(addr)
+	if err != nil {
+		return IPv6Network{}, wrapParseError(function, input, err, nil)
 	}
 	if !hasSuffix {
 		return IPv6Network{addr: addrKernel, mask: ipv6AllBits}, nil
@@ -142,9 +142,9 @@ func parseIPv6NetworkParts(function, input string, addr netip.Addr, suffix strin
 	if err != nil {
 		return IPv6Network{}, wrapParseError(function, input, ErrInvalidMask, err)
 	}
-	maskKernel, kernelErr := ipv6ParsedKernel(mask)
-	if kernelErr != nil {
-		return IPv6Network{}, wrapParseError(function, input, ErrInvalidMask, kernelErr)
+	maskKernel, err := ipv6ParsedKernel(mask)
+	if err != nil {
+		return IPv6Network{}, wrapParseError(function, input, ErrInvalidMask, err)
 	}
 	return fromBits6(addrKernel, maskKernel), nil
 }

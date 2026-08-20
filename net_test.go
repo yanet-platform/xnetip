@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"net/netip"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -1485,5 +1487,388 @@ func BenchmarkIPNetwork_AppendTo_IPv4(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		bytesSink = network.AppendTo(buffer[:0])
+	}
+}
+
+// verifies that the address part selects the family: every accepted
+// form lands on the concrete network of its own family.
+func Test_ParseIPNetwork_AcceptsBothFamilies(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		wantAddr string
+		wantMask string
+		want4    bool
+	}{
+		{name: "IPv4 CIDR", input: "192.168.1.0/24", wantAddr: "192.168.1.0", wantMask: "255.255.255.0", want4: true},
+		{name: "IPv4 /8", input: "10.0.0.0/8", wantAddr: "10.0.0.0", wantMask: "255.0.0.0", want4: true},
+		{name: "IPv4 dotted mask", input: "10.0.0.0/255.0.0.0", wantAddr: "10.0.0.0", wantMask: "255.0.0.0", want4: true},
+		{name: "IPv4 normalizes host bits", input: "77.88.55.242/16", wantAddr: "77.88.0.0", wantMask: "255.255.0.0", want4: true},
+		{name: "bare IPv4 is a host route", input: "192.168.1.1", wantAddr: "192.168.1.1", wantMask: "255.255.255.255", want4: true},
+		{name: "IPv6 CIDR", input: "2a02:6b8:c00::/40", wantAddr: "2a02:6b8:c00::", wantMask: "ffff:ffff:ff00::", want4: false},
+		{name: "IPv6 /32", input: "2001:db8::/32", wantAddr: "2001:db8::", wantMask: "ffff:ffff::", want4: false},
+		{name: "IPv6 full mask", input: "2001:db8::1/ffff:ffff::ffff", wantAddr: "2001:db8::1", wantMask: "ffff:ffff::ffff", want4: false},
+		{name: "bare IPv6 is a host route", input: "2001:db8::1", wantAddr: "2001:db8::1", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", want4: false},
+		{name: "mapped text with short prefix", input: "::ffff:1.2.3.4/24", wantAddr: "::", wantMask: "ffff:ff00::", want4: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.ParseIPNetwork(testCase.input)
+			require.NoError(t, err)
+			if testCase.want4 {
+				require.Equal(t, mustIPNetwork4(t, testCase.wantAddr, testCase.wantMask), network)
+			} else {
+				require.Equal(t, mustIPNetwork6(t, testCase.wantAddr, testCase.wantMask), network)
+			}
+		})
+	}
+}
+
+// verifies that all six documented forms parse and print back to their
+// canonical text, the family following the address part.
+func Test_ParseIPNetwork_SixDocumentedForms(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+		want4 bool
+	}{
+		{name: "bare IPv4", input: "77.88.55.242", want: "77.88.55.242/32", want4: true},
+		{name: "IPv4 CIDR", input: "77.88.0.0/16", want: "77.88.0.0/16", want4: true},
+		{name: "IPv4 dotted mask", input: "77.88.0.0/255.255.0.0", want: "77.88.0.0/16", want4: true},
+		{name: "bare IPv6", input: "2a02:6b8::2:242", want: "2a02:6b8::2:242/128", want4: false},
+		{name: "IPv6 CIDR", input: "2a02:6b8:c00::/40", want: "2a02:6b8:c00::/40", want4: false},
+		{name: "IPv6 colon mask", input: "2a02:6b8:c00::/ffff:ffff:ff00::", want: "2a02:6b8:c00::/40", want4: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.ParseIPNetwork(testCase.input)
+			require.NoError(t, err)
+			require.Equal(t, testCase.want4, network.Is4())
+			require.Equal(t, testCase.want, network.String())
+		})
+	}
+}
+
+// verifies that IPv4-mapped text is an IPv6 network, exactly as the
+// mapped address itself reports the IPv6 family.
+func Test_ParseIPNetwork_MappedTextIsIPv6(t *testing.T) {
+	network, err := xnetip.ParseIPNetwork("::ffff:192.0.2.0/120")
+	require.NoError(t, err)
+	require.True(t, network.Is6())
+	_, ok := network.IPv4()
+	require.False(t, ok)
+	require.Equal(t, "::ffff:192.0.2.0/120", network.String())
+}
+
+// verifies that each family's universe parses into its own family: the
+// IPv4 one is not the IPv6 zero value and reports a zero prefix.
+func Test_ParseIPNetwork_UniversePerFamily(t *testing.T) {
+	network4, err := xnetip.ParseIPNetwork("0.0.0.0/0")
+	require.NoError(t, err)
+	require.True(t, network4.Is4())
+	bits, ok := network4.PrefixLen()
+	require.True(t, ok)
+	require.Equal(t, 0, bits)
+	network6, err := xnetip.ParseIPNetwork("::/0")
+	require.NoError(t, err)
+	require.True(t, network6.Is6())
+	require.Equal(t, xnetip.IPNetwork{}, network6)
+}
+
+// verifies that a digits-only suffix past the family's own limit is a
+// prefix-length overflow in either family.
+func Test_ParseIPNetwork_RejectsPrefixOverflow(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "IPv4 one past the limit", input: "192.168.1.0/33"},
+		{name: "IPv6 one past the limit", input: "::/129"},
+		{name: "IPv6 with address past the limit", input: "2a02:6b8:c00::/129"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.ParseIPNetwork(testCase.input)
+			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+			require.Equal(t, xnetip.IPNetwork{}, network)
+		})
+	}
+}
+
+// verifies that the strict prefix grammar and the same-family mask rule
+// hold through the family-agnostic entry point.
+func Test_ParseIPNetwork_RejectsBadSuffix(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "IPv4 leading zero in prefix", input: "10.0.0.0/08"},
+		{name: "IPv4 plus sign in prefix", input: "10.0.0.0/+8"},
+		{name: "IPv6 leading zero in prefix", input: "2001:db8::/032"},
+		{name: "IPv6 mask on IPv4 address", input: "10.0.0.1/2001:db8::1"},
+		{name: "IPv4 mask on IPv6 address", input: "2001:db8::1/255.255.255.0"},
+		{name: "empty suffix", input: "10.0.0.1/"},
+		{name: "double slash", input: "10.0.0.1//24"},
+		{name: "trailing space in suffix", input: "10.0.0.1/24 "},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.ParseIPNetwork(testCase.input)
+			require.ErrorIs(t, err, xnetip.ErrInvalidMask)
+			require.Equal(t, xnetip.IPNetwork{}, network)
+		})
+	}
+}
+
+// verifies that a cross-family mask keeps the family sentinel in the
+// chain behind the mask sentinel.
+func Test_ParseIPNetwork_CrossFamilyMaskKeepsBothSentinels(t *testing.T) {
+	_, err := xnetip.ParseIPNetwork("2001:db8::1/255.255.255.0")
+	require.ErrorIs(t, err, xnetip.ErrInvalidMask)
+	require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+}
+
+// verifies that text whose address part is no address of either family
+// is rejected with the parse sentinel.
+func Test_ParseIPNetwork_RejectsBadAddress(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "empty input", input: ""},
+		{name: "lone slash", input: "/"},
+		{name: "missing address", input: "/24"},
+		{name: "garbage", input: "hello"},
+		{name: "garbage with suffix", input: "zz/24"},
+		{name: "leading whitespace", input: " 10.0.0.1/24"},
+		{name: "port-like suffix", input: "1.2.3.4:80"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.ParseIPNetwork(testCase.input)
+			require.ErrorIs(t, err, xnetip.ErrParse)
+			require.Equal(t, xnetip.IPNetwork{}, network)
+		})
+	}
+}
+
+// verifies that a zone suffix is rejected with the zone sentinel
+// through the family-agnostic entry point.
+func Test_ParseIPNetwork_RejectsZone(t *testing.T) {
+	network, err := xnetip.ParseIPNetwork("fe80::1%eth0/64")
+	require.ErrorIs(t, err, xnetip.ErrZone)
+	require.Equal(t, xnetip.IPNetwork{}, network)
+}
+
+// verifies that non-contiguous masks of both families flow through the
+// family-agnostic parser verbatim.
+func Test_ParseIPNetwork_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		wantAddr string
+		wantMask string
+		want4    bool
+	}{
+		{name: "IPv4 two-run mask", input: "192.168.0.1/255.255.0.255", wantAddr: "192.168.0.1", wantMask: "255.255.0.255", want4: true},
+		{name: "IPv4 alternating mask", input: "170.85.170.85/170.85.170.85", wantAddr: "170.85.170.85", wantMask: "170.85.170.85", want4: true},
+		{name: "IPv6 geo mask", input: "2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0", wantAddr: "2a02:6b8:c00::1234:0:0", wantMask: "ffff:ffff:ff00:0:ffff:ffff::", want4: false},
+		{name: "IPv6 alternating groups", input: "2001:0:db8:0:1:0:2:0/ffff:0:ffff:0:ffff:0:ffff:0", wantAddr: "2001:0:db8:0:1:0:2:0", wantMask: "ffff:0:ffff:0:ffff:0:ffff:0", want4: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.ParseIPNetwork(testCase.input)
+			require.NoError(t, err)
+			if testCase.want4 {
+				require.Equal(t, mustIPNetwork4(t, testCase.wantAddr, testCase.wantMask), network)
+			} else {
+				require.Equal(t, mustIPNetwork6(t, testCase.wantAddr, testCase.wantMask), network)
+			}
+		})
+	}
+}
+
+// verifies that the must variant panics on invalid input instead of
+// returning an error.
+func Test_MustParseIPNetwork_PanicsOnInvalidInput(t *testing.T) {
+	require.Panics(t, func() { xnetip.MustParseIPNetwork("hello") })
+}
+
+// verifies that the must variant passes a valid parse through.
+func Test_MustParseIPNetwork_ReturnsParsedNetwork(t *testing.T) {
+	network := xnetip.MustParseIPNetwork("10.0.0.0/8")
+	require.Equal(t, mustIPNetwork4(t, "10.0.0.0", "255.0.0.0"), network)
+}
+
+// verifies that every parse error names this parser and echoes the
+// rejected input in quotes.
+func Test_ParseIPNetwork_ErrorEchoesInput(t *testing.T) {
+	_, err := xnetip.ParseIPNetwork("192.168.1.0/33")
+	require.Error(t, err)
+	require.True(t, strings.HasPrefix(err.Error(), "xnetip.ParseIPNetwork("))
+	require.Contains(t, err.Error(), `"192.168.1.0/33"`)
+}
+
+// verifies that the dispatcher never disagrees with the family parsers
+// on text either of them accepts.
+func Test_ParseIPNetwork_AgreesWithFamilyParsersProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		if rapid.Bool().Draw(t, "is4") {
+			text := genIPv4Network.Draw(t, "network4").String()
+			concrete, err := xnetip.ParseIPv4Network(text)
+			require.NoError(t, err)
+			agnostic, err := xnetip.ParseIPNetwork(text)
+			require.NoError(t, err)
+			require.Equal(t, xnetip.IPNetworkFrom4(concrete), agnostic)
+		} else {
+			text := genIPv6Network.Draw(t, "network6").String()
+			concrete, err := xnetip.ParseIPv6Network(text)
+			require.NoError(t, err)
+			agnostic, err := xnetip.ParseIPNetwork(text)
+			require.NoError(t, err)
+			require.Equal(t, xnetip.IPNetworkFrom6(concrete), agnostic)
+		}
+	})
+}
+
+// verifies that parsing the string form recovers the network exactly,
+// family flag included.
+func Test_ParseIPNetwork_StringRoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		parsed, err := xnetip.ParseIPNetwork(network.String())
+		require.NoError(t, err)
+		require.Equal(t, network, parsed)
+	})
+}
+
+// verifies that the dispatcher rejects a string exactly when both
+// family parsers reject it, and never panics on any byte string.
+func Test_ParseIPNetwork_RejectAgreementProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		input := string(rapid.SliceOfN(rapid.Byte(), 0, 60).Draw(t, "input"))
+		_, err := xnetip.ParseIPNetwork(input)
+		_, err4 := xnetip.ParseIPv4Network(input)
+		_, err6 := xnetip.ParseIPv6Network(input)
+		require.Equal(t, err4 != nil && err6 != nil, err != nil)
+	})
+}
+
+// verifies that on CIDR-shaped text of either family the accept set,
+// the family and the parsed value are those of the std prefix parser.
+func Test_ParseIPNetwork_MatchesNetipParsePrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var addr netip.Addr
+		if rapid.Bool().Draw(t, "is4") {
+			addr = genNetipAddr4.Draw(t, "addr4")
+		} else {
+			addr = genNetipAddr6.Draw(t, "addr6")
+		}
+		limit := 140
+		input := addr.String() + "/" + strconv.Itoa(rapid.IntRange(0, limit).Draw(t, "bits"))
+		parsed, err := xnetip.ParseIPNetwork(input)
+		stdPrefix, stdErr := netip.ParsePrefix(input)
+		if stdErr != nil {
+			require.Error(t, err)
+			return
+		}
+		require.NoError(t, err)
+		require.Equal(t, stdPrefix.Addr().Is4(), parsed.Is4())
+		require.Equal(t, stdPrefix.Masked().Addr(), parsed.Addr())
+		bits, ok := parsed.PrefixLen()
+		require.True(t, ok)
+		require.Equal(t, stdPrefix.Bits(), bits)
+	})
+}
+
+// verifies that accepting a network of either family allocates
+// nothing: the input is only ever sliced, never copied.
+func Test_ParseIPNetwork_AllocationFree(t *testing.T) {
+	requireNoAllocs(t, func() { ipNetworkSink, errSink = xnetip.ParseIPNetwork("10.0.0.0/8") })
+	requireNoAllocs(t, func() { ipNetworkSink, errSink = xnetip.ParseIPNetwork("2001:db8::/32") })
+}
+
+func FuzzParseIPNetwork(f *testing.F) {
+	seeds := []string{
+		"192.168.1.0/24", "10.0.0.0/8", "10.0.0.0/255.0.0.0", "77.88.55.242/16",
+		"192.168.1.1", "2a02:6b8:c00::/40", "2001:db8::/32", "2001:db8::1/ffff:ffff::ffff",
+		"2001:db8::1", "2a02:6b8::2:242", "77.88.0.0/255.255.0.0", "2a02:6b8:c00::/ffff:ffff:ff00::",
+		"::ffff:192.0.2.0/120", "::ffff:1.2.3.4/24", "0.0.0.0/0", "::/0",
+		"192.168.1.0/33", "::/129", "2a02:6b8:c00::/129", "10.0.0.0/08", "10.0.0.0/+8",
+		"2001:db8::/032", "10.0.0.1/2001:db8::1", "2001:db8::1/255.255.255.0",
+		"", "/", "10.0.0.1/", "/24", "10.0.0.1//24", "hello", "zz/24",
+		" 10.0.0.1/24", "10.0.0.1/24 ", "fe80::1%eth0/64", "1.2.3.4:80",
+		"192.168.0.1/255.255.0.255", "170.85.170.85/170.85.170.85",
+		"2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+		"2001:0:db8:0:1:0:2:0/ffff:0:ffff:0:ffff:0:ffff:0",
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		network, err := xnetip.ParseIPNetwork(input)
+		if err == nil {
+			back, err := xnetip.ParseIPNetwork(network.String())
+			if err != nil {
+				t.Fatalf("round trip of %q rejected %q: %v", input, network.String(), err)
+			}
+			if back != network {
+				t.Fatalf("round trip of %q changed the network: %v != %v", input, back, network)
+			}
+			addrText, _, _ := strings.Cut(input, "/")
+			addr, err := netip.ParseAddr(addrText)
+			if err != nil {
+				t.Fatalf("accepted %q, whose address part %q std rejects", input, addrText)
+			}
+			if addr.Is4() != network.Is4() {
+				t.Fatalf("parsed %q into the wrong family", input)
+			}
+		}
+		slash := strings.IndexByte(input, '/')
+		if slash < 0 || strings.IndexByte(input[slash+1:], '/') >= 0 || !digitsOnly(input[slash+1:]) {
+			return
+		}
+		stdPrefix, stdErr := netip.ParsePrefix(input)
+		if stdErr != nil {
+			if err == nil {
+				t.Fatalf("accepted %q, which std rejects", input)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("rejected %q, which std accepts: %v", input, err)
+		}
+		if bits, ok := network.PrefixLen(); !ok || bits != stdPrefix.Bits() || network.Addr() != stdPrefix.Masked().Addr() {
+			t.Fatalf("parsed %q as %v, std says %v", input, network, stdPrefix.Masked())
+		}
+	})
+}
+
+func BenchmarkParseIPNetwork_IPv4CIDR(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		ipNetworkSink, errSink = xnetip.ParseIPNetwork("10.0.0.0/8")
+	}
+}
+
+func BenchmarkParseIPNetwork_IPv6CIDR(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		ipNetworkSink, errSink = xnetip.ParseIPNetwork("2001:db8::/32")
+	}
+}
+
+func BenchmarkParseIPNetwork_IPv4Bare(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		ipNetworkSink, errSink = xnetip.ParseIPNetwork("10.0.0.1")
+	}
+}
+
+func BenchmarkParseIPNetwork_Reject(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		ipNetworkSink, errSink = xnetip.ParseIPNetwork("hello")
 	}
 }

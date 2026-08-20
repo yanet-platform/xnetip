@@ -1362,9 +1362,9 @@ func FuzzParseIPv4Network(f *testing.F) {
 	f.Fuzz(func(t *testing.T, input string) {
 		network, err := xnetip.ParseIPv4Network(input)
 		if err == nil {
-			back, backErr := xnetip.ParseIPv4Network(network.String())
-			if backErr != nil {
-				t.Fatalf("round trip of %q rejected %q: %v", input, network.String(), backErr)
+			back, err := xnetip.ParseIPv4Network(network.String())
+			if err != nil {
+				t.Fatalf("round trip of %q rejected %q: %v", input, network.String(), err)
 			}
 			if back != network {
 				t.Fatalf("round trip of %q changed the network: %v != %v", input, back, network)
