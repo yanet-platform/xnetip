@@ -69,6 +69,23 @@ func (m *failRecorder) Errorf(string, ...any) { m.errors++ }
 
 func (m *failRecorder) FailNow() { m.failedNow = true }
 
+// netipAddrFrom4Bits returns the Is4 netip.Addr whose host-order bit
+// pattern is bits, the integer entry point for tests and generators.
+func netipAddrFrom4Bits(bits uint32) netip.Addr {
+	var bytes [4]byte
+	binary.BigEndian.PutUint32(bytes[:], bits)
+	return netip.AddrFrom4(bytes)
+}
+
+// netipAddrFrom6Bits returns the Is6 netip.Addr for host-order 64-bit
+// halves, high half first.
+func netipAddrFrom6Bits(hi, lo uint64) netip.Addr {
+	var bytes [16]byte
+	binary.BigEndian.PutUint64(bytes[:8], hi)
+	binary.BigEndian.PutUint64(bytes[8:], lo)
+	return netip.AddrFrom16(bytes)
+}
+
 // genNetipAddr4 draws an Is4 netip.Addr: uniform 32-bit values, with one
 // draw in ten on a boundary or half-word pattern.
 //
@@ -84,9 +101,7 @@ var genNetipAddr4 = rapid.Custom(func(t *rapid.T) netip.Addr {
 		boundaries := []uint32{0, math.MaxUint32, 0x7FFFFFFF, 0x80000000, 0x0000FFFF, 0xFFFF0000}
 		bits = rapid.SampledFrom(boundaries).Draw(t, "boundary")
 	}
-	var bytes [4]byte
-	binary.BigEndian.PutUint32(bytes[:], bits)
-	return netip.AddrFrom4(bytes)
+	return netipAddrFrom4Bits(bits)
 })
 
 // genNetipAddr6 draws an Is6 netip.Addr: uniform 128-bit values with
@@ -115,13 +130,10 @@ var genNetipAddr6 = rapid.Custom(func(t *rapid.T) netip.Addr {
 		hi = rapid.Uint64().Draw(t, "hi")
 		lo = rapid.Uint64().Draw(t, "lo")
 	}
-	var bytes [16]byte
-	binary.BigEndian.PutUint64(bytes[:8], hi)
-	binary.BigEndian.PutUint64(bytes[8:], lo)
-	return netip.AddrFrom16(bytes)
+	return netipAddrFrom6Bits(hi, lo)
 })
 
-// genIPv4Network draws an IPv4 network through the total integer
+// genIPv4Network draws an IPv4 network through the checked
 // constructor, asserting every draw normalized.
 //
 // The address is uniform and the mask comes from fixed-weight shapes:
@@ -146,10 +158,13 @@ var genIPv4Network = rapid.Custom(func(t *rapid.T) xnetip.IPv4Network {
 	default:
 		maskBits = math.MaxUint32
 	}
-	network := xnetip.IPv4NetworkFromBits(addressBits, maskBits)
-	networkAddr, networkMask := network.Bits()
-	require.Equal(t, networkAddr&networkMask, networkAddr, "network not normalized")
-	require.Equal(t, maskBits, networkMask, "mask not preserved")
+	network, err := xnetip.IPv4NetworkFrom(
+		netipAddrFrom4Bits(addressBits),
+		netipAddrFrom4Bits(maskBits),
+	)
+	require.NoError(t, err)
+	require.Equal(t, netipAddrFrom4Bits(addressBits&maskBits), network.Addr(), "network not normalized")
+	require.Equal(t, netipAddrFrom4Bits(maskBits), network.Mask(), "mask not preserved")
 	return network
 })
 
@@ -166,7 +181,7 @@ var genIPv4Prefix = rapid.Custom(func(t *rapid.T) netip.Prefix {
 	return netip.PrefixFrom(address, bits)
 })
 
-// genIPv6Network draws an IPv6 network through the total integer
+// genIPv6Network draws an IPv6 network through the checked
 // constructor, asserting every draw normalized.
 //
 // The address is uniform and the mask comes from fixed-weight shapes:
@@ -212,12 +227,13 @@ var genIPv6Network = rapid.Custom(func(t *rapid.T) xnetip.IPv6Network {
 		maskHi = 0xFF00000000000000 | ^uint64(0)>>(64-straddleHigh)
 		maskLo = ^uint64(0) << (64 - straddleLow)
 	}
-	network := xnetip.IPv6NetworkFromBits(addrHi, addrLo, maskHi, maskLo)
-	networkAddrHi, networkAddrLo, networkMaskHi, networkMaskLo := network.Bits()
-	require.Equal(t, networkAddrHi&networkMaskHi, networkAddrHi, "network high half not normalized")
-	require.Equal(t, networkAddrLo&networkMaskLo, networkAddrLo, "network low half not normalized")
-	require.Equal(t, maskHi, networkMaskHi, "mask high half not preserved")
-	require.Equal(t, maskLo, networkMaskLo, "mask low half not preserved")
+	network, err := xnetip.IPv6NetworkFrom(
+		netipAddrFrom6Bits(addrHi, addrLo),
+		netipAddrFrom6Bits(maskHi, maskLo),
+	)
+	require.NoError(t, err)
+	require.Equal(t, netipAddrFrom6Bits(addrHi&maskHi, addrLo&maskLo), network.Addr(), "network not normalized")
+	require.Equal(t, netipAddrFrom6Bits(maskHi, maskLo), network.Mask(), "mask not preserved")
 	return network
 })
 
@@ -251,7 +267,6 @@ var genIPNetwork = rapid.Custom(func(t *rapid.T) xnetip.IPNetwork {
 // optimise the work under test away.
 var (
 	wordSink      uint32
-	word64Sink    uint64
 	bytesSink     []byte
 	networkSink   xnetip.IPv4Network
 	network6Sink  xnetip.IPv6Network

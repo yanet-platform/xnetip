@@ -2,7 +2,6 @@ package xnetip_test
 
 import (
 	"encoding/binary"
-	"math"
 	"net/netip"
 	"testing"
 
@@ -110,56 +109,8 @@ func Test_IPv6NetworkFrom_UniverseEqualsZeroValue(t *testing.T) {
 // verifies that the zero value is the unspecified network ::/0.
 func Test_IPv6Network_ZeroValue_IsUnspecifiedNetwork(t *testing.T) {
 	var network xnetip.IPv6Network
-	addrHi, addrLo, maskHi, maskLo := network.Bits()
-	require.Equal(t, uint64(0), addrHi)
-	require.Equal(t, uint64(0), addrLo)
-	require.Equal(t, uint64(0), maskHi)
-	require.Equal(t, uint64(0), maskLo)
 	require.Equal(t, netip.MustParseAddr("::"), network.Addr())
 	require.Equal(t, netip.MustParseAddr("::"), network.Mask())
-}
-
-// verifies that the integer constructor matches the checked one and
-// the bits view returns the host-order halves it was built from.
-func Test_IPv6NetworkFromBits_RoundTrip(t *testing.T) {
-	expected, err := xnetip.IPv6NetworkFrom(
-		netip.MustParseAddr("2a02:6b8:b081:7228::1:b"),
-		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
-	)
-	require.NoError(t, err)
-	network := xnetip.IPv6NetworkFromBits(0x2a0206b8b0817228, 0x000000000001000b, math.MaxUint64, math.MaxUint64)
-	require.Equal(t, expected, network)
-	addrHi, addrLo, maskHi, maskLo := network.Bits()
-	require.Equal(t, uint64(0x2a0206b8b0817228), addrHi)
-	require.Equal(t, uint64(0x000000000001000b), addrLo)
-	require.Equal(t, uint64(math.MaxUint64), maskHi)
-	require.Equal(t, uint64(math.MaxUint64), maskLo)
-}
-
-// verifies that the integer constructor normalizes the address by the
-// mask like the checked constructor, each half independently.
-func Test_IPv6NetworkFromBits_Normalizes(t *testing.T) {
-	network := xnetip.IPv6NetworkFromBits(0x20010db800000000, 1, 0xffffffff00000000, 0)
-	addrHi, addrLo, maskHi, maskLo := network.Bits()
-	require.Equal(t, uint64(0x20010db800000000), addrHi)
-	require.Equal(t, uint64(0), addrLo)
-	require.Equal(t, uint64(0xffffffff00000000), maskHi)
-	require.Equal(t, uint64(0), maskLo)
-}
-
-// verifies that the single-lowest-bit mask keeps exactly bit zero of
-// the low half, pinning the half layout of the bits view.
-func Test_IPv6NetworkFrom_SingleLowestBit_Bits(t *testing.T) {
-	network, err := xnetip.IPv6NetworkFrom(
-		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
-		netip.MustParseAddr("::1"),
-	)
-	require.NoError(t, err)
-	addrHi, addrLo, maskHi, maskLo := network.Bits()
-	require.Equal(t, uint64(0), addrHi)
-	require.Equal(t, uint64(1), addrLo)
-	require.Equal(t, uint64(0), maskHi)
-	require.Equal(t, uint64(1), maskLo)
 }
 
 // verifies that two constructions from different hosts of one subnet
@@ -187,9 +138,13 @@ func Test_IPv6NetworkFrom_NormalizationProperty(t *testing.T) {
 		mask := genNetipAddr6.Draw(t, "mask")
 		network, err := xnetip.IPv6NetworkFrom(addr, mask)
 		require.NoError(t, err)
-		addrHi, addrLo, maskHi, maskLo := network.Bits()
-		require.Equal(t, addrHi&maskHi, addrHi)
-		require.Equal(t, addrLo&maskLo, addrLo)
+		addrBytes := addr.As16()
+		maskBytes := mask.As16()
+		var wantBytes [16]byte
+		for idx := range wantBytes {
+			wantBytes[idx] = addrBytes[idx] & maskBytes[idx]
+		}
+		require.Equal(t, netip.AddrFrom16(wantBytes), network.Addr())
 		require.Equal(t, mask, network.Mask())
 	})
 }
@@ -202,15 +157,6 @@ func Test_IPv6NetworkFrom_Idempotent(t *testing.T) {
 		rebuilt, err := xnetip.IPv6NetworkFrom(network.Addr(), network.Mask())
 		require.NoError(t, err)
 		require.Equal(t, network, rebuilt)
-	})
-}
-
-// verifies that the bits view and the integer constructor invert each
-// other.
-func Test_IPv6NetworkFromBits_RoundTripsBits(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		require.Equal(t, network, xnetip.IPv6NetworkFromBits(network.Bits()))
 	})
 }
 
@@ -239,10 +185,7 @@ func Test_IPv6NetworkFrom_MatchesNetipMasked(t *testing.T) {
 			maskHi = ^uint64(0)
 			maskLo = ^uint64(0) << (128 - prefix.Bits())
 		}
-		var maskBytes [16]byte
-		binary.BigEndian.PutUint64(maskBytes[:8], maskHi)
-		binary.BigEndian.PutUint64(maskBytes[8:], maskLo)
-		network, err := xnetip.IPv6NetworkFrom(prefix.Addr(), netip.AddrFrom16(maskBytes))
+		network, err := xnetip.IPv6NetworkFrom(prefix.Addr(), netipAddrFrom6Bits(maskHi, maskLo))
 		require.NoError(t, err)
 		require.Equal(t, prefix.Masked().Addr(), network.Addr())
 	})
@@ -256,14 +199,8 @@ func Test_IPv6Network_Constructors_AllocationFree(t *testing.T) {
 	var err error
 	requireNoAllocs(t, func() { network6Sink, err = xnetip.IPv6NetworkFrom(addr, mask) })
 	require.NoError(t, err)
-	requireNoAllocs(t, func() {
-		network6Sink = xnetip.IPv6NetworkFromBits(0x2a0206b8b0817228, 0x1000b, ^uint64(0), ^uint64(0))
-	})
-	network := xnetip.IPv6NetworkFromBits(0x2a0206b8b0817228, 0, ^uint64(0), 0)
-	requireNoAllocs(t, func() {
-		addrHi, addrLo, maskHi, maskLo := network.Bits()
-		word64Sink = addrHi ^ addrLo ^ maskHi ^ maskLo
-	})
+	network, err := xnetip.IPv6NetworkFrom(addr, mask)
+	require.NoError(t, err)
 	requireNoAllocs(t, func() { addrSink = network.Addr() })
 	requireNoAllocs(t, func() { addrSink = network.Mask() })
 }
@@ -327,8 +264,8 @@ func Test_IPv6Network_IsIPv4MappedIPv6_TrueOnMappedIPv4(t *testing.T) {
 func Test_IPv6Network_IsIPv4MappedIPv6_FalseWhenMaskHighHalfNotFull(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		network := genIPv6Network.Draw(t, "network")
-		_, _, maskHi, _ := network.Bits()
-		if maskHi != ^uint64(0) {
+		maskBytes := network.Mask().As16()
+		if binary.BigEndian.Uint64(maskBytes[:8]) != ^uint64(0) {
 			require.False(t, network.IsIPv4MappedIPv6())
 		}
 	})
@@ -360,7 +297,12 @@ func Test_IPv6Network_IsIPv4MappedIPv6_MatchesByteOracle(t *testing.T) {
 // verifies that the predicate allocates nothing, per the
 // allocation-free runtime contract.
 func Test_IPv6Network_IsIPv4MappedIPv6_AllocationFree(t *testing.T) {
-	network := xnetip.IPv4NetworkFromBits(0xC0A80001, 0xFFFF00FF).ToIPv6Mapped()
+	network4, err := xnetip.IPv4NetworkFrom(
+		netip.MustParseAddr("192.168.0.1"),
+		netip.MustParseAddr("255.255.0.255"),
+	)
+	require.NoError(t, err)
+	network := network4.ToIPv6Mapped()
 	requireNoAllocs(t, func() { okSink = network.IsIPv4MappedIPv6() })
 }
 
@@ -416,15 +358,13 @@ func Test_IPv6Network_ToIPv4Mapped(t *testing.T) {
 }
 
 // verifies that collapsing the mapped image of any IPv4 network
-// recovers it exactly and normalized, whatever the mask's shape.
+// recovers it exactly, whatever the mask's shape.
 func Test_IPv6Network_ToIPv4Mapped_RoundTripsMappedIPv4(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		network := genIPv4Network.Draw(t, "network")
 		recovered, ok := network.ToIPv6Mapped().ToIPv4Mapped()
 		require.True(t, ok)
 		require.Equal(t, network, recovered)
-		recoveredAddr, recoveredMask := recovered.Bits()
-		require.Equal(t, recoveredAddr&recoveredMask, recoveredAddr)
 	})
 }
 
@@ -438,8 +378,8 @@ func Test_IPv6Network_ToIPv4Mapped_ConsistentWithGuard(t *testing.T) {
 	})
 }
 
-// verifies that a successful collapse returns exactly the low 32 bits
-// of the address and the mask, pinning the truncation.
+// verifies that a successful collapse returns exactly the low four
+// address and mask bytes, pinning the truncation.
 func Test_IPv6Network_ToIPv4Mapped_TakesLowBits(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		network := genIPv6Network.Draw(t, "network")
@@ -447,18 +387,27 @@ func Test_IPv6Network_ToIPv4Mapped_TakesLowBits(t *testing.T) {
 		if !ok {
 			return
 		}
-		_, addrLo, _, maskLo := network.Bits()
-		recoveredAddr, recoveredMask := recovered.Bits()
-		require.Equal(t, uint32(addrLo), recoveredAddr)
-		require.Equal(t, uint32(maskLo), recoveredMask)
+		addrBytes := network.Addr().As16()
+		maskBytes := network.Mask().As16()
+		require.Equal(t, [4]byte(addrBytes[12:]), recovered.Addr().As4())
+		require.Equal(t, [4]byte(maskBytes[12:]), recovered.Mask().As4())
 	})
 }
 
 // verifies that the collapse allocates nothing on either path, per the
 // allocation-free runtime contract.
 func Test_IPv6Network_ToIPv4Mapped_AllocationFree(t *testing.T) {
-	mapped := xnetip.IPv4NetworkFromBits(0xC0A80001, 0xFFFF00FF).ToIPv6Mapped()
-	notMapped := xnetip.IPv6NetworkFromBits(0x20010db800000000, 0, 0xffffffff00000000, 0)
+	network4, err := xnetip.IPv4NetworkFrom(
+		netip.MustParseAddr("192.168.0.1"),
+		netip.MustParseAddr("255.255.0.255"),
+	)
+	require.NoError(t, err)
+	mapped := network4.ToIPv6Mapped()
+	notMapped, err := xnetip.IPv6NetworkFrom(
+		netip.MustParseAddr("2001:db8::"),
+		netip.MustParseAddr("ffff:ffff::"),
+	)
+	require.NoError(t, err)
 	requireNoAllocs(t, func() { networkSink, okSink = mapped.ToIPv4Mapped() })
 	requireNoAllocs(t, func() { networkSink, okSink = notMapped.ToIPv4Mapped() })
 }

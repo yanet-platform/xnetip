@@ -30,18 +30,19 @@ func IPv4NetworkFrom(addr, mask netip.Addr) (IPv4Network, error) {
 		input := addr.String() + "/" + mask.String()
 		return IPv4Network{}, wrapParseError("IPv4NetworkFrom", input, ErrAddrFamilyMismatch, nil)
 	}
-	return IPv4NetworkFromBits(addrKernel.Bits(), maskKernel.Bits()), nil
+	return fromBits4(addrKernel, maskKernel), nil
 }
 
-// IPv4NetworkFromBits returns the network for a host-order address and
-// mask.
+// fromBits4 returns the normalized network of an address and mask
+// kernel.
 //
-// The address is normalized by the mask, as in IPv4NetworkFrom. It is
-// the total integer fast path: every input is a valid network.
-func IPv4NetworkFromBits(addr, mask uint32) IPv4Network {
+// It is the total internal fast path shared by every constructor: the
+// address is normalized by the mask, so any kernel pair yields a valid
+// network.
+func fromBits4(addr, mask ipv4Addr) IPv4Network {
 	return IPv4Network{
-		addr: ipv4AddrFromBits(addr & mask),
-		mask: ipv4AddrFromBits(mask),
+		addr: ipv4AddrFromBits(addr.Bits() & mask.Bits()),
+		mask: mask,
 	}
 }
 
@@ -56,11 +57,6 @@ func (m IPv4Network) Mask() netip.Addr {
 	return m.mask.Netip()
 }
 
-// Bits returns the address and the mask as host-order integers.
-func (m IPv4Network) Bits() (addr, mask uint32) {
-	return m.addr.Bits(), m.mask.Bits()
-}
-
 // ToIPv6Mapped returns this network as an IPv4-mapped IPv6 network.
 //
 // The address becomes ::ffff:a.b.c.d and the mask keeps the upper 96
@@ -69,8 +65,8 @@ func (m IPv4Network) Bits() (addr, mask uint32) {
 // preserved: two IPv4 networks contain or intersect each other exactly
 // when their mapped forms do. IPv6Network.ToIPv4Mapped inverts it.
 func (m IPv4Network) ToIPv6Mapped() IPv6Network {
-	addrHi, addrLo := m.addr.ToIPv6Mapped().Bits()
-	return IPv6NetworkFromBits(addrHi, addrLo, ^uint64(0), 0xffffffff_00000000|uint64(m.mask.Bits()))
+	mappedMask := ipv6AddrFromBits(^uint64(0), 0xffffffff_00000000|uint64(m.mask.Bits()))
+	return fromBits6(m.addr.ToIPv6Mapped(), mappedMask)
 }
 
 // IPNetwork returns this IPv4 network as an IPNetwork.

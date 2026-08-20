@@ -31,21 +31,19 @@ func IPv6NetworkFrom(addr, mask netip.Addr) (IPv6Network, error) {
 		input := addr.String() + "/" + mask.String()
 		return IPv6Network{}, wrapParseError("IPv6NetworkFrom", input, ErrAddrFamilyMismatch, nil)
 	}
-	addrHi, addrLo := addrKernel.Bits()
-	maskHi, maskLo := maskKernel.Bits()
-	return IPv6NetworkFromBits(addrHi, addrLo, maskHi, maskLo), nil
+	return fromBits6(addrKernel, maskKernel), nil
 }
 
-// IPv6NetworkFromBits returns the network for host-order address and
-// mask halves, high 64 bits first.
+// fromBits6 returns the normalized network of an address and mask
+// kernel.
 //
-// The address is normalized by the mask, as in IPv6NetworkFrom. It is
-// the total integer fast path: every input is a valid network.
-func IPv6NetworkFromBits(addrHi, addrLo, maskHi, maskLo uint64) IPv6Network {
-	mask := uint128FromHalves(maskHi, maskLo)
+// It is the total internal fast path shared by every constructor: the
+// address is normalized by the mask, so any kernel pair yields a valid
+// network.
+func fromBits6(addr, mask ipv6Addr) IPv6Network {
 	return IPv6Network{
-		addr: ipv6Addr{uint128FromHalves(addrHi, addrLo).And(mask)},
-		mask: ipv6Addr{mask},
+		addr: ipv6Addr{addr.bits.And(mask.bits)},
+		mask: mask,
 	}
 }
 
@@ -58,13 +56,6 @@ func (m IPv6Network) Addr() netip.Addr {
 // Mask returns the network mask as an Is6 netip.Addr.
 func (m IPv6Network) Mask() netip.Addr {
 	return m.mask.Netip()
-}
-
-// Bits returns the address and the mask as host-order 64-bit halves.
-func (m IPv6Network) Bits() (addrHi, addrLo, maskHi, maskLo uint64) {
-	addrHi, addrLo = m.addr.Bits()
-	maskHi, maskLo = m.mask.Bits()
-	return addrHi, addrLo, maskHi, maskLo
 }
 
 // IsIPv4MappedIPv6 reports whether this network is an IPv4-mapped IPv6
@@ -93,7 +84,7 @@ func (m IPv6Network) ToIPv4Mapped() (IPv4Network, bool) {
 	}
 	_, addrLo := m.addr.Bits()
 	_, maskLo := m.mask.Bits()
-	return IPv4NetworkFromBits(uint32(addrLo), uint32(maskLo)), true
+	return fromBits4(ipv4AddrFromBits(uint32(addrLo)), ipv4AddrFromBits(uint32(maskLo))), true
 }
 
 // IPNetwork returns this IPv6 network as an IPNetwork.
