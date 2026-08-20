@@ -79,3 +79,19 @@ func (m IPv6Network) IsIPv4MappedIPv6() bool {
 	maskHi, maskLo := m.mask.Bits()
 	return m.addr.Is4In6() && maskHi == ^uint64(0) && maskLo>>32 == 0xffffffff
 }
+
+// ToIPv4Mapped returns the IPv4 network this IPv4-mapped IPv6 network
+// encodes.
+//
+// The result is the low 32 bits of the address and the mask, valid
+// only when IsIPv4MappedIPv6 holds, otherwise ok is false. Truncation
+// preserves normalization, because the upper 96 bits of a mapped
+// network are fully masked. The inverse of IPv4Network.ToIPv6Mapped.
+func (m IPv6Network) ToIPv4Mapped() (IPv4Network, bool) {
+	if !m.IsIPv4MappedIPv6() {
+		return IPv4Network{}, false
+	}
+	_, addrLo := m.addr.Bits()
+	_, maskLo := m.mask.Bits()
+	return IPv4NetworkFromBits(uint32(addrLo), uint32(maskLo)), true
+}

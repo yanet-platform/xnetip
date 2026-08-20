@@ -363,3 +363,144 @@ func Test_IPv6Network_IsIPv4MappedIPv6_AllocationFree(t *testing.T) {
 	network := xnetip.IPv4NetworkFromBits(0xC0A80001, 0xFFFF00FF).ToIPv6Mapped()
 	requireNoAllocs(t, func() { okSink = network.IsIPv4MappedIPv6() })
 }
+
+// verifies that a mapped network collapses to the IPv4 network in its
+// low 32 address and mask bits, and everything else reports not ok.
+//
+// The guard is the strict mapped predicate: an IPv4-compatible address,
+// a plain IPv6 network and a mapped-looking address under a mask that
+// does not pin the upper 96 bits all refuse to collapse.
+func Test_IPv6Network_ToIPv4Mapped(t *testing.T) {
+	cases := []struct {
+		name     string
+		addr     string
+		mask     string
+		wantAddr string
+		wantMask string
+		wantOk   bool
+	}{
+		{name: "mapped /120 doctest", addr: "::ffff:c00a:2ff", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00", wantAddr: "192.10.2.0", wantMask: "255.255.255.0", wantOk: true},
+		{name: "mapped /120", addr: "::ffff:c0a8:100", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00", wantAddr: "192.168.1.0", wantMask: "255.255.255.0", wantOk: true},
+		{name: "mapped universe", addr: "::ffff:0:0", mask: "ffff:ffff:ffff:ffff:ffff:ffff::", wantAddr: "0.0.0.0", wantMask: "0.0.0.0", wantOk: true},
+		{name: "mapped host route", addr: "::ffff:a01:203", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", wantAddr: "10.1.2.3", wantMask: "255.255.255.255", wantOk: true},
+		{name: "mapped with a hole in the third octet", addr: "::ffff:c0a8:1", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff", wantAddr: "192.168.0.1", wantMask: "255.255.0.255", wantOk: true},
+		{name: "mapped with an alternating low mask", addr: "::ffff:aa55:aa55", mask: "ffff:ffff:ffff:ffff:ffff:ffff:aa55:aa55", wantAddr: "170.85.170.85", wantMask: "170.85.170.85", wantOk: true},
+		{name: "IPv4-compatible address is not mapped", addr: "::c00a:2ff", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00", wantOk: false},
+		{name: "plain IPv6 /32", addr: "2001:db8::", mask: "ffff:ffff::", wantOk: false},
+		{name: "ffff pattern under a mask not pinning the top bits", addr: "::ffff:c0a8:1", mask: "0:ffff:ffff:ffff:ffff:ffff:ffff:ffff", wantOk: false},
+		{name: "universe", addr: "::", mask: "::", wantOk: false},
+		{name: "hole inside the upper 96 mask bits", addr: "::ffff:c0a8:1", mask: "ffff:ffff:ffff:0:ffff:ffff:ffff:ffff", wantOk: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPv6NetworkFrom(
+				netip.MustParseAddr(testCase.addr),
+				netip.MustParseAddr(testCase.mask),
+			)
+			require.NoError(t, err)
+			recovered, ok := network.ToIPv4Mapped()
+			if !testCase.wantOk {
+				require.False(t, ok)
+				require.Equal(t, xnetip.IPv4Network{}, recovered)
+				return
+			}
+			require.True(t, ok)
+			expected, err := xnetip.IPv4NetworkFrom(
+				netip.MustParseAddr(testCase.wantAddr),
+				netip.MustParseAddr(testCase.wantMask),
+			)
+			require.NoError(t, err)
+			require.Equal(t, expected, recovered)
+		})
+	}
+}
+
+// verifies that collapsing the mapped image of any IPv4 network
+// recovers it exactly and normalized, whatever the mask's shape.
+func Test_IPv6Network_ToIPv4Mapped_RoundTripsMappedIPv4(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		recovered, ok := network.ToIPv6Mapped().ToIPv4Mapped()
+		require.True(t, ok)
+		require.Equal(t, network, recovered)
+		recoveredAddr, recoveredMask := recovered.Bits()
+		require.Equal(t, recoveredAddr&recoveredMask, recoveredAddr)
+	})
+}
+
+// verifies that the collapse succeeds exactly when the strict mapped
+// predicate holds, on every mask shape the generator draws.
+func Test_IPv6Network_ToIPv4Mapped_ConsistentWithGuard(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		_, ok := network.ToIPv4Mapped()
+		require.Equal(t, network.IsIPv4MappedIPv6(), ok)
+	})
+}
+
+// verifies that a successful collapse returns exactly the low 32 bits
+// of the address and the mask, pinning the truncation.
+func Test_IPv6Network_ToIPv4Mapped_TakesLowBits(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		recovered, ok := network.ToIPv4Mapped()
+		if !ok {
+			return
+		}
+		_, addrLo, _, maskLo := network.Bits()
+		recoveredAddr, recoveredMask := recovered.Bits()
+		require.Equal(t, uint32(addrLo), recoveredAddr)
+		require.Equal(t, uint32(maskLo), recoveredMask)
+	})
+}
+
+// verifies that the collapse allocates nothing on either path, per the
+// allocation-free runtime contract.
+func Test_IPv6Network_ToIPv4Mapped_AllocationFree(t *testing.T) {
+	mapped := xnetip.IPv4NetworkFromBits(0xC0A80001, 0xFFFF00FF).ToIPv6Mapped()
+	notMapped := xnetip.IPv6NetworkFromBits(0x20010db800000000, 0, 0xffffffff00000000, 0)
+	requireNoAllocs(t, func() { networkSink, okSink = mapped.ToIPv4Mapped() })
+	requireNoAllocs(t, func() { networkSink, okSink = notMapped.ToIPv4Mapped() })
+}
+
+func BenchmarkIPv6Network_ToIPv4Mapped_Contiguous(b *testing.B) {
+	network, err := xnetip.IPv6NetworkFrom(
+		netip.MustParseAddr("::ffff:192.168.1.0"),
+		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"),
+	)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink, okSink = network.ToIPv4Mapped()
+	}
+}
+
+func BenchmarkIPv6Network_ToIPv4Mapped_NonContiguous(b *testing.B) {
+	network, err := xnetip.IPv6NetworkFrom(
+		netip.MustParseAddr("::ffff:c0a8:1"),
+		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"),
+	)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink, okSink = network.ToIPv4Mapped()
+	}
+}
+
+func BenchmarkIPv6Network_ToIPv4Mapped_NotMapped(b *testing.B) {
+	network, err := xnetip.IPv6NetworkFrom(
+		netip.MustParseAddr("2001:db8::"),
+		netip.MustParseAddr("ffff:ffff::"),
+	)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink, okSink = network.ToIPv4Mapped()
+	}
+}
