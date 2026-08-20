@@ -267,3 +267,99 @@ func Test_IPv6Network_Constructors_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { addrSink = network.Addr() })
 	requireNoAllocs(t, func() { addrSink = network.Mask() })
 }
+
+// verifies that a network is IPv4-mapped exactly when its address lies
+// in ::ffff:0:0/96 and its mask pins all of those upper 96 bits.
+//
+// The low 32 mask bits are unconstrained, so non-contiguous IPv4 masks
+// still qualify, while a mapped-looking address under a mask that does
+// not pin the upper bits does not: collapsing it to IPv4 would lose
+// addresses.
+func Test_IPv6Network_IsIPv4MappedIPv6(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+		mask string
+		want bool
+	}{
+		{name: "mapped /96 universe", addr: "::ffff:0:0", mask: "ffff:ffff:ffff:ffff:ffff:ffff::", want: true},
+		{name: "mapped host route", addr: "::ffff:c0a8:101", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", want: true},
+		{name: "mapped /120", addr: "::ffff:c0a8:100", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00", want: true},
+		{name: "plain IPv6 /40", addr: "2a02:6b8::", mask: "ffff:ffff:ff00::", want: false},
+		{name: "IPv4-compatible address is not mapped", addr: "::c00a:2ff", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", want: false},
+		{name: "ffff pattern under a /95 mask", addr: "::ffff:c0a8:1", mask: "ffff:ffff:ffff:ffff:ffff:fffe::", want: false},
+		{name: "ffff pattern under a mask not pinning the top bits", addr: "::ffff:c0a8:1", mask: "0:ffff:ffff:ffff:ffff:ffff:ffff:ffff", want: false},
+		{name: "universe", addr: "::", mask: "::", want: false},
+		{name: "mapped with a non-contiguous low mask", addr: "::ffff:c0a8:1", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff", want: true},
+		{name: "mapped with an alternating low mask", addr: "::ffff:aa55:aa55", mask: "ffff:ffff:ffff:ffff:ffff:ffff:aa55:aa55", want: true},
+		{name: "hole inside the upper 96 mask bits", addr: "::ffff:c0a8:1", mask: "ffff:ffff:ffff:0:ffff:ffff:ffff:ffff", want: false},
+		{name: "hole in the ffff group of the address", addr: "::fff0:c0a8:1", mask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPv6NetworkFrom(
+				netip.MustParseAddr(testCase.addr),
+				netip.MustParseAddr(testCase.mask),
+			)
+			require.NoError(t, err)
+			require.Equal(t, testCase.want, network.IsIPv4MappedIPv6())
+		})
+	}
+}
+
+// verifies that the zero value, the universe ::/0, is not mapped.
+func Test_IPv6Network_IsIPv4MappedIPv6_ZeroValue(t *testing.T) {
+	var network xnetip.IPv6Network
+	require.False(t, network.IsIPv4MappedIPv6())
+}
+
+// verifies that every image of an IPv4 network under the mapping is
+// recognized as mapped, whatever the IPv4 mask's shape.
+func Test_IPv6Network_IsIPv4MappedIPv6_TrueOnMappedIPv4(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		require.True(t, network.ToIPv6Mapped().IsIPv4MappedIPv6())
+	})
+}
+
+// verifies the cheap necessary condition: a network whose mask does not
+// keep the whole high half is never mapped.
+func Test_IPv6Network_IsIPv4MappedIPv6_FalseWhenMaskHighHalfNotFull(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		_, _, maskHi, _ := network.Bits()
+		if maskHi != ^uint64(0) {
+			require.False(t, network.IsIPv4MappedIPv6())
+		}
+	})
+}
+
+// verifies that the predicate agrees with the byte-level oracle.
+//
+// The oracle spells the definition out over the 16-byte forms: the
+// first ten address bytes zero, then two 0xff bytes, and the first
+// twelve mask bytes 0xff.
+func Test_IPv6Network_IsIPv4MappedIPv6_MatchesByteOracle(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		addrBytes := network.Addr().As16()
+		maskBytes := network.Mask().As16()
+		want := true
+		for idx := range 12 {
+			if idx < 10 {
+				want = want && addrBytes[idx] == 0
+			} else {
+				want = want && addrBytes[idx] == 0xff
+			}
+			want = want && maskBytes[idx] == 0xff
+		}
+		require.Equal(t, want, network.IsIPv4MappedIPv6())
+	})
+}
+
+// verifies that the predicate allocates nothing, per the
+// allocation-free runtime contract.
+func Test_IPv6Network_IsIPv4MappedIPv6_AllocationFree(t *testing.T) {
+	network := xnetip.IPv4NetworkFromBits(0xC0A80001, 0xFFFF00FF).ToIPv6Mapped()
+	requireNoAllocs(t, func() { okSink = network.IsIPv4MappedIPv6() })
+}

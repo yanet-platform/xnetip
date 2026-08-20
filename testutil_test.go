@@ -243,4 +243,5 @@ var (
 	networkSink  xnetip.IPv4Network
 	network6Sink xnetip.IPv6Network
 	addrSink     netip.Addr
+	okSink       bool
 )

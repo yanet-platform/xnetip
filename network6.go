@@ -66,3 +66,16 @@ func (m IPv6Network) Bits() (addrHi, addrLo, maskHi, maskLo uint64) {
 	maskHi, maskLo = m.mask.Bits()
 	return addrHi, addrLo, maskHi, maskLo
 }
+
+// IsIPv4MappedIPv6 reports whether this network is an IPv4-mapped IPv6
+// network.
+//
+// True when the address lies in ::ffff:0:0/96 and the mask keeps all
+// of those upper 96 bits, so the network is exactly the image of an
+// IPv4 network under IPv4Network.ToIPv6Mapped. An address with the
+// ::ffff pattern under a mask that does not pin the upper bits is not
+// mapped: collapsing it to IPv4 would lose addresses.
+func (m IPv6Network) IsIPv4MappedIPv6() bool {
+	maskHi, maskLo := m.mask.Bits()
+	return m.addr.Is4In6() && maskHi == ^uint64(0) && maskLo>>32 == 0xffffffff
+}
