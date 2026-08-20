@@ -379,6 +379,33 @@ func (m IPNetwork) IsAdjacent(other IPNetwork) bool {
 	return m.is4 == other.is4 && m.network.IsAdjacent(other.network)
 }
 
+// Merge returns the single network whose address set is the union of
+// the two inputs, and false when no such network exists.
+//
+// Networks of different families never merge. Within a family the
+// result equals the corresponding IPv4Network or IPv6Network method
+// and keeps the family of the inputs. On ok=false the returned value
+// is the zero IPNetwork.
+func (m IPNetwork) Merge(other IPNetwork) (IPNetwork, bool) {
+	// The family check must come first: without it the IPv6 universe
+	// would absorb the mapped storage form of every IPv4 network.
+	//
+	// For two IPv4 networks the 128-bit merge of the stored forms is
+	// exact: mapped storage pins the top 96 address and mask bits to
+	// the same values on both sides, so a sibling difference and a
+	// dropped mask bit land in the low 32 bits and a containment
+	// result is one of the inputs — either way the result is a valid
+	// mapped network.
+	if m.is4 != other.is4 {
+		return IPNetwork{}, false
+	}
+	network, ok := m.network.Merge(other.network)
+	if !ok {
+		return IPNetwork{}, false
+	}
+	return IPNetwork{network: network, is4: m.is4}, true
+}
+
 // IsContiguous reports whether the mask, in the network's own family,
 // is a CIDR prefix mask: leading one bits followed only by zero bits.
 //

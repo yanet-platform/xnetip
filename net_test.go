@@ -3214,3 +3214,143 @@ func Test_IPNetwork_NumHostBits_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { intSink = four.NumHostBits() })
 	requireNoAllocs(t, func() { intSink = six.NumHostBits() })
 }
+
+// verifies that merging works within a family, never across families,
+// and keeps the family of its inputs.
+func Test_IPNetwork_Merge_FamiliesAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  xnetip.IPNetwork
+		ok    bool
+	}{
+		{name: "IPv4 siblings", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: xnetip.MustParseIPNetwork("192.168.0.0/23"), ok: true},
+		{name: "IPv6 siblings", left: xnetip.MustParseIPNetwork("2001:db8::/48"), right: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: xnetip.MustParseIPNetwork("2001:db8::/47"), ok: true},
+		{name: "mixed families", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), ok: false},
+		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("192.168.0.0/24"), ok: false},
+		{name: "IPv4 containment", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("10.1.0.0/16"), want: xnetip.MustParseIPNetwork("10.0.0.0/8"), ok: true},
+		{name: "IPv4 non-mergeable", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.3.0/24"), ok: false},
+		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.IPNetwork{}, ok: false},
+		{name: "mapped IPv6 network vs the IPv4 it encodes", left: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), ok: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			merged, ok := testCase.left.Merge(testCase.right)
+			require.Equal(t, testCase.ok, ok)
+			require.Equal(t, testCase.want, merged)
+		})
+	}
+}
+
+// verifies that an IPv4 sibling merge at a higher bit stays an IPv4
+// network even though the result mask turns non-contiguous.
+func Test_IPNetwork_Merge_NonContiguousResultKeepsFamily(t *testing.T) {
+	left := xnetip.MustParseIPNetwork("10.0.0.0/24")
+	right := xnetip.MustParseIPNetwork("10.0.2.0/24")
+	merged, ok := left.Merge(right)
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPNetwork("10.0.0.0/255.255.253.0"), merged)
+	require.True(t, merged.Is4())
+}
+
+// verifies that non-contiguous sibling merges of both families flow
+// through the wrapper.
+func Test_IPNetwork_Merge_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  xnetip.IPNetwork
+	}{
+		{name: "IPv4 pattern siblings", left: xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPNetwork("10.1.0.1/255.255.0.255"), want: xnetip.MustParseIPNetwork("10.0.0.1/255.254.0.255")},
+		{name: "IPv6 pattern siblings", left: xnetip.MustParseIPNetwork("2001::1/ffff:ff00::ffff"), right: xnetip.MustParseIPNetwork("2001:100::1/ffff:ff00::ffff"), want: xnetip.MustParseIPNetwork("2001::1/ffff:fe00::ffff")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			merged, ok := testCase.left.Merge(testCase.right)
+			require.True(t, ok)
+			require.Equal(t, testCase.want, merged)
+		})
+	}
+}
+
+// verifies that the wrapped merge equals the concrete answer lifted
+// into the wrapper, on random pairs and on constructed siblings.
+//
+// A successful result must keep the inputs' family. The sibling flips
+// the lowest set mask bit of the address, so every draw with a
+// non-empty mask exercises the merge case that random pairs almost
+// never hit.
+func Test_IPNetwork_Merge_AgreesWithConcreteProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left4 := genIPv4Network.Draw(t, "left4")
+		right4 := genIPv4Network.Draw(t, "right4")
+		want4, wantOK4 := left4.Merge(right4)
+		merged4, ok4 := xnetip.IPNetworkFrom4(left4).Merge(xnetip.IPNetworkFrom4(right4))
+		require.Equal(t, wantOK4, ok4)
+		if ok4 {
+			require.Equal(t, xnetip.IPNetworkFrom4(want4), merged4)
+			require.True(t, merged4.Is4())
+		}
+		addrBits, maskBits := ipv4NetworkBits(left4)
+		if maskBits != 0 {
+			sibling, err := xnetip.IPv4NetworkFrom(
+				netipAddrFrom4Bits(addrBits^(maskBits&-maskBits)),
+				netipAddrFrom4Bits(maskBits),
+			)
+			require.NoError(t, err)
+			wantSibling, wantSiblingOK := left4.Merge(sibling)
+			require.True(t, wantSiblingOK)
+			mergedSibling, ok := xnetip.IPNetworkFrom4(left4).Merge(xnetip.IPNetworkFrom4(sibling))
+			require.True(t, ok)
+			require.Equal(t, xnetip.IPNetworkFrom4(wantSibling), mergedSibling)
+			require.True(t, mergedSibling.Is4())
+		}
+		left6 := genIPv6Network.Draw(t, "left6")
+		right6 := genIPv6Network.Draw(t, "right6")
+		want6, wantOK6 := left6.Merge(right6)
+		merged6, ok6 := xnetip.IPNetworkFrom6(left6).Merge(xnetip.IPNetworkFrom6(right6))
+		require.Equal(t, wantOK6, ok6)
+		if ok6 {
+			require.Equal(t, xnetip.IPNetworkFrom6(want6), merged6)
+			require.True(t, merged6.Is6())
+		}
+	})
+}
+
+// verifies that networks of different families never merge, whatever
+// their masks.
+func Test_IPNetwork_Merge_CrossFamilyNeverMergesProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
+		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		_, ok := network4.Merge(network6)
+		require.False(t, ok)
+		_, ok = network6.Merge(network4)
+		require.False(t, ok)
+	})
+}
+
+// verifies that merging is commutative in both the value and the
+// flag, whatever the families.
+func Test_IPNetwork_Merge_CommutativityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPNetwork.Draw(t, "left")
+		right := genIPNetwork.Draw(t, "right")
+		leftMerged, leftOK := left.Merge(right)
+		rightMerged, rightOK := right.Merge(left)
+		require.Equal(t, leftOK, rightOK)
+		require.Equal(t, leftMerged, rightMerged)
+	})
+}
+
+// verifies that merging allocates nothing in either family.
+func Test_IPNetwork_Merge_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseIPNetwork("192.168.0.0/24")
+	fourBuddy := xnetip.MustParseIPNetwork("192.168.1.0/24")
+	six := xnetip.MustParseIPNetwork("2001:db8::/48")
+	sixBuddy := xnetip.MustParseIPNetwork("2001:db8:1::/48")
+	requireNoAllocs(t, func() { ipNetworkSink, okSink = four.Merge(fourBuddy) })
+	requireNoAllocs(t, func() { ipNetworkSink, okSink = six.Merge(sixBuddy) })
+}
