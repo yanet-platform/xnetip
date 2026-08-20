@@ -70,3 +70,24 @@ func (m IPAddr) BitLen() int {
 	}
 	return 128
 }
+
+// Compare returns -1, 0 or +1 as m sorts before, equal to or after
+// other.
+//
+// Every IPv4 address orders before every IPv6 address, including the
+// IPv4-mapped twin built with IPAddrFrom6 — the order of netip.Addr,
+// which sorts by bit length first. Within a family the order is the
+// numeric order of the address bits, as in IPv4Addr.Compare and
+// IPv6Addr.Compare, and comparing the stored 128-bit forms preserves it
+// because the mapped prefix above the IPv4 bits is constant. It is the
+// order every sorting operation in this package uses for
+// family-agnostic values.
+func (m IPAddr) Compare(other IPAddr) int {
+	if m.is4 != other.is4 {
+		if m.is4 {
+			return -1
+		}
+		return 1
+	}
+	return m.addr.Compare(other.addr)
+}
