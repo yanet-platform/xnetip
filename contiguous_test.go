@@ -562,6 +562,329 @@ func Test_Contiguous_Contains_MatchesNetipPrefixProperty(t *testing.T) {
 	})
 }
 
+// verifies that intersecting nested blocks yields the nested block
+// in both orders, in both families.
+func Test_Contiguous_Intersection_Nested(t *testing.T) {
+	container4 := xnetip.MustParseContiguous4("10.0.0.0/8")
+	nested4 := xnetip.MustParseContiguous4("10.1.0.0/16")
+	intersected4, ok := container4.Intersection(nested4)
+	require.True(t, ok)
+	require.Equal(t, nested4, intersected4)
+	intersected4, ok = nested4.Intersection(container4)
+	require.True(t, ok)
+	require.Equal(t, nested4, intersected4)
+	container6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	nested6 := xnetip.MustParseContiguous6("2001:db8:1::/48")
+	intersected6, ok := container6.Intersection(nested6)
+	require.True(t, ok)
+	require.Equal(t, nested6, intersected6)
+	intersected6, ok = nested6.Intersection(container6)
+	require.True(t, ok)
+	require.Equal(t, nested6, intersected6)
+}
+
+// verifies that disjoint sibling blocks report no intersection with
+// the zero wrapper as the result.
+func Test_Contiguous_Intersection_Disjoint(t *testing.T) {
+	low := xnetip.MustParseContiguous4("10.0.0.0/9")
+	high := xnetip.MustParseContiguous4("10.128.0.0/9")
+	intersected, ok := low.Intersection(high)
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network4]{}, intersected)
+	low6 := xnetip.MustParseContiguous6("2001:db8::/33")
+	high6 := xnetip.MustParseContiguous6("2001:db8:8000::/33")
+	intersected6, ok := low6.Intersection(high6)
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network6]{}, intersected6)
+}
+
+// verifies that a block intersected with itself is itself.
+func Test_Contiguous_Intersection_Self(t *testing.T) {
+	block4 := xnetip.MustParseContiguous4("192.168.0.0/16")
+	intersected4, ok := block4.Intersection(block4)
+	require.True(t, ok)
+	require.Equal(t, block4, intersected4)
+	block6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	intersected6, ok := block6.Intersection(block6)
+	require.True(t, ok)
+	require.Equal(t, block6, intersected6)
+}
+
+// verifies that the universe absorbs any block of its family: the
+// intersection is the other operand.
+func Test_Contiguous_Intersection_UniverseAbsorbs(t *testing.T) {
+	block4 := xnetip.MustParseContiguous4("10.1.0.0/16")
+	intersected4, ok := xnetip.MustParseContiguous4("0.0.0.0/0").Intersection(block4)
+	require.True(t, ok)
+	require.Equal(t, block4, intersected4)
+	block6 := xnetip.MustParseContiguous6("2001:db8:1::/48")
+	intersected6, ok := xnetip.MustParseContiguous6("::/0").Intersection(block6)
+	require.True(t, ok)
+	require.Equal(t, block6, intersected6)
+}
+
+// verifies that blocks of different families never intersect in the
+// dual instantiation.
+func Test_Contiguous_Intersection_DualCrossFamily(t *testing.T) {
+	ipv4 := xnetip.MustParseContiguous("10.0.0.0/8")
+	ipv6 := xnetip.MustParseContiguous("2001:db8::/32")
+	intersected, ok := ipv4.Intersection(ipv6)
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network]{}, intersected)
+	intersected, ok = ipv6.Intersection(ipv4)
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network]{}, intersected)
+}
+
+// verifies that CIDR buddies at the prefix boundary bit merge into
+// their parent block.
+func Test_Contiguous_MergeByLowestMaskBit_Buddies(t *testing.T) {
+	low := xnetip.MustParseContiguous4("10.0.0.0/9")
+	high := xnetip.MustParseContiguous4("10.128.0.0/9")
+	merged, ok := low.MergeByLowestMaskBit(high)
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseContiguous4("10.0.0.0/8"), merged)
+	merged, ok = high.MergeByLowestMaskBit(low)
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseContiguous4("10.0.0.0/8"), merged)
+}
+
+// verifies that two adjacent host routes merge into their /31.
+func Test_Contiguous_MergeByLowestMaskBit_HostRouteBuddies(t *testing.T) {
+	even := xnetip.MustParseContiguous4("10.0.0.0/32")
+	odd := xnetip.MustParseContiguous4("10.0.0.1/32")
+	merged, ok := even.MergeByLowestMaskBit(odd)
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseContiguous4("10.0.0.0/31"), merged)
+}
+
+// verifies that containment merges to the larger block in both
+// orders.
+func Test_Contiguous_MergeByLowestMaskBit_Containment(t *testing.T) {
+	container := xnetip.MustParseContiguous4("10.0.0.0/8")
+	nested := xnetip.MustParseContiguous4("10.1.0.0/16")
+	merged, ok := container.MergeByLowestMaskBit(nested)
+	require.True(t, ok)
+	require.Equal(t, container, merged)
+	merged, ok = nested.MergeByLowestMaskBit(container)
+	require.True(t, ok)
+	require.Equal(t, container, merged)
+}
+
+// verifies that non-adjacent same-length blocks refuse to merge with
+// the zero wrapper as the result.
+func Test_Contiguous_MergeByLowestMaskBit_NonAdjacentRefuse(t *testing.T) {
+	first := xnetip.MustParseContiguous4("10.0.0.0/24")
+	second := xnetip.MustParseContiguous4("10.0.2.0/24")
+	merged, ok := first.MergeByLowestMaskBit(second)
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network4]{}, merged)
+}
+
+// verifies that IPv6 buddies whose boundary bit sits in the high
+// half, one step above bit 64, merge into their parent.
+func Test_Contiguous_MergeByLowestMaskBit_BuddiesAcrossBit64(t *testing.T) {
+	low := xnetip.MustParseContiguous6("2001:db8:0:0::/63")
+	high := xnetip.MustParseContiguous6("2001:db8:0:2::/63")
+	merged, ok := low.MergeByLowestMaskBit(high)
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseContiguous6("2001:db8::/62"), merged)
+}
+
+// verifies that blocks of different families never merge in the dual
+// instantiation.
+func Test_Contiguous_MergeByLowestMaskBit_DualCrossFamily(t *testing.T) {
+	ipv4 := xnetip.MustParseContiguous("10.0.0.0/8")
+	ipv6 := xnetip.MustParseContiguous("2001:db8::/32")
+	merged, ok := ipv4.MergeByLowestMaskBit(ipv6)
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network]{}, merged)
+}
+
+// verifies that both class-closed operations equal the unwrapped
+// operations, result and flag alike, in all three instantiations.
+func Test_Contiguous_Intersection_MatchesInnerProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first4 := genContiguous4.Draw(t, "first4")
+		second4 := genContiguous4.Draw(t, "second4")
+		requireClassClosedMatchInner4(t, first4, second4)
+		first6 := genContiguous6.Draw(t, "first6")
+		second6 := genContiguous6.Draw(t, "second6")
+		requireClassClosedMatchInner6(t, first6, second6)
+		first := genContiguous.Draw(t, "first")
+		second := genContiguous.Draw(t, "second")
+		requireClassClosedMatchInner(t, first, second)
+	})
+}
+
+// requireClassClosedMatchInner4 asserts that the typed intersection
+// and merge of two IPv4 blocks equal the unwrapped operations.
+//
+// Every ok result must also survive revalidation through the exact
+// constructor, precisely because the implementation skips it.
+func requireClassClosedMatchInner4(t require.TestingT, first, second xnetip.Contiguous[xnetip.Network4]) {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	innerIntersected, innerOk := first.Network().Intersection(second.Network())
+	intersected, ok := first.Intersection(second)
+	require.Equal(t, innerOk, ok)
+	if ok {
+		require.Equal(t, innerIntersected, intersected.Network())
+		_, stillOk := xnetip.ContiguousFrom(intersected.Network())
+		require.True(t, stillOk)
+	}
+	innerMerged, innerOk := first.Network().MergeByLowestMaskBit(second.Network())
+	merged, ok := first.MergeByLowestMaskBit(second)
+	require.Equal(t, innerOk, ok)
+	if ok {
+		require.Equal(t, innerMerged, merged.Network())
+		_, stillOk := xnetip.ContiguousFrom(merged.Network())
+		require.True(t, stillOk)
+	}
+}
+
+// requireClassClosedMatchInner6 asserts that the typed intersection
+// and merge of two IPv6 blocks equal the unwrapped operations.
+//
+// Every ok result must also survive revalidation through the exact
+// constructor, precisely because the implementation skips it.
+func requireClassClosedMatchInner6(t require.TestingT, first, second xnetip.Contiguous[xnetip.Network6]) {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	innerIntersected, innerOk := first.Network().Intersection(second.Network())
+	intersected, ok := first.Intersection(second)
+	require.Equal(t, innerOk, ok)
+	if ok {
+		require.Equal(t, innerIntersected, intersected.Network())
+		_, stillOk := xnetip.ContiguousFrom(intersected.Network())
+		require.True(t, stillOk)
+	}
+	innerMerged, innerOk := first.Network().MergeByLowestMaskBit(second.Network())
+	merged, ok := first.MergeByLowestMaskBit(second)
+	require.Equal(t, innerOk, ok)
+	if ok {
+		require.Equal(t, innerMerged, merged.Network())
+		_, stillOk := xnetip.ContiguousFrom(merged.Network())
+		require.True(t, stillOk)
+	}
+}
+
+// requireClassClosedMatchInner asserts that the typed intersection
+// and merge of two dual blocks equal the unwrapped operations.
+//
+// Every ok result must also survive revalidation through the exact
+// constructor, precisely because the implementation skips it.
+func requireClassClosedMatchInner(t require.TestingT, first, second xnetip.Contiguous[xnetip.Network]) {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	innerIntersected, innerOk := first.Network().Intersection(second.Network())
+	intersected, ok := first.Intersection(second)
+	require.Equal(t, innerOk, ok)
+	if ok {
+		require.Equal(t, innerIntersected, intersected.Network())
+		_, stillOk := xnetip.ContiguousFrom(intersected.Network())
+		require.True(t, stillOk)
+	}
+	innerMerged, innerOk := first.Network().MergeByLowestMaskBit(second.Network())
+	merged, ok := first.MergeByLowestMaskBit(second)
+	require.Equal(t, innerOk, ok)
+	if ok {
+		require.Equal(t, innerMerged, merged.Network())
+		_, stillOk := xnetip.ContiguousFrom(merged.Network())
+		require.True(t, stillOk)
+	}
+}
+
+// verifies that intersection and merge are commutative on random
+// pairs, in all three instantiations.
+func Test_Contiguous_Intersection_CommutativeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := genContiguous.Draw(t, "first")
+		second := genContiguous.Draw(t, "second")
+		intersected, ok := first.Intersection(second)
+		intersectedBack, okBack := second.Intersection(first)
+		require.Equal(t, ok, okBack)
+		require.Equal(t, intersected, intersectedBack)
+		merged, ok := first.MergeByLowestMaskBit(second)
+		mergedBack, okBack := second.MergeByLowestMaskBit(first)
+		require.Equal(t, ok, okBack)
+		require.Equal(t, merged, mergedBack)
+	})
+}
+
+// verifies that a wrapped sibling pair always merges into the parent
+// block one prefix bit shorter, in both families.
+func Test_Contiguous_MergeByLowestMaskBit_SiblingsMergeToParentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		pair4 := genIPv4ContiguousSiblingPair.Draw(t, "pair4")
+		first4, ok := xnetip.ContiguousFrom(pair4[0])
+		require.True(t, ok)
+		second4, ok := xnetip.ContiguousFrom(pair4[1])
+		require.True(t, ok)
+		merged4, ok := first4.MergeByLowestMaskBit(second4)
+		require.True(t, ok)
+		require.Equal(t, first4.PrefixLen()-1, merged4.PrefixLen())
+		require.True(t, merged4.Contains(first4))
+		require.True(t, merged4.Contains(second4))
+		pair6 := genIPv6ContiguousSiblingPair.Draw(t, "pair6")
+		first6, ok := xnetip.ContiguousFrom(pair6[0])
+		require.True(t, ok)
+		second6, ok := xnetip.ContiguousFrom(pair6[1])
+		require.True(t, ok)
+		merged6, ok := first6.MergeByLowestMaskBit(second6)
+		require.True(t, ok)
+		require.Equal(t, first6.PrefixLen()-1, merged6.PrefixLen())
+		require.True(t, merged6.Contains(first6))
+		require.True(t, merged6.Contains(second6))
+	})
+}
+
+// verifies the CIDR laminar fact: two blocks intersect exactly when
+// one contains the other.
+func Test_Contiguous_Intersection_OkIffContainmentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := genContiguous.Draw(t, "first")
+		second := genContiguous.Draw(t, "second")
+		_, ok := first.Intersection(second)
+		require.Equal(t, first.Contains(second) || second.Contains(first), ok)
+	})
+}
+
+// verifies against net/netip: the intersection flag agrees with
+// prefix overlap in both families.
+func Test_Contiguous_Intersection_MatchesNetipOverlapsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first4 := genContiguous4.Draw(t, "first4")
+		second4 := genContiguous4.Draw(t, "second4")
+		_, ok := first4.Intersection(second4)
+		require.Equal(t, first4.Prefix().Overlaps(second4.Prefix()), ok)
+		first6 := genContiguous6.Draw(t, "first6")
+		second6 := genContiguous6.Draw(t, "second6")
+		_, ok = first6.Intersection(second6)
+		require.Equal(t, first6.Prefix().Overlaps(second6.Prefix()), ok)
+	})
+}
+
+// verifies that both class-closed operations allocate nothing in all
+// three instantiations.
+func Test_Contiguous_Intersection_AllocationFree(t *testing.T) {
+	container4 := xnetip.MustParseContiguous4("10.0.0.0/8")
+	nested4 := xnetip.MustParseContiguous4("10.1.0.0/16")
+	requireNoAllocs(t, func() { contiguous4Sink, okSink = container4.Intersection(nested4) })
+	requireNoAllocs(t, func() { contiguous4Sink, okSink = container4.MergeByLowestMaskBit(nested4) })
+	container6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	nested6 := xnetip.MustParseContiguous6("2001:db8:1::/48")
+	requireNoAllocs(t, func() { contiguous6Sink, okSink = container6.Intersection(nested6) })
+	requireNoAllocs(t, func() { contiguous6Sink, okSink = container6.MergeByLowestMaskBit(nested6) })
+	container := xnetip.MustParseContiguous("10.0.0.0/8")
+	nested := xnetip.MustParseContiguous("10.1.0.0/16")
+	requireNoAllocs(t, func() { contiguousSink, okSink = container.Intersection(nested) })
+	requireNoAllocs(t, func() { contiguousSink, okSink = container.MergeByLowestMaskBit(nested) })
+}
+
 // verifies that typed containment allocates nothing in all three
 // instantiations.
 func Test_Contiguous_Contains_AllocationFree(t *testing.T) {

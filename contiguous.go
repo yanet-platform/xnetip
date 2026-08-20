@@ -179,6 +179,45 @@ func (m Contiguous[T]) Contains(other Contiguous[T]) bool {
 	return m.network.containsContiguous(other.network)
 }
 
+// Intersection returns the block of addresses common to m and other.
+//
+// Two CIDR blocks intersect exactly when one contains the other, so
+// the result is the nested block, still contiguous — the class is
+// closed under intersection and the result needs no revalidation.
+// ok is false when the blocks are disjoint, and for blocks of
+// different families in the Network instantiation; the first result
+// is then the zero block.
+func (m Contiguous[T]) Intersection(other Contiguous[T]) (Contiguous[T], bool) {
+	intersected, ok := m.network.Intersection(other.network)
+	if !ok {
+		return Contiguous[T]{}, false
+	}
+	// The mask union of two leading runs is the longer run, so the
+	// result is contiguous and wraps without revalidation.
+	return Contiguous[T]{network: intersected}, true
+}
+
+// MergeByLowestMaskBit merges two blocks when one contains the other
+// or when they are CIDR buddies at the prefix boundary bit.
+//
+// Containment returns the larger block; buddies merge into their
+// parent, whose mask drops the run's lowest bit and therefore stays
+// contiguous — the class is closed and the result needs no
+// revalidation. Whenever ok is true the result equals the wrapped
+// networks' MergeByLowestMaskBit; on ok=false the first result is
+// the zero block.
+func (m Contiguous[T]) MergeByLowestMaskBit(other Contiguous[T]) (Contiguous[T], bool) {
+	merged, ok := m.network.MergeByLowestMaskBit(other.network)
+	if !ok {
+		return Contiguous[T]{}, false
+	}
+	// The result is contiguous and wraps without revalidation.
+	//
+	// Containment hands back an input unchanged, and a buddy merge
+	// only clears the run's lowest bit, leaving a leading run.
+	return Contiguous[T]{network: merged}, true
+}
+
 // PrefixLen returns the prefix length of the block, total by the
 // contiguity invariant.
 //
@@ -295,4 +334,11 @@ type network[T any] interface {
 	// containsContiguous is the concrete type's containment kernel
 	// for two CIDR operands.
 	containsContiguous(T) bool
+
+	// Intersection is the concrete type's own comma-ok intersection.
+	Intersection(T) (T, bool)
+
+	// MergeByLowestMaskBit is the concrete type's own comma-ok merge
+	// at containment or the mask's lowest set bit.
+	MergeByLowestMaskBit(T) (T, bool)
 }
