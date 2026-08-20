@@ -225,6 +225,91 @@ func Test_IPv4Addr_Netip_DoesNotAllocate(t *testing.T) {
 	requireNoAllocs(t, func() { netipAddrSink = address.Netip() })
 }
 
+// verifies the documentation example of the mapping: the mapped address
+// holds the four octets behind the ::ffff: prefix.
+func Test_IPv4Addr_ToIPv6Mapped_MapsDocumentationExample(t *testing.T) {
+	mapped := xnetip.MustParseIPv4Addr("192.0.2.1").ToIPv6Mapped()
+	require.Equal(t, xnetip.MustParseIPv6Addr("::ffff:192.0.2.1"), mapped)
+	require.Equal(t, xnetip.MustParseIPv6Addr("::ffff:c000:201"), mapped)
+}
+
+// verifies that the unspecified IPv4 address maps to the mapped zero,
+// which is a real mapped address and not the IPv6 unspecified address.
+func Test_IPv4Addr_ToIPv6Mapped_MapsZeroToMappedZero(t *testing.T) {
+	mapped := xnetip.MustParseIPv4Addr("0.0.0.0").ToIPv6Mapped()
+	require.Equal(t, xnetip.MustParseIPv6Addr("::ffff:0.0.0.0"), mapped)
+	require.False(t, mapped.IsUnspecified())
+}
+
+// verifies that the broadcast address maps to the top of the mapped
+// range, filling the whole low half below the prefix.
+func Test_IPv4Addr_ToIPv6Mapped_MapsBroadcastToRangeTop(t *testing.T) {
+	mapped := xnetip.MustParseIPv4Addr("255.255.255.255").ToIPv6Mapped()
+	require.Equal(t, xnetip.MustParseIPv6Addr("::ffff:255.255.255.255"), mapped)
+	hi, lo := mapped.Bits()
+	require.Zero(t, hi)
+	require.Equal(t, uint64(0x0000_ffff_ffff_ffff), lo)
+}
+
+// verifies the byte layout of the mapped form: ten zero bytes, two 0xff
+// bytes, then the four octets in order.
+func Test_IPv4Addr_ToIPv6Mapped_PinsByteLayout(t *testing.T) {
+	mapped := xnetip.MustParseIPv4Addr("1.2.3.4").ToIPv6Mapped()
+	require.Equal(t, [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4}, mapped.As16())
+}
+
+// verifies the bit layout of the mapped form: a zero high half and the
+// IPv4 bits in the low 32 bits under the mapping prefix.
+func Test_IPv4Addr_ToIPv6Mapped_PinsBitsLayout(t *testing.T) {
+	hi, lo := xnetip.IPv4AddrFromBits(0xC0A80001).ToIPv6Mapped().Bits()
+	require.Zero(t, hi)
+	require.Equal(t, uint64(0x0000_ffff_c0a8_0001), lo)
+}
+
+// verifies the mapping on the Rust crate's network-address example.
+func Test_IPv4Addr_ToIPv6Mapped_MatchesCrateExample(t *testing.T) {
+	mapped := xnetip.MustParseIPv4Addr("192.168.1.0").ToIPv6Mapped()
+	require.Equal(t, xnetip.MustParseIPv6Addr("::ffff:c0a8:100"), mapped)
+}
+
+// verifies that the mapped form prints in the ::ffff:a.b.c.d notation.
+func Test_IPv4Addr_ToIPv6Mapped_PrintsMappedText(t *testing.T) {
+	require.Equal(t, "::ffff:10.0.0.1", xnetip.MustParseIPv4Addr("10.0.0.1").ToIPv6Mapped().String())
+}
+
+// verifies that every mapped result is in the mapped range.
+func Test_IPv4Addr_ToIPv6Mapped_AlwaysIs4In6(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		require.True(t, address.ToIPv6Mapped().Is4In6())
+	})
+}
+
+// verifies that the mapping agrees with the 16-byte form net/netip gives
+// an IPv4 address, the std definition of the mapped layout.
+func Test_IPv4Addr_ToIPv6Mapped_MatchesNetipAs16(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		require.Equal(t, netip.AddrFrom4(address.As4()).As16(), address.ToIPv6Mapped().As16())
+	})
+}
+
+// verifies that the mapping preserves order, which is what lets the
+// family-agnostic types store IPv4 values mapped and still sort right.
+func Test_IPv4Addr_ToIPv6Mapped_PreservesOrder(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Addr.Draw(t, "left")
+		right := genIPv4Addr.Draw(t, "right")
+		require.Equal(t, left.Compare(right), left.ToIPv6Mapped().Compare(right.ToIPv6Mapped()))
+	})
+}
+
+// verifies that the mapping does not allocate.
+func Test_IPv4Addr_ToIPv6Mapped_DoesNotAllocate(t *testing.T) {
+	address := xnetip.MustParseIPv4Addr("192.168.0.1")
+	requireNoAllocs(t, func() { ipv6AddrSink = address.ToIPv6Mapped() })
+}
+
 // verifies that only the all-zero address is unspecified, and that it is
 // not global unicast.
 func Test_IPv4Addr_IsUnspecified_OnlyAllZeros(t *testing.T) {

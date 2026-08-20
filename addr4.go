@@ -64,6 +64,16 @@ func (m IPv4Addr) Netip() netip.Addr {
 	return netip.AddrFrom4(m.As4())
 }
 
+// ToIPv6Mapped returns the IPv4-mapped IPv6 address ::ffff:a.b.c.d that
+// embeds m, as defined by RFC 4291 section 2.5.5.2.
+//
+// The result reports Is4In6 and converts back with
+// IPv6Addr.ToIPv4Mapped. The mapping preserves order, which is what lets
+// the family-agnostic types store IPv4 values in this form.
+func (m IPv4Addr) ToIPv6Mapped() IPv6Addr {
+	return IPv6Addr{uint128FromHalves(0, ipv4MappedPrefix|uint64(m.bits))}
+}
+
 // IsUnspecified reports whether the address is 0.0.0.0.
 func (m IPv4Addr) IsUnspecified() bool {
 	return m.bits == 0

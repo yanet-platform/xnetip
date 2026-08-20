@@ -81,13 +81,17 @@ func (m IPv6Addr) IsUnspecified() bool {
 	return m.bits.IsZero()
 }
 
+// ipv4MappedPrefix is the low half of the IPv4-mapped range
+// ::ffff:0:0/96: the embedded IPv4 address sits in the 32 bits below it.
+const ipv4MappedPrefix = uint64(0xffff) << 32
+
 // Is4In6 reports whether the address is IPv4-mapped, that is in
 // ::ffff:0:0/96 (RFC 4291 section 2.5.5.2).
 //
 // The classification predicates of this type follow net/netip and judge
 // a mapped address by its embedded IPv4 part.
 func (m IPv6Addr) Is4In6() bool {
-	return m.bits.hi == 0 && m.bits.lo>>32 == 0xffff
+	return m.bits.hi == 0 && m.bits.lo>>32 == ipv4MappedPrefix>>32
 }
 
 // IsLoopback reports whether the address is ::1, or an IPv4-mapped
