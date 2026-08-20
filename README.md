@@ -14,11 +14,11 @@ aggregation, iteration) stays correct on it.
 
 | | `net/netip` | `xnetip` |
 |---|---|---|
-| Network model | `Prefix` = address + prefix length, contiguous masks only | `IPv4Network`, `IPv6Network`, `IPNetwork` = `(address, mask)`, any mask, always normalized (`addr & mask == addr`) |
+| Network model | `Prefix` = address + prefix length, contiguous masks only | `Network4`, `Network6`, `Network` = `(address, mask)`, any mask, always normalized (`addr & mask == addr`) |
 | Notation | `10.0.0.0/8` | `10.0.0.0/8` and dotted masks `10.0.0.0/255.0.255.0`; the CIDR suffix is strict (digits only, no leading zeros) |
 | Set algebra | `Contains`, `Overlaps` | `Contains`, `Intersection`, `Intersects`, `IsDisjoint`, `IsAdjacent`, `Merge`, `SupernetFor`, `Difference` (exact, pairwise-disjoint pieces) |
-| Contiguity | implied by the type | a query: `IsContiguous`, `Prefix() (int, bool)`, `ToContiguous`, `LastAddr` |
-| Collections | — | `AggregateIPv4/6` (in-place), `BinarySplitIPv4/6`, `RangeToNetworksIPv4/6` (address range → minimal CIDR list) |
+| Contiguity | implied by the type | a query: `IsContiguous`, `PrefixLen() (int, bool)`, `ToContiguous`, `LastAddr` |
+| Collections | — | `Aggregate4/6` (in-place), `BinarySplit4/6`, `RangeToNetworks4/6` (address range → minimal CIDR list) |
 | Iteration | `Addr.Next`/`Prev` | `Addrs`, `AddrsBackward` as `iter.Seq[netip.Addr]`, `NumHostBits` for the exact count |
 | Addresses | `netip.Addr` with zones | plain `netip.Addr` is the address currency of the whole API — accessors, iteration and constructors speak it; zones are rejected at the parsing boundary, and contiguous networks convert to and from `netip.Prefix` |
 | Ordering | `Compare` | `Compare` on every network type, IPv4 before IPv6, the sort key aggregation relies on |

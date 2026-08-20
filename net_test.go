@@ -18,13 +18,13 @@ import (
 
 // verifies that wrapping an IPv4 network reports the IPv4 family,
 // round-trips through the IPv4 extractor and declines the IPv6 one.
-func Test_IPNetworkFrom4_RoundTripsThroughIPv4(t *testing.T) {
-	network4, err := xnetip.IPv4NetworkFrom(
+func Test_NetworkFrom4_RoundTripsThroughIPv4(t *testing.T) {
+	network4, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.1.0"),
 		netip.MustParseAddr("255.255.255.0"),
 	)
 	require.NoError(t, err)
-	wrapped := xnetip.IPNetworkFrom4(network4)
+	wrapped := xnetip.NetworkFrom4(network4)
 	require.True(t, wrapped.Is4())
 	require.False(t, wrapped.Is6())
 	extracted, ok := wrapped.IPv4()
@@ -32,18 +32,18 @@ func Test_IPNetworkFrom4_RoundTripsThroughIPv4(t *testing.T) {
 	require.Equal(t, network4, extracted)
 	rejected, ok := wrapped.IPv6()
 	require.False(t, ok)
-	require.Equal(t, xnetip.IPv6Network{}, rejected)
+	require.Equal(t, xnetip.Network6{}, rejected)
 }
 
 // verifies that wrapping an IPv6 network reports the IPv6 family,
 // round-trips through the IPv6 extractor and declines the IPv4 one.
-func Test_IPNetworkFrom6_RoundTripsThroughIPv6(t *testing.T) {
-	network6, err := xnetip.IPv6NetworkFrom(
+func Test_NetworkFrom6_RoundTripsThroughIPv6(t *testing.T) {
+	network6, err := xnetip.Network6From(
 		netip.MustParseAddr("2001:db8::"),
 		netip.MustParseAddr("ffff:ffff::"),
 	)
 	require.NoError(t, err)
-	wrapped := xnetip.IPNetworkFrom6(network6)
+	wrapped := xnetip.NetworkFrom6(network6)
 	require.True(t, wrapped.Is6())
 	require.False(t, wrapped.Is4())
 	extracted, ok := wrapped.IPv6()
@@ -51,18 +51,18 @@ func Test_IPNetworkFrom6_RoundTripsThroughIPv6(t *testing.T) {
 	require.Equal(t, network6, extracted)
 	rejected, ok := wrapped.IPv4()
 	require.False(t, ok)
-	require.Equal(t, xnetip.IPv4Network{}, rejected)
+	require.Equal(t, xnetip.Network4{}, rejected)
 }
 
 // verifies that an IPv4-mapped IPv6 network stays IPv6 when wrapped,
 // the way an IPv4-mapped netip.Addr reports Is6 and not Is4.
-func Test_IPNetworkFrom6_KeepsMappedNetworkIPv6(t *testing.T) {
-	mapped, err := xnetip.IPv6NetworkFrom(
+func Test_NetworkFrom6_KeepsMappedNetworkIPv6(t *testing.T) {
+	mapped, err := xnetip.Network6From(
 		netip.MustParseAddr("::ffff:192.168.1.0"),
 		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"),
 	)
 	require.NoError(t, err)
-	wrapped := xnetip.IPNetworkFrom6(mapped)
+	wrapped := xnetip.NetworkFrom6(mapped)
 	require.True(t, wrapped.Is6())
 	require.False(t, wrapped.Is4())
 	_, ok := wrapped.IPv4()
@@ -74,146 +74,146 @@ func Test_IPNetworkFrom6_KeepsMappedNetworkIPv6(t *testing.T) {
 
 // verifies that the address accessor of an IPv4 network returns the
 // unmapped Is4 view of the stored address.
-func Test_IPNetwork_Addr_IPv4(t *testing.T) {
-	network4, err := xnetip.IPv4NetworkFrom(
+func Test_Network_Addr_IPv4(t *testing.T) {
+	network4, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.1.0"),
 		netip.MustParseAddr("255.255.255.0"),
 	)
 	require.NoError(t, err)
-	addr := xnetip.IPNetworkFrom4(network4).Addr()
+	addr := xnetip.NetworkFrom4(network4).Addr()
 	require.Equal(t, netip.MustParseAddr("192.168.1.0"), addr)
 	require.True(t, addr.Is4())
 }
 
 // verifies that the address accessor of an IPv6 network returns the
 // Is6 view of the stored address.
-func Test_IPNetwork_Addr_IPv6(t *testing.T) {
-	network6, err := xnetip.IPv6NetworkFrom(
+func Test_Network_Addr_IPv6(t *testing.T) {
+	network6, err := xnetip.Network6From(
 		netip.MustParseAddr("2001:db8::"),
 		netip.MustParseAddr("ffff:ffff::"),
 	)
 	require.NoError(t, err)
-	addr := xnetip.IPNetworkFrom6(network6).Addr()
+	addr := xnetip.NetworkFrom6(network6).Addr()
 	require.Equal(t, netip.MustParseAddr("2001:db8::"), addr)
 	require.True(t, addr.Is6())
 }
 
 // verifies that the mask accessor of an IPv4 network returns the
 // unmapped Is4 view of the stored mask.
-func Test_IPNetwork_Mask_IPv4(t *testing.T) {
-	network4, err := xnetip.IPv4NetworkFrom(
+func Test_Network_Mask_IPv4(t *testing.T) {
+	network4, err := xnetip.Network4From(
 		netip.MustParseAddr("10.0.0.0"),
 		netip.MustParseAddr("255.0.0.0"),
 	)
 	require.NoError(t, err)
-	mask := xnetip.IPNetworkFrom4(network4).Mask()
+	mask := xnetip.NetworkFrom4(network4).Mask()
 	require.Equal(t, netip.MustParseAddr("255.0.0.0"), mask)
 	require.True(t, mask.Is4())
 }
 
 // verifies that the mask accessor of an IPv6 network returns the Is6
 // view of the stored mask.
-func Test_IPNetwork_Mask_IPv6(t *testing.T) {
-	network6, err := xnetip.IPv6NetworkFrom(
+func Test_Network_Mask_IPv6(t *testing.T) {
+	network6, err := xnetip.Network6From(
 		netip.MustParseAddr("2001:db8::"),
 		netip.MustParseAddr("ffff:ffff::"),
 	)
 	require.NoError(t, err)
-	mask := xnetip.IPNetworkFrom6(network6).Mask()
+	mask := xnetip.NetworkFrom6(network6).Mask()
 	require.Equal(t, netip.MustParseAddr("ffff:ffff::"), mask)
 	require.True(t, mask.Is6())
 }
 
 // verifies that a non-contiguous IPv4 mask and the address bits it
 // keeps come back verbatim through the family-agnostic accessors.
-func Test_IPNetwork_Mask_NonContiguousIPv4(t *testing.T) {
-	network4, err := xnetip.IPv4NetworkFrom(
+func Test_Network_Mask_NonContiguousIPv4(t *testing.T) {
+	network4, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.0.1"),
 		netip.MustParseAddr("255.255.0.255"),
 	)
 	require.NoError(t, err)
-	wrapped := xnetip.IPNetworkFrom4(network4)
+	wrapped := xnetip.NetworkFrom4(network4)
 	require.Equal(t, netip.MustParseAddr("255.255.0.255"), wrapped.Mask())
 	require.Equal(t, netip.MustParseAddr("192.168.0.1"), wrapped.Addr())
 }
 
 // verifies that a non-contiguous IPv6 mask with a hole spanning the
 // 64-bit half boundary comes back verbatim through the mask accessor.
-func Test_IPNetwork_Mask_NonContiguousIPv6(t *testing.T) {
-	network6, err := xnetip.IPv6NetworkFrom(
+func Test_Network_Mask_NonContiguousIPv6(t *testing.T) {
+	network6, err := xnetip.Network6From(
 		netip.MustParseAddr("2001:db8::1"),
 		netip.MustParseAddr("ffff:ffff::ffff:ffff:0:0"),
 	)
 	require.NoError(t, err)
-	wrapped := xnetip.IPNetworkFrom6(network6)
+	wrapped := xnetip.NetworkFrom6(network6)
 	require.Equal(t, netip.MustParseAddr("ffff:ffff::ffff:ffff:0:0"), wrapped.Mask())
 }
 
 // verifies that the alternating-bit mask, the extreme non-contiguous
 // shape, survives the wrap and extract cycle bit for bit.
-func Test_IPNetworkFrom4_AlternatingMaskRoundTrips(t *testing.T) {
-	network4, err := xnetip.IPv4NetworkFrom(
+func Test_NetworkFrom4_AlternatingMaskRoundTrips(t *testing.T) {
+	network4, err := xnetip.Network4From(
 		netip.MustParseAddr("170.85.170.85"),
 		netip.MustParseAddr("170.85.170.85"),
 	)
 	require.NoError(t, err)
-	extracted, ok := xnetip.IPNetworkFrom4(network4).IPv4()
+	extracted, ok := xnetip.NetworkFrom4(network4).IPv4()
 	require.True(t, ok)
 	require.Equal(t, network4, extracted)
 }
 
 // verifies that the zero value is the IPv6 network ::/0, giving the
 // family-agnostic type a valid default like the concrete types have.
-func Test_IPNetwork_ZeroValue_IsUnspecifiedIPv6Network(t *testing.T) {
-	var network xnetip.IPNetwork
+func Test_Network_ZeroValue_IsUnspecifiedNetwork6(t *testing.T) {
+	var network xnetip.Network
 	require.True(t, network.Is6())
 	require.False(t, network.Is4())
 	extracted, ok := network.IPv6()
 	require.True(t, ok)
-	require.Equal(t, xnetip.IPv6Network{}, extracted)
+	require.Equal(t, xnetip.Network6{}, extracted)
 	require.Equal(t, netip.MustParseAddr("::"), network.Addr())
 	require.Equal(t, netip.MustParseAddr("::"), network.Mask())
 }
 
 // verifies that the conversion method on the IPv4 network type builds
 // the same value as the corresponding constructor.
-func Test_IPv4Network_IPNetwork_EqualsConstructor(t *testing.T) {
-	network4, err := xnetip.IPv4NetworkFrom(
+func Test_Network4_Network_EqualsConstructor(t *testing.T) {
+	network4, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.1.0"),
 		netip.MustParseAddr("255.255.255.0"),
 	)
 	require.NoError(t, err)
-	require.Equal(t, xnetip.IPNetworkFrom4(network4), network4.IPNetwork())
+	require.Equal(t, xnetip.NetworkFrom4(network4), network4.Network())
 }
 
 // verifies that the conversion method on the IPv6 network type builds
 // the same value as the corresponding constructor.
-func Test_IPv6Network_IPNetwork_EqualsConstructor(t *testing.T) {
-	network6, err := xnetip.IPv6NetworkFrom(
+func Test_Network6_Network_EqualsConstructor(t *testing.T) {
+	network6, err := xnetip.Network6From(
 		netip.MustParseAddr("2001:db8::"),
 		netip.MustParseAddr("ffff:ffff::"),
 	)
 	require.NoError(t, err)
-	require.Equal(t, xnetip.IPNetworkFrom6(network6), network6.IPNetwork())
+	require.Equal(t, xnetip.NetworkFrom6(network6), network6.Network())
 }
 
 // verifies that wrapped networks compare with == and the family flag
 // splits an IPv4 network from the IPv6 image sharing its storage.
-func Test_IPNetwork_Equality_DistinguishesFamilies(t *testing.T) {
-	universe4, err := xnetip.IPv4NetworkFrom(
+func Test_Network_Equality_DistinguishesFamilies(t *testing.T) {
+	universe4, err := xnetip.Network4From(
 		netip.MustParseAddr("0.0.0.0"),
 		netip.MustParseAddr("0.0.0.0"),
 	)
 	require.NoError(t, err)
-	first := xnetip.IPNetworkFrom4(universe4)
-	second := xnetip.IPNetworkFrom4(universe4)
+	first := xnetip.NetworkFrom4(universe4)
+	second := xnetip.NetworkFrom4(universe4)
 	require.Equal(t, first, second)
-	mappedImage, err := xnetip.IPv6NetworkFrom(
+	mappedImage, err := xnetip.Network6From(
 		netip.MustParseAddr("::ffff:0:0"),
 		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff::"),
 	)
 	require.NoError(t, err)
-	require.NotEqual(t, xnetip.IPNetworkFrom4(universe4), xnetip.IPNetworkFrom6(mappedImage))
+	require.NotEqual(t, xnetip.NetworkFrom4(universe4), xnetip.NetworkFrom6(mappedImage))
 }
 
 // verifies that wrapping and extracting an IPv4 network is the
@@ -222,10 +222,10 @@ func Test_IPNetwork_Equality_DistinguishesFamilies(t *testing.T) {
 // The property also exercises the mapped-storage invariant: a wrap
 // whose stored form were not IPv4-mapped could not extract back into
 // the network it came from.
-func Test_IPNetworkFrom4_RoundTripProperty(t *testing.T) {
+func Test_NetworkFrom4_RoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		wrapped := xnetip.IPNetworkFrom4(network)
+		network := genNetwork4.Draw(t, "network")
+		wrapped := xnetip.NetworkFrom4(network)
 		require.True(t, wrapped.Is4())
 		require.False(t, wrapped.Is6())
 		extracted, ok := wrapped.IPv4()
@@ -238,10 +238,10 @@ func Test_IPNetworkFrom4_RoundTripProperty(t *testing.T) {
 
 // verifies that wrapping and extracting an IPv6 network is the
 // identity for every mask shape, IPv4-mapped draws included.
-func Test_IPNetworkFrom6_RoundTripProperty(t *testing.T) {
+func Test_NetworkFrom6_RoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		wrapped := xnetip.IPNetworkFrom6(network)
+		network := genNetwork6.Draw(t, "network")
+		wrapped := xnetip.NetworkFrom6(network)
 		require.True(t, wrapped.Is6())
 		require.False(t, wrapped.Is4())
 		extracted, ok := wrapped.IPv6()
@@ -254,10 +254,10 @@ func Test_IPNetworkFrom6_RoundTripProperty(t *testing.T) {
 
 // verifies that the family-agnostic accessors return exactly the
 // address and mask of the wrapped IPv4 network, for every mask shape.
-func Test_IPNetwork_Accessors_AgreeWithIPv4Network(t *testing.T) {
+func Test_Network_Accessors_AgreeWithNetwork4(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		wrapped := xnetip.IPNetworkFrom4(network)
+		network := genNetwork4.Draw(t, "network")
+		wrapped := xnetip.NetworkFrom4(network)
 		require.Equal(t, network.Addr(), wrapped.Addr())
 		require.Equal(t, network.Mask(), wrapped.Mask())
 	})
@@ -265,10 +265,10 @@ func Test_IPNetwork_Accessors_AgreeWithIPv4Network(t *testing.T) {
 
 // verifies that the family-agnostic accessors return exactly the
 // address and mask of the wrapped IPv6 network, for every mask shape.
-func Test_IPNetwork_Accessors_AgreeWithIPv6Network(t *testing.T) {
+func Test_Network_Accessors_AgreeWithNetwork6(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		wrapped := xnetip.IPNetworkFrom6(network)
+		network := genNetwork6.Draw(t, "network")
+		wrapped := xnetip.NetworkFrom6(network)
 		require.Equal(t, network.Addr(), wrapped.Addr())
 		require.Equal(t, network.Mask(), wrapped.Mask())
 	})
@@ -278,9 +278,9 @@ func Test_IPNetwork_Accessors_AgreeWithIPv6Network(t *testing.T) {
 //
 // The family flags are complementary, exactly the matching extractor
 // succeeds and the accessors answer in the network's own family.
-func Test_IPNetwork_FamilyViews_Coherent(t *testing.T) {
+func Test_Network_FamilyViews_Coherent(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		require.NotEqual(t, network.Is4(), network.Is6())
 		_, ok4 := network.IPv4()
 		require.Equal(t, network.Is4(), ok4)
@@ -294,36 +294,36 @@ func Test_IPNetwork_FamilyViews_Coherent(t *testing.T) {
 }
 
 // verifies that both constructors perform no allocation.
-func Test_IPNetwork_Constructors_AllocationFree(t *testing.T) {
-	network4, err := xnetip.IPv4NetworkFrom(
+func Test_Network_Constructors_AllocationFree(t *testing.T) {
+	network4, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.1.0"),
 		netip.MustParseAddr("255.255.0.255"),
 	)
 	require.NoError(t, err)
-	network6, err := xnetip.IPv6NetworkFrom(
+	network6, err := xnetip.Network6From(
 		netip.MustParseAddr("2001:db8::"),
 		netip.MustParseAddr("ffff:0:ffff::"),
 	)
 	require.NoError(t, err)
-	requireNoAllocs(t, func() { ipNetworkSink = xnetip.IPNetworkFrom4(network4) })
-	requireNoAllocs(t, func() { ipNetworkSink = xnetip.IPNetworkFrom6(network6) })
+	requireNoAllocs(t, func() { ipNetworkSink = xnetip.NetworkFrom4(network4) })
+	requireNoAllocs(t, func() { ipNetworkSink = xnetip.NetworkFrom6(network6) })
 }
 
 // verifies that the extractors and the address and mask accessors
 // perform no allocation in either family.
-func Test_IPNetwork_Accessors_AllocationFree(t *testing.T) {
-	network4, err := xnetip.IPv4NetworkFrom(
+func Test_Network_Accessors_AllocationFree(t *testing.T) {
+	network4, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.1.0"),
 		netip.MustParseAddr("255.255.0.255"),
 	)
 	require.NoError(t, err)
-	network6, err := xnetip.IPv6NetworkFrom(
+	network6, err := xnetip.Network6From(
 		netip.MustParseAddr("2001:db8::"),
 		netip.MustParseAddr("ffff:0:ffff::"),
 	)
 	require.NoError(t, err)
-	wrapped4 := xnetip.IPNetworkFrom4(network4)
-	wrapped6 := xnetip.IPNetworkFrom6(network6)
+	wrapped4 := xnetip.NetworkFrom4(network4)
+	wrapped6 := xnetip.NetworkFrom6(network6)
 	requireNoAllocs(t, func() { networkSink, okSink = wrapped4.IPv4() })
 	requireNoAllocs(t, func() { network6Sink, okSink = wrapped6.IPv6() })
 	requireNoAllocs(t, func() { addrSink = wrapped4.Addr() })
@@ -334,7 +334,7 @@ func Test_IPNetwork_Accessors_AllocationFree(t *testing.T) {
 
 // verifies that the CIDR constructor dispatches on the address family
 // and equals the same-family typed construction, views included.
-func Test_IPNetworkFromCIDR_DispatchesByFamily(t *testing.T) {
+func Test_NetworkFromCIDR_DispatchesByFamily(t *testing.T) {
 	cases := []struct {
 		name     string
 		addr     string
@@ -354,20 +354,20 @@ func Test_IPNetworkFromCIDR_DispatchesByFamily(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			addr := netip.MustParseAddr(testCase.addr)
-			network, err := xnetip.IPNetworkFromCIDR(addr, testCase.bits)
+			network, err := xnetip.NetworkFromCIDR(addr, testCase.bits)
 			require.NoError(t, err)
 			require.Equal(t, testCase.wantIs4, network.Is4())
 			require.Equal(t, !testCase.wantIs4, network.Is6())
 			require.Equal(t, netip.MustParseAddr(testCase.wantAddr), network.Addr())
 			require.Equal(t, netip.MustParseAddr(testCase.wantMask), network.Mask())
 			if testCase.wantIs4 {
-				typed, typedErr := xnetip.IPv4NetworkFromCIDR(addr, testCase.bits)
+				typed, typedErr := xnetip.Network4FromCIDR(addr, testCase.bits)
 				require.NoError(t, typedErr)
-				require.Equal(t, xnetip.IPNetworkFrom4(typed), network)
+				require.Equal(t, xnetip.NetworkFrom4(typed), network)
 			} else {
-				typed, typedErr := xnetip.IPv6NetworkFromCIDR(addr, testCase.bits)
+				typed, typedErr := xnetip.Network6FromCIDR(addr, testCase.bits)
 				require.NoError(t, typedErr)
-				require.Equal(t, xnetip.IPNetworkFrom6(typed), network)
+				require.Equal(t, xnetip.NetworkFrom6(typed), network)
 			}
 		})
 	}
@@ -375,7 +375,7 @@ func Test_IPNetworkFromCIDR_DispatchesByFamily(t *testing.T) {
 
 // verifies that the length limit is the family's own: 33 overflows
 // IPv4, 129 IPv6, 64 splits the two and negatives overflow both.
-func Test_IPNetworkFromCIDR_FamilySetsTheLimit(t *testing.T) {
+func Test_NetworkFromCIDR_FamilySetsTheLimit(t *testing.T) {
 	cases := []struct {
 		name    string
 		addr    string
@@ -391,10 +391,10 @@ func Test_IPNetworkFromCIDR_FamilySetsTheLimit(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPNetworkFromCIDR(netip.MustParseAddr(testCase.addr), testCase.bits)
+			network, err := xnetip.NetworkFromCIDR(netip.MustParseAddr(testCase.addr), testCase.bits)
 			if testCase.wantErr {
 				require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
-				require.Equal(t, xnetip.IPNetwork{}, network)
+				require.Equal(t, xnetip.Network{}, network)
 			} else {
 				require.NoError(t, err)
 			}
@@ -404,10 +404,10 @@ func Test_IPNetworkFromCIDR_FamilySetsTheLimit(t *testing.T) {
 
 // verifies that the invalid zero address, having no family, yields
 // the family-mismatch sentinel and the zero network.
-func Test_IPNetworkFromCIDR_RejectsInvalidAddr(t *testing.T) {
-	network, err := xnetip.IPNetworkFromCIDR(netip.Addr{}, 0)
+func Test_NetworkFromCIDR_RejectsInvalidAddr(t *testing.T) {
+	network, err := xnetip.NetworkFromCIDR(netip.Addr{}, 0)
 	require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
-	require.Equal(t, xnetip.IPNetwork{}, network)
+	require.Equal(t, xnetip.Network{}, network)
 }
 
 // verifies that the constructor equals the wrapped IPv4 typed
@@ -417,20 +417,20 @@ func Test_IPNetworkFromCIDR_RejectsInvalidAddr(t *testing.T) {
 // the error case is drawn every run. Non-contiguous masks cannot
 // arise here — both delegates only build contiguous masks — and the
 // success branch checks the concrete view normalized.
-func Test_IPNetworkFromCIDR_MatchesTypedConstructorIPv4(t *testing.T) {
+func Test_NetworkFromCIDR_MatchesTypedConstructorIPv4(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		bits := rapid.IntRange(0, 33).Draw(t, "bits")
-		network, err := xnetip.IPNetworkFromCIDR(addr, bits)
-		typed, typedErr := xnetip.IPv4NetworkFromCIDR(addr, bits)
+		network, err := xnetip.NetworkFromCIDR(addr, bits)
+		typed, typedErr := xnetip.Network4FromCIDR(addr, bits)
 		if typedErr != nil {
 			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
 			require.ErrorIs(t, typedErr, xnetip.ErrCIDROverflow)
-			require.Equal(t, xnetip.IPNetwork{}, network)
+			require.Equal(t, xnetip.Network{}, network)
 			return
 		}
 		require.NoError(t, err)
-		require.Equal(t, xnetip.IPNetworkFrom4(typed), network)
+		require.Equal(t, xnetip.NetworkFrom4(typed), network)
 		require.True(t, network.Is4())
 		concrete, ok := network.IPv4()
 		require.True(t, ok)
@@ -449,20 +449,20 @@ func Test_IPNetworkFromCIDR_MatchesTypedConstructorIPv4(t *testing.T) {
 // the error case is drawn every run. Non-contiguous masks cannot
 // arise here — both delegates only build contiguous masks — and the
 // success branch checks the concrete view normalized.
-func Test_IPNetworkFromCIDR_MatchesTypedConstructorIPv6(t *testing.T) {
+func Test_NetworkFromCIDR_MatchesTypedConstructorIPv6(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr6.Draw(t, "addr")
 		bits := rapid.IntRange(0, 129).Draw(t, "bits")
-		network, err := xnetip.IPNetworkFromCIDR(addr, bits)
-		typed, typedErr := xnetip.IPv6NetworkFromCIDR(addr, bits)
+		network, err := xnetip.NetworkFromCIDR(addr, bits)
+		typed, typedErr := xnetip.Network6FromCIDR(addr, bits)
 		if typedErr != nil {
 			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
 			require.ErrorIs(t, typedErr, xnetip.ErrCIDROverflow)
-			require.Equal(t, xnetip.IPNetwork{}, network)
+			require.Equal(t, xnetip.Network{}, network)
 			return
 		}
 		require.NoError(t, err)
-		require.Equal(t, xnetip.IPNetworkFrom6(typed), network)
+		require.Equal(t, xnetip.NetworkFrom6(typed), network)
 		require.True(t, network.Is6())
 		concrete, ok := network.IPv6()
 		require.True(t, ok)
@@ -475,13 +475,13 @@ func Test_IPNetworkFromCIDR_MatchesTypedConstructorIPv6(t *testing.T) {
 
 // verifies that the CIDR constructor allocates nothing on the success
 // path of either family, per the allocation-free runtime contract.
-func Test_IPNetworkFromCIDR_AllocationFree(t *testing.T) {
+func Test_NetworkFromCIDR_AllocationFree(t *testing.T) {
 	addr4 := netip.MustParseAddr("192.168.1.5")
 	addr6 := netip.MustParseAddr("2001:db8::1")
 	var err error
-	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFromCIDR(addr4, 24) })
+	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.NetworkFromCIDR(addr4, 24) })
 	require.NoError(t, err)
-	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFromCIDR(addr6, 64) })
+	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.NetworkFromCIDR(addr6, 64) })
 	require.NoError(t, err)
 }
 
@@ -491,7 +491,7 @@ func Test_IPNetworkFromCIDR_AllocationFree(t *testing.T) {
 // A non-contiguous mask table is not applicable to this constructor:
 // the mask is fixed to all ones, the universe of bits of the address's
 // own family.
-func Test_IPNetworkFromAddr_BuildsHostRouteInOwnFamily(t *testing.T) {
+func Test_NetworkFromAddr_BuildsHostRouteInOwnFamily(t *testing.T) {
 	cases := []struct {
 		name     string
 		addr     string
@@ -508,7 +508,7 @@ func Test_IPNetworkFromAddr_BuildsHostRouteInOwnFamily(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr(testCase.addr))
+			network, err := xnetip.NetworkFromAddr(netip.MustParseAddr(testCase.addr))
 			require.NoError(t, err)
 			require.Equal(t, testCase.wantIs4, network.Is4())
 			require.Equal(t, netip.MustParseAddr(testCase.addr), network.Addr())
@@ -519,12 +519,12 @@ func Test_IPNetworkFromAddr_BuildsHostRouteInOwnFamily(t *testing.T) {
 
 // verifies that the IPv4 host route round-trips through the IPv4
 // extractor and declines the IPv6 one.
-func Test_IPNetworkFromAddr_RoundTripsThroughIPv4(t *testing.T) {
-	network, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr("192.168.1.1"))
+func Test_NetworkFromAddr_RoundTripsThroughIPv4(t *testing.T) {
+	network, err := xnetip.NetworkFromAddr(netip.MustParseAddr("192.168.1.1"))
 	require.NoError(t, err)
 	extracted, ok := network.IPv4()
 	require.True(t, ok)
-	expected, err := xnetip.IPv4NetworkFromAddr(netip.MustParseAddr("192.168.1.1"))
+	expected, err := xnetip.Network4FromAddr(netip.MustParseAddr("192.168.1.1"))
 	require.NoError(t, err)
 	require.Equal(t, expected, extracted)
 	_, ok = network.IPv6()
@@ -533,12 +533,12 @@ func Test_IPNetworkFromAddr_RoundTripsThroughIPv4(t *testing.T) {
 
 // verifies that the host route of an IPv4-mapped address round-trips
 // through the IPv6 extractor and declines the IPv4 one.
-func Test_IPNetworkFromAddr_MappedAddressRoundTripsThroughIPv6(t *testing.T) {
-	network, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr("::ffff:192.168.0.1"))
+func Test_NetworkFromAddr_MappedAddressRoundTripsThroughIPv6(t *testing.T) {
+	network, err := xnetip.NetworkFromAddr(netip.MustParseAddr("::ffff:192.168.0.1"))
 	require.NoError(t, err)
 	extracted, ok := network.IPv6()
 	require.True(t, ok)
-	expected, err := xnetip.IPv6NetworkFromAddr(netip.MustParseAddr("::ffff:192.168.0.1"))
+	expected, err := xnetip.Network6FromAddr(netip.MustParseAddr("::ffff:192.168.0.1"))
 	require.NoError(t, err)
 	require.Equal(t, expected, extracted)
 	_, ok = network.IPv4()
@@ -550,18 +550,18 @@ func Test_IPNetworkFromAddr_MappedAddressRoundTripsThroughIPv6(t *testing.T) {
 //
 // Equality of the whole values pins the IPv4-mapped stored form with
 // the all-ones 128-bit mask, because the lift performs that encoding.
-func Test_IPNetworkFromAddr_StoredFormEqualsIPv4Lift(t *testing.T) {
-	network, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr("192.168.1.1"))
+func Test_NetworkFromAddr_StoredFormEqualsIPv4Lift(t *testing.T) {
+	network, err := xnetip.NetworkFromAddr(netip.MustParseAddr("192.168.1.1"))
 	require.NoError(t, err)
-	concrete, err := xnetip.IPv4NetworkFromAddr(netip.MustParseAddr("192.168.1.1"))
+	concrete, err := xnetip.Network4FromAddr(netip.MustParseAddr("192.168.1.1"))
 	require.NoError(t, err)
-	require.Equal(t, xnetip.IPNetworkFrom4(concrete), network)
+	require.Equal(t, xnetip.NetworkFrom4(concrete), network)
 }
 
 // verifies that a zone is dropped silently and the zone-free host
 // route is built.
-func Test_IPNetworkFromAddr_DropsZone(t *testing.T) {
-	network, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr("fe80::1%eth0"))
+func Test_NetworkFromAddr_DropsZone(t *testing.T) {
+	network, err := xnetip.NetworkFromAddr(netip.MustParseAddr("fe80::1%eth0"))
 	require.NoError(t, err)
 	require.True(t, network.Is6())
 	require.Equal(t, netip.MustParseAddr("fe80::1"), network.Addr())
@@ -570,10 +570,10 @@ func Test_IPNetworkFromAddr_DropsZone(t *testing.T) {
 
 // verifies that the invalid zero address yields the family-mismatch
 // sentinel and the zero network.
-func Test_IPNetworkFromAddr_RejectsInvalidZeroAddr(t *testing.T) {
-	network, err := xnetip.IPNetworkFromAddr(netip.Addr{})
+func Test_NetworkFromAddr_RejectsInvalidZeroAddr(t *testing.T) {
+	network, err := xnetip.NetworkFromAddr(netip.Addr{})
 	require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
-	require.Equal(t, xnetip.IPNetwork{}, network)
+	require.Equal(t, xnetip.Network{}, network)
 }
 
 // verifies that every valid address of either family lifts into a
@@ -581,7 +581,7 @@ func Test_IPNetworkFromAddr_RejectsInvalidZeroAddr(t *testing.T) {
 //
 // The result must also equal the lift of the concrete constructor of
 // its family, so the family-agnostic entry point adds no behaviour.
-func Test_IPNetworkFromAddr_AgreesWithConcreteConstructorsProperty(t *testing.T) {
+func Test_NetworkFromAddr_AgreesWithConcreteConstructorsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		var addr netip.Addr
 		if rapid.Bool().Draw(t, "is4") {
@@ -589,37 +589,37 @@ func Test_IPNetworkFromAddr_AgreesWithConcreteConstructorsProperty(t *testing.T)
 		} else {
 			addr = genNetipAddr6.Draw(t, "addr6")
 		}
-		network, err := xnetip.IPNetworkFromAddr(addr)
+		network, err := xnetip.NetworkFromAddr(addr)
 		require.NoError(t, err)
 		require.Equal(t, addr.Is4(), network.Is4())
 		require.Equal(t, addr, network.Addr())
 		if addr.Is4() {
-			concrete, err := xnetip.IPv4NetworkFromAddr(addr)
+			concrete, err := xnetip.Network4FromAddr(addr)
 			require.NoError(t, err)
-			require.Equal(t, xnetip.IPNetworkFrom4(concrete), network)
+			require.Equal(t, xnetip.NetworkFrom4(concrete), network)
 		} else {
-			concrete, err := xnetip.IPv6NetworkFromAddr(addr)
+			concrete, err := xnetip.Network6FromAddr(addr)
 			require.NoError(t, err)
-			require.Equal(t, xnetip.IPNetworkFrom6(concrete), network)
+			require.Equal(t, xnetip.NetworkFrom6(concrete), network)
 		}
 	})
 }
 
 // verifies that the host-route constructor allocates nothing on the
 // success path of either family.
-func Test_IPNetworkFromAddr_AllocationFree(t *testing.T) {
+func Test_NetworkFromAddr_AllocationFree(t *testing.T) {
 	addr4 := netip.MustParseAddr("192.168.1.5")
 	addr6 := netip.MustParseAddr("2001:db8::1")
 	var err error
-	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFromAddr(addr4) })
+	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.NetworkFromAddr(addr4) })
 	require.NoError(t, err)
-	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFromAddr(addr6) })
+	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.NetworkFromAddr(addr6) })
 	require.NoError(t, err)
 }
 
 // verifies that a same-family pair is accepted, the address bits
 // outside the mask are cleared and the pair's own family is kept.
-func Test_IPNetworkFrom_NormalizesAddressByMask(t *testing.T) {
+func Test_NetworkFrom_NormalizesAddressByMask(t *testing.T) {
 	cases := []struct {
 		name     string
 		addr     string
@@ -640,7 +640,7 @@ func Test_IPNetworkFrom_NormalizesAddressByMask(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPNetworkFrom(
+			network, err := xnetip.NetworkFrom(
 				netip.MustParseAddr(testCase.addr),
 				netip.MustParseAddr(testCase.mask),
 			)
@@ -654,7 +654,7 @@ func Test_IPNetworkFrom_NormalizesAddressByMask(t *testing.T) {
 
 // verifies that pairing an address with the all-ones mask of its
 // family builds the same host route as the host-route constructor.
-func Test_IPNetworkFrom_HostRouteEqualsFromAddr(t *testing.T) {
+func Test_NetworkFrom_HostRouteEqualsFromAddr(t *testing.T) {
 	cases := []struct {
 		name string
 		addr string
@@ -665,12 +665,12 @@ func Test_IPNetworkFrom_HostRouteEqualsFromAddr(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPNetworkFrom(
+			network, err := xnetip.NetworkFrom(
 				netip.MustParseAddr(testCase.addr),
 				netip.MustParseAddr(testCase.mask),
 			)
 			require.NoError(t, err)
-			hostRoute, err := xnetip.IPNetworkFromAddr(netip.MustParseAddr(testCase.addr))
+			hostRoute, err := xnetip.NetworkFromAddr(netip.MustParseAddr(testCase.addr))
 			require.NoError(t, err)
 			require.Equal(t, hostRoute, network)
 		})
@@ -679,7 +679,7 @@ func Test_IPNetworkFrom_HostRouteEqualsFromAddr(t *testing.T) {
 
 // verifies that a mixed-family pair or the invalid zero address
 // yields the family-mismatch sentinel and the zero network.
-func Test_IPNetworkFrom_RejectsFamilyMismatch(t *testing.T) {
+func Test_NetworkFrom_RejectsFamilyMismatch(t *testing.T) {
 	cases := []struct {
 		name string
 		addr netip.Addr
@@ -693,16 +693,16 @@ func Test_IPNetworkFrom_RejectsFamilyMismatch(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPNetworkFrom(testCase.addr, testCase.mask)
+			network, err := xnetip.NetworkFrom(testCase.addr, testCase.mask)
 			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
-			require.Equal(t, xnetip.IPNetwork{}, network)
+			require.Equal(t, xnetip.Network{}, network)
 		})
 	}
 }
 
 // verifies that an IPv4 pair equals the lift of the concrete IPv4
 // constructor, pinning the mapped encoding, all-zero mask included.
-func Test_IPNetworkFrom_MatchesIPv4Lift(t *testing.T) {
+func Test_NetworkFrom_MatchesIPv4Lift(t *testing.T) {
 	cases := []struct {
 		name string
 		addr string
@@ -715,43 +715,43 @@ func Test_IPNetworkFrom_MatchesIPv4Lift(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			addr := netip.MustParseAddr(testCase.addr)
 			mask := netip.MustParseAddr(testCase.mask)
-			network, err := xnetip.IPNetworkFrom(addr, mask)
+			network, err := xnetip.NetworkFrom(addr, mask)
 			require.NoError(t, err)
 			require.True(t, network.Is4())
-			concrete, err := xnetip.IPv4NetworkFrom(addr, mask)
+			concrete, err := xnetip.Network4From(addr, mask)
 			require.NoError(t, err)
-			require.Equal(t, xnetip.IPNetworkFrom4(concrete), network)
+			require.Equal(t, xnetip.NetworkFrom4(concrete), network)
 		})
 	}
 }
 
 // verifies that every same-family pair of either family succeeds and
 // equals the lift of its family's concrete checked constructor.
-func Test_IPNetworkFrom_AgreesWithConcreteConstructorsProperty(t *testing.T) {
+func Test_NetworkFrom_AgreesWithConcreteConstructorsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		if rapid.Bool().Draw(t, "is4") {
 			addr := genNetipAddr4.Draw(t, "addr4")
 			mask := genNetipAddr4.Draw(t, "mask4")
-			network, err := xnetip.IPNetworkFrom(addr, mask)
+			network, err := xnetip.NetworkFrom(addr, mask)
 			require.NoError(t, err)
-			concrete, err := xnetip.IPv4NetworkFrom(addr, mask)
+			concrete, err := xnetip.Network4From(addr, mask)
 			require.NoError(t, err)
-			require.Equal(t, xnetip.IPNetworkFrom4(concrete), network)
+			require.Equal(t, xnetip.NetworkFrom4(concrete), network)
 		} else {
 			addr := genNetipAddr6.Draw(t, "addr6")
 			mask := genNetipAddr6.Draw(t, "mask6")
-			network, err := xnetip.IPNetworkFrom(addr, mask)
+			network, err := xnetip.NetworkFrom(addr, mask)
 			require.NoError(t, err)
-			concrete, err := xnetip.IPv6NetworkFrom(addr, mask)
+			concrete, err := xnetip.Network6From(addr, mask)
 			require.NoError(t, err)
-			require.Equal(t, xnetip.IPNetworkFrom6(concrete), network)
+			require.Equal(t, xnetip.NetworkFrom6(concrete), network)
 		}
 	})
 }
 
 // verifies that every result is masked in its family's width and
 // that rebuilding a result from its own accessors is the identity.
-func Test_IPNetworkFrom_NormalizationIdempotentProperty(t *testing.T) {
+func Test_NetworkFrom_NormalizationIdempotentProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		var addr, mask, wantAddr netip.Addr
 		if rapid.Bool().Draw(t, "is4") {
@@ -769,11 +769,11 @@ func Test_IPNetworkFrom_NormalizationIdempotentProperty(t *testing.T) {
 			mask = netipAddrFrom6Bits(maskHi, maskLo)
 			wantAddr = netipAddrFrom6Bits(addressHi&maskHi, addressLo&maskLo)
 		}
-		network, err := xnetip.IPNetworkFrom(addr, mask)
+		network, err := xnetip.NetworkFrom(addr, mask)
 		require.NoError(t, err)
 		require.Equal(t, wantAddr, network.Addr())
 		require.Equal(t, mask, network.Mask())
-		rebuilt, err := xnetip.IPNetworkFrom(network.Addr(), network.Mask())
+		rebuilt, err := xnetip.NetworkFrom(network.Addr(), network.Mask())
 		require.NoError(t, err)
 		require.Equal(t, network, rebuilt)
 	})
@@ -781,7 +781,7 @@ func Test_IPNetworkFrom_NormalizationIdempotentProperty(t *testing.T) {
 
 // verifies that a mixed-family pair, in either order, always yields
 // the family-mismatch sentinel and the zero network.
-func Test_IPNetworkFrom_RejectsMixedFamilyProperty(t *testing.T) {
+func Test_NetworkFrom_RejectsMixedFamilyProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr4 := genNetipAddr4.Draw(t, "addr4")
 		addr6 := genNetipAddr6.Draw(t, "addr6")
@@ -789,15 +789,15 @@ func Test_IPNetworkFrom_RejectsMixedFamilyProperty(t *testing.T) {
 		if rapid.Bool().Draw(t, "v6 first") {
 			addr, mask = addr6, addr4
 		}
-		network, err := xnetip.IPNetworkFrom(addr, mask)
+		network, err := xnetip.NetworkFrom(addr, mask)
 		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
-		require.Equal(t, xnetip.IPNetwork{}, network)
+		require.Equal(t, xnetip.Network{}, network)
 	})
 }
 
 // verifies that normalization by a contiguous mask agrees with the
 // net/netip oracle for masking a prefix, in both families.
-func Test_IPNetworkFrom_MatchesNetipMaskedForPrefixMasks(t *testing.T) {
+func Test_NetworkFrom_MatchesNetipMaskedForPrefixMasks(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		var addr, mask netip.Addr
 		var bits int
@@ -814,7 +814,7 @@ func Test_IPNetworkFrom_MatchesNetipMaskedForPrefixMasks(t *testing.T) {
 				mask = netipAddrFrom6Bits(^uint64(0), ^uint64(0)<<(128-bits))
 			}
 		}
-		network, err := xnetip.IPNetworkFrom(addr, mask)
+		network, err := xnetip.NetworkFrom(addr, mask)
 		require.NoError(t, err)
 		require.Equal(t, netip.PrefixFrom(addr, bits).Masked().Addr(), network.Addr())
 	})
@@ -822,62 +822,62 @@ func Test_IPNetworkFrom_MatchesNetipMaskedForPrefixMasks(t *testing.T) {
 
 // verifies that the pair constructor allocates nothing on the success
 // path of either family.
-func Test_IPNetworkFrom_AllocationFree(t *testing.T) {
+func Test_NetworkFrom_AllocationFree(t *testing.T) {
 	addr4 := netip.MustParseAddr("192.168.1.1")
 	mask4 := netip.MustParseAddr("255.255.0.255")
 	addr6 := netip.MustParseAddr("2001:db8::1")
 	mask6 := netip.MustParseAddr("ffff:ffff::")
 	var err error
-	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFrom(addr4, mask4) })
+	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.NetworkFrom(addr4, mask4) })
 	require.NoError(t, err)
-	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFrom(addr6, mask6) })
+	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.NetworkFrom(addr6, mask6) })
 	require.NoError(t, err)
 }
 
 // verifies that an IPv4 network embeds as its IPv4-mapped IPv6 image
 // and an IPv6 network passes through unchanged, whatever its shape.
-func Test_IPNetwork_ToIPv6Mapped_EmbedsIntoIPv6Space(t *testing.T) {
+func Test_Network_ToIPv6Mapped_EmbedsIntoIPv6Space(t *testing.T) {
 	cases := []struct {
 		name     string
-		network  xnetip.IPNetwork
+		network  xnetip.Network
 		wantAddr string
 		wantMask string
 	}{
-		{name: "IPv4 contiguous", network: mustIPNetwork4(t, "192.168.1.0", "255.255.255.0"), wantAddr: "::ffff:c0a8:100", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"},
-		{name: "IPv6 identity contiguous", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"), wantAddr: "2001:db8::", wantMask: "ffff:ffff::"},
-		{name: "IPv4 universe pins only the mapped prefix", network: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"), wantAddr: "::ffff:0:0", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff::"},
-		{name: "IPv4 host route becomes a /128", network: mustIPNetwork4(t, "10.0.0.1", "255.255.255.255"), wantAddr: "::ffff:a00:1", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
-		{name: "IPv6 universe identity", network: mustIPNetwork6(t, "::", "::"), wantAddr: "::", wantMask: "::"},
-		{name: "IPv6 mapped network stays as is", network: mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), wantAddr: "::ffff:c0a8:100", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"},
-		{name: "IPv4 non-contiguous keeps the low mask hole", network: mustIPNetwork4(t, "192.168.0.1", "255.255.0.255"), wantAddr: "::ffff:c0a8:1", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff"},
-		{name: "IPv6 non-contiguous identity", network: mustIPNetwork6(t, "2a02:6b8:c00::1234:abcd:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), wantAddr: "2a02:6b8:c00::1234:abcd:0:0", wantMask: "ffff:ffff:ff00::ffff:ffff:0:0"},
-		{name: "IPv4 alternating mask carries into the low bits", network: mustIPNetwork4(t, "170.85.170.85", "170.85.170.85"), wantAddr: "::ffff:aa55:aa55", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:aa55:aa55"},
+		{name: "IPv4 contiguous", network: mustNetworkIs4(t, "192.168.1.0", "255.255.255.0"), wantAddr: "::ffff:c0a8:100", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"},
+		{name: "IPv6 identity contiguous", network: mustNetworkIs6(t, "2001:db8::", "ffff:ffff::"), wantAddr: "2001:db8::", wantMask: "ffff:ffff::"},
+		{name: "IPv4 universe pins only the mapped prefix", network: mustNetworkIs4(t, "0.0.0.0", "0.0.0.0"), wantAddr: "::ffff:0:0", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff::"},
+		{name: "IPv4 host route becomes a /128", network: mustNetworkIs4(t, "10.0.0.1", "255.255.255.255"), wantAddr: "::ffff:a00:1", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+		{name: "IPv6 universe identity", network: mustNetworkIs6(t, "::", "::"), wantAddr: "::", wantMask: "::"},
+		{name: "IPv6 mapped network stays as is", network: mustNetworkIs6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), wantAddr: "::ffff:c0a8:100", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"},
+		{name: "IPv4 non-contiguous keeps the low mask hole", network: mustNetworkIs4(t, "192.168.0.1", "255.255.0.255"), wantAddr: "::ffff:c0a8:1", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff"},
+		{name: "IPv6 non-contiguous identity", network: mustNetworkIs6(t, "2a02:6b8:c00::1234:abcd:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), wantAddr: "2a02:6b8:c00::1234:abcd:0:0", wantMask: "ffff:ffff:ff00::ffff:ffff:0:0"},
+		{name: "IPv4 alternating mask carries into the low bits", network: mustNetworkIs4(t, "170.85.170.85", "170.85.170.85"), wantAddr: "::ffff:aa55:aa55", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:aa55:aa55"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			mapped := testCase.network.ToIPv6Mapped()
-			require.Equal(t, mustIPv6Network(t, testCase.wantAddr, testCase.wantMask), mapped)
+			require.Equal(t, mustNetwork6(t, testCase.wantAddr, testCase.wantMask), mapped)
 		})
 	}
 }
 
 // verifies that the family-agnostic embedding equals the IPv4 type's
 // own embedding for an IPv4 network.
-func Test_IPNetwork_ToIPv6Mapped_EqualsIPv4NetworkMethod(t *testing.T) {
-	network, err := xnetip.IPv4NetworkFrom(
+func Test_Network_ToIPv6Mapped_EqualsNetwork4Method(t *testing.T) {
+	network, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.1.0"),
 		netip.MustParseAddr("255.255.255.0"),
 	)
 	require.NoError(t, err)
-	require.Equal(t, network.ToIPv6Mapped(), xnetip.IPNetworkFrom4(network).ToIPv6Mapped())
+	require.Equal(t, network.ToIPv6Mapped(), xnetip.NetworkFrom4(network).ToIPv6Mapped())
 }
 
 // verifies that embedding an IPv4 network agrees with the concrete
 // method, lands in the mapped range and round-trips back.
-func Test_IPNetwork_ToIPv6Mapped_IPv4RoundTripProperty(t *testing.T) {
+func Test_Network_ToIPv6Mapped_IPv4RoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		mapped := xnetip.IPNetworkFrom4(network).ToIPv6Mapped()
+		network := genNetwork4.Draw(t, "network")
+		mapped := xnetip.NetworkFrom4(network).ToIPv6Mapped()
 		require.Equal(t, network.ToIPv6Mapped(), mapped)
 		require.True(t, mapped.IsIPv4MappedIPv6())
 		recovered, ok := mapped.ToIPv4Mapped()
@@ -888,51 +888,51 @@ func Test_IPNetwork_ToIPv6Mapped_IPv4RoundTripProperty(t *testing.T) {
 
 // verifies that embedding an IPv6 network is the identity, whatever
 // the mask shape.
-func Test_IPNetwork_ToIPv6Mapped_IPv6IdentityProperty(t *testing.T) {
+func Test_Network_ToIPv6Mapped_IPv6IdentityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		require.Equal(t, network, xnetip.IPNetworkFrom6(network).ToIPv6Mapped())
+		network := genNetwork6.Draw(t, "network")
+		require.Equal(t, network, xnetip.NetworkFrom6(network).ToIPv6Mapped())
 	})
 }
 
 // verifies that the address of an embedded IPv4 network unmaps back to
 // the original address, with net/netip as the unmapping oracle.
-func Test_IPNetwork_ToIPv6Mapped_MatchesNetipUnmap(t *testing.T) {
+func Test_Network_ToIPv6Mapped_MatchesNetipUnmap(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		mapped := xnetip.IPNetworkFrom4(network).ToIPv6Mapped()
+		network := genNetwork4.Draw(t, "network")
+		mapped := xnetip.NetworkFrom4(network).ToIPv6Mapped()
 		require.Equal(t, network.Addr(), mapped.Addr().Unmap())
 	})
 }
 
 // verifies that the embedding allocates nothing for either family.
-func Test_IPNetwork_ToIPv6Mapped_AllocationFree(t *testing.T) {
-	network4 := mustIPNetwork4(t, "192.168.1.0", "255.255.255.0")
-	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+func Test_Network_ToIPv6Mapped_AllocationFree(t *testing.T) {
+	network4 := mustNetworkIs4(t, "192.168.1.0", "255.255.255.0")
+	network6 := mustNetworkIs6(t, "2001:db8::", "ffff:ffff::")
 	requireNoAllocs(t, func() { network6Sink = network4.ToIPv6Mapped() })
 	requireNoAllocs(t, func() { network6Sink = network6.ToIPv6Mapped() })
 }
 
 // verifies that an IPv4 network and a non-mapped IPv6 network come
 // back unchanged while a mapped IPv6 network collapses to IPv4.
-func Test_IPNetwork_ToCanonical_CollapsesOnlyMappedIPv6(t *testing.T) {
+func Test_Network_ToCanonical_CollapsesOnlyMappedIPv6(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
-		want    xnetip.IPNetwork
+		network xnetip.Network
+		want    xnetip.Network
 	}{
-		{name: "IPv4 unchanged", network: mustIPNetwork4(t, "192.168.0.0", "255.255.255.0"), want: mustIPNetwork4(t, "192.168.0.0", "255.255.255.0")},
-		{name: "mapped IPv6 contiguous collapses", network: mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: mustIPNetwork4(t, "192.168.1.0", "255.255.255.0")},
-		{name: "plain IPv6 unchanged", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"), want: mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")},
-		{name: "IPv4-compatible address is not mapped", network: mustIPNetwork6(t, "::c00a:2ff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustIPNetwork6(t, "::c00a:2ff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
-		{name: "mapped address under an unpinned mask stays IPv6", network: mustIPNetwork6(t, "::ffff:c0a8:1", "0:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustIPNetwork6(t, "::ffff:c0a8:1", "0:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
-		{name: "mapped universe collapses to the IPv4 universe", network: mustIPNetwork6(t, "::ffff:0:0", "ffff:ffff:ffff:ffff:ffff:ffff::"), want: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0")},
-		{name: "mapped host route collapses", network: mustIPNetwork6(t, "::ffff:a00:1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustIPNetwork4(t, "10.0.0.1", "255.255.255.255")},
-		{name: "mask one bit short of the mapped pin stays IPv6", network: mustIPNetwork6(t, "::ffff:0:0", "ffff:ffff:ffff:ffff:ffff:fffe::"), want: mustIPNetwork6(t, "::fffe:0:0", "ffff:ffff:ffff:ffff:ffff:fffe::")},
-		{name: "IPv6 universe unchanged", network: mustIPNetwork6(t, "::", "::"), want: mustIPNetwork6(t, "::", "::")},
-		{name: "mapped with non-contiguous low mask collapses", network: mustIPNetwork6(t, "::ffff:c0a8:1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff"), want: mustIPNetwork4(t, "192.168.0.1", "255.255.0.255")},
-		{name: "hole inside the pinned region stays IPv6", network: mustIPNetwork6(t, "::ffff:c0a8:1", "ffff:0:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustIPNetwork6(t, "::ffff:c0a8:1", "ffff:0:ffff:ffff:ffff:ffff:ffff:ffff")},
-		{name: "mapped with alternating low mask collapses", network: mustIPNetwork6(t, "::ffff:aa55:aa55", "ffff:ffff:ffff:ffff:ffff:ffff:aa55:aa55"), want: mustIPNetwork4(t, "170.85.170.85", "170.85.170.85")},
+		{name: "IPv4 unchanged", network: mustNetworkIs4(t, "192.168.0.0", "255.255.255.0"), want: mustNetworkIs4(t, "192.168.0.0", "255.255.255.0")},
+		{name: "mapped IPv6 contiguous collapses", network: mustNetworkIs6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: mustNetworkIs4(t, "192.168.1.0", "255.255.255.0")},
+		{name: "plain IPv6 unchanged", network: mustNetworkIs6(t, "2001:db8::", "ffff:ffff::"), want: mustNetworkIs6(t, "2001:db8::", "ffff:ffff::")},
+		{name: "IPv4-compatible address is not mapped", network: mustNetworkIs6(t, "::c00a:2ff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustNetworkIs6(t, "::c00a:2ff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "mapped address under an unpinned mask stays IPv6", network: mustNetworkIs6(t, "::ffff:c0a8:1", "0:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustNetworkIs6(t, "::ffff:c0a8:1", "0:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "mapped universe collapses to the IPv4 universe", network: mustNetworkIs6(t, "::ffff:0:0", "ffff:ffff:ffff:ffff:ffff:ffff::"), want: mustNetworkIs4(t, "0.0.0.0", "0.0.0.0")},
+		{name: "mapped host route collapses", network: mustNetworkIs6(t, "::ffff:a00:1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustNetworkIs4(t, "10.0.0.1", "255.255.255.255")},
+		{name: "mask one bit short of the mapped pin stays IPv6", network: mustNetworkIs6(t, "::ffff:0:0", "ffff:ffff:ffff:ffff:ffff:fffe::"), want: mustNetworkIs6(t, "::fffe:0:0", "ffff:ffff:ffff:ffff:ffff:fffe::")},
+		{name: "IPv6 universe unchanged", network: mustNetworkIs6(t, "::", "::"), want: mustNetworkIs6(t, "::", "::")},
+		{name: "mapped with non-contiguous low mask collapses", network: mustNetworkIs6(t, "::ffff:c0a8:1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff"), want: mustNetworkIs4(t, "192.168.0.1", "255.255.0.255")},
+		{name: "hole inside the pinned region stays IPv6", network: mustNetworkIs6(t, "::ffff:c0a8:1", "ffff:0:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustNetworkIs6(t, "::ffff:c0a8:1", "ffff:0:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "mapped with alternating low mask collapses", network: mustNetworkIs6(t, "::ffff:aa55:aa55", "ffff:ffff:ffff:ffff:ffff:ffff:aa55:aa55"), want: mustNetworkIs4(t, "170.85.170.85", "170.85.170.85")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -943,9 +943,9 @@ func Test_IPNetwork_ToCanonical_CollapsesOnlyMappedIPv6(t *testing.T) {
 
 // verifies that canonicalizing twice equals canonicalizing once, for
 // networks of every family and mask shape.
-func Test_IPNetwork_ToCanonical_IdempotentProperty(t *testing.T) {
+func Test_Network_ToCanonical_IdempotentProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		canonical := network.ToCanonical()
 		require.Equal(t, canonical, canonical.ToCanonical())
 	})
@@ -953,29 +953,29 @@ func Test_IPNetwork_ToCanonical_IdempotentProperty(t *testing.T) {
 
 // verifies that canonicalization preserves the IPv6 embedding: the
 // canonical form embeds into the same 128-bit network.
-func Test_IPNetwork_ToCanonical_PreservesEmbeddingProperty(t *testing.T) {
+func Test_Network_ToCanonical_PreservesEmbeddingProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		require.Equal(t, network.ToIPv6Mapped(), network.ToCanonical().ToIPv6Mapped())
 	})
 }
 
 // verifies that an IPv4 network survives the round trip through its
 // mapped IPv6 lift and back through canonicalization.
-func Test_IPNetwork_ToCanonical_RoundTripsMappedIPv4Property(t *testing.T) {
+func Test_Network_ToCanonical_RoundTripsMappedIPv4Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		lifted := xnetip.IPNetworkFrom6(xnetip.IPNetworkFrom4(network).ToIPv6Mapped())
-		require.Equal(t, xnetip.IPNetworkFrom4(network), lifted.ToCanonical())
+		network := genNetwork4.Draw(t, "network")
+		lifted := xnetip.NetworkFrom6(xnetip.NetworkFrom4(network).ToIPv6Mapped())
+		require.Equal(t, xnetip.NetworkFrom4(network), lifted.ToCanonical())
 	})
 }
 
 // verifies that an IPv6 network collapses exactly when the concrete
 // mapped predicate holds, and collapses to the concrete truncation.
-func Test_IPNetwork_ToCanonical_AgreesWithConcretePredicateProperty(t *testing.T) {
+func Test_Network_ToCanonical_AgreesWithConcretePredicateProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		canonical := xnetip.IPNetworkFrom6(network).ToCanonical()
+		network := genNetwork6.Draw(t, "network")
+		canonical := xnetip.NetworkFrom6(network).ToCanonical()
 		require.Equal(t, network.IsIPv4MappedIPv6(), canonical.Is4())
 		if canonical.Is4() {
 			extracted, ok := canonical.IPv4()
@@ -989,10 +989,10 @@ func Test_IPNetwork_ToCanonical_AgreesWithConcretePredicateProperty(t *testing.T
 
 // verifies the address half of the collapse against net/netip: a
 // collapsed network's address unmaps to Is4, an unmappable one blocks.
-func Test_IPNetwork_ToCanonical_MatchesNetipUnmapOnAddress(t *testing.T) {
+func Test_Network_ToCanonical_MatchesNetipUnmapOnAddress(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		canonical := xnetip.IPNetworkFrom6(network).ToCanonical()
+		network := genNetwork6.Draw(t, "network")
+		canonical := xnetip.NetworkFrom6(network).ToCanonical()
 		if canonical.Is4() {
 			require.True(t, network.Addr().Unmap().Is4())
 		}
@@ -1004,10 +1004,10 @@ func Test_IPNetwork_ToCanonical_MatchesNetipUnmapOnAddress(t *testing.T) {
 
 // verifies that canonicalization allocates nothing for an IPv4, a
 // mapped IPv6 and a plain IPv6 network alike.
-func Test_IPNetwork_ToCanonical_AllocationFree(t *testing.T) {
-	network4 := mustIPNetwork4(t, "192.168.1.0", "255.255.255.0")
-	mapped := mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00")
-	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+func Test_Network_ToCanonical_AllocationFree(t *testing.T) {
+	network4 := mustNetworkIs4(t, "192.168.1.0", "255.255.255.0")
+	mapped := mustNetworkIs6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00")
+	network6 := mustNetworkIs6(t, "2001:db8::", "ffff:ffff::")
 	requireNoAllocs(t, func() { ipNetworkSink = network4.ToCanonical() })
 	requireNoAllocs(t, func() { ipNetworkSink = mapped.ToCanonical() })
 	requireNoAllocs(t, func() { ipNetworkSink = network6.ToCanonical() })
@@ -1015,23 +1015,23 @@ func Test_IPNetwork_ToCanonical_AllocationFree(t *testing.T) {
 
 // verifies that every IPv4 network sorts before every IPv6 network
 // and that within a family the concrete lexicographic order applies.
-func Test_IPNetwork_Compare_FamilyFirstThenConcreteOrder(t *testing.T) {
+func Test_Network_Compare_FamilyFirstThenConcreteOrder(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
 		want  int
 	}{
-		{name: "IPv4 max before IPv6 universe", left: mustIPNetwork4(t, "255.255.255.255", "255.255.255.255"), right: mustIPNetwork6(t, "::", "::"), want: -1},
-		{name: "IPv6 universe after IPv4 universe", left: mustIPNetwork6(t, "::", "::"), right: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"), want: 1},
-		{name: "within IPv4 address dominates mask", left: mustIPNetwork4(t, "10.0.0.0", "255.255.255.255"), right: mustIPNetwork4(t, "11.0.0.0", "255.0.0.0"), want: -1},
-		{name: "within IPv4 mask decides", left: mustIPNetwork4(t, "10.0.0.0", "255.255.0.0"), right: mustIPNetwork4(t, "10.0.0.0", "255.255.255.0"), want: -1},
-		{name: "within IPv6 address dominates mask", left: mustIPNetwork6(t, "2001::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), right: mustIPNetwork6(t, "2001:db9::", "ffff:ffff::"), want: -1},
-		{name: "within IPv6 mask decides", left: mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"), right: mustIPNetwork6(t, "2001:db8::", "ffff:ffff:ffff:ffff::"), want: -1},
-		{name: "IPv4-mapped IPv6 sorts after its IPv4 twin", left: mustIPNetwork4(t, "192.168.1.0", "255.255.255.0"), right: mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: -1},
-		{name: "IPv4 non-contiguous mask decides", left: mustIPNetwork4(t, "10.0.0.5", "255.0.0.255"), right: mustIPNetwork4(t, "10.0.0.5", "255.255.0.255"), want: -1},
-		{name: "IPv6 non-contiguous mask decides", left: mustIPNetwork6(t, "2001:db8::5", "ffff:ffff:ff00:ff00:ffff:ffff:ffff:ffff"), right: mustIPNetwork6(t, "2001:db8::5", "ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff"), want: -1},
-		{name: "IPv4 non-contiguous still before any IPv6", left: mustIPNetwork4(t, "255.255.255.255", "170.85.170.85"), right: mustIPNetwork6(t, "::", "::"), want: -1},
+		{name: "IPv4 max before IPv6 universe", left: mustNetworkIs4(t, "255.255.255.255", "255.255.255.255"), right: mustNetworkIs6(t, "::", "::"), want: -1},
+		{name: "IPv6 universe after IPv4 universe", left: mustNetworkIs6(t, "::", "::"), right: mustNetworkIs4(t, "0.0.0.0", "0.0.0.0"), want: 1},
+		{name: "within IPv4 address dominates mask", left: mustNetworkIs4(t, "10.0.0.0", "255.255.255.255"), right: mustNetworkIs4(t, "11.0.0.0", "255.0.0.0"), want: -1},
+		{name: "within IPv4 mask decides", left: mustNetworkIs4(t, "10.0.0.0", "255.255.0.0"), right: mustNetworkIs4(t, "10.0.0.0", "255.255.255.0"), want: -1},
+		{name: "within IPv6 address dominates mask", left: mustNetworkIs6(t, "2001::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), right: mustNetworkIs6(t, "2001:db9::", "ffff:ffff::"), want: -1},
+		{name: "within IPv6 mask decides", left: mustNetworkIs6(t, "2001:db8::", "ffff:ffff::"), right: mustNetworkIs6(t, "2001:db8::", "ffff:ffff:ffff:ffff::"), want: -1},
+		{name: "IPv4-mapped IPv6 sorts after its IPv4 twin", left: mustNetworkIs4(t, "192.168.1.0", "255.255.255.0"), right: mustNetworkIs6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: -1},
+		{name: "IPv4 non-contiguous mask decides", left: mustNetworkIs4(t, "10.0.0.5", "255.0.0.255"), right: mustNetworkIs4(t, "10.0.0.5", "255.255.0.255"), want: -1},
+		{name: "IPv6 non-contiguous mask decides", left: mustNetworkIs6(t, "2001:db8::5", "ffff:ffff:ff00:ff00:ffff:ffff:ffff:ffff"), right: mustNetworkIs6(t, "2001:db8::5", "ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff"), want: -1},
+		{name: "IPv4 non-contiguous still before any IPv6", left: mustNetworkIs4(t, "255.255.255.255", "170.85.170.85"), right: mustNetworkIs6(t, "::", "::"), want: -1},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1041,57 +1041,57 @@ func Test_IPNetwork_Compare_FamilyFirstThenConcreteOrder(t *testing.T) {
 }
 
 // verifies that equal networks of either family compare as zero.
-func Test_IPNetwork_Compare_EqualityIsZero(t *testing.T) {
-	require.Equal(t, 0, mustIPNetwork4(t, "192.168.1.0", "255.255.255.0").Compare(mustIPNetwork4(t, "192.168.1.0", "255.255.255.0")))
-	require.Equal(t, 0, mustIPNetwork6(t, "2001:db8::", "ffff:ffff::").Compare(mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")))
+func Test_Network_Compare_EqualityIsZero(t *testing.T) {
+	require.Equal(t, 0, mustNetworkIs4(t, "192.168.1.0", "255.255.255.0").Compare(mustNetworkIs4(t, "192.168.1.0", "255.255.255.0")))
+	require.Equal(t, 0, mustNetworkIs6(t, "2001:db8::", "ffff:ffff::").Compare(mustNetworkIs6(t, "2001:db8::", "ffff:ffff::")))
 }
 
 // verifies that sorting a mixed fixture yields the family blocks in
 // order, each internally sorted by its concrete order.
-func Test_IPNetwork_Compare_SortPinsFamilyThenOrder(t *testing.T) {
-	shuffled := []xnetip.IPNetwork{
-		mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"),
-		mustIPNetwork4(t, "10.0.0.0", "255.0.0.0"),
-		mustIPNetwork6(t, "::", "::"),
-		mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"),
-		mustIPNetwork4(t, "10.0.0.5", "255.0.0.255"),
-		mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"),
+func Test_Network_Compare_SortPinsFamilyThenOrder(t *testing.T) {
+	shuffled := []xnetip.Network{
+		mustNetworkIs6(t, "2001:db8::", "ffff:ffff::"),
+		mustNetworkIs4(t, "10.0.0.0", "255.0.0.0"),
+		mustNetworkIs6(t, "::", "::"),
+		mustNetworkIs4(t, "0.0.0.0", "0.0.0.0"),
+		mustNetworkIs4(t, "10.0.0.5", "255.0.0.255"),
+		mustNetworkIs6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"),
 	}
-	want := []xnetip.IPNetwork{
-		mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"),
-		mustIPNetwork4(t, "10.0.0.0", "255.0.0.0"),
-		mustIPNetwork4(t, "10.0.0.5", "255.0.0.255"),
-		mustIPNetwork6(t, "::", "::"),
-		mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"),
-		mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"),
+	want := []xnetip.Network{
+		mustNetworkIs4(t, "0.0.0.0", "0.0.0.0"),
+		mustNetworkIs4(t, "10.0.0.0", "255.0.0.0"),
+		mustNetworkIs4(t, "10.0.0.5", "255.0.0.255"),
+		mustNetworkIs6(t, "::", "::"),
+		mustNetworkIs6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"),
+		mustNetworkIs6(t, "2001:db8::", "ffff:ffff::"),
 	}
-	slices.SortFunc(shuffled, xnetip.IPNetwork.Compare)
+	slices.SortFunc(shuffled, xnetip.Network.Compare)
 	require.Equal(t, want, shuffled)
 }
 
 // verifies that within a family the lifted order agrees with the
 // concrete type's order, the check behind the stored-form compare.
-func Test_IPNetwork_Compare_AgreesWithConcreteOrdersProperty(t *testing.T) {
+func Test_Network_Compare_AgreesWithConcreteOrdersProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		if rapid.Bool().Draw(t, "is4") {
-			left := genIPv4Network.Draw(t, "left")
-			right := genIPv4Network.Draw(t, "right")
-			require.Equal(t, left.Compare(right), xnetip.IPNetworkFrom4(left).Compare(xnetip.IPNetworkFrom4(right)))
+			left := genNetwork4.Draw(t, "left")
+			right := genNetwork4.Draw(t, "right")
+			require.Equal(t, left.Compare(right), xnetip.NetworkFrom4(left).Compare(xnetip.NetworkFrom4(right)))
 		} else {
-			left := genIPv6Network.Draw(t, "left")
-			right := genIPv6Network.Draw(t, "right")
-			require.Equal(t, left.Compare(right), xnetip.IPNetworkFrom6(left).Compare(xnetip.IPNetworkFrom6(right)))
+			left := genNetwork6.Draw(t, "left")
+			right := genNetwork6.Draw(t, "right")
+			require.Equal(t, left.Compare(right), xnetip.NetworkFrom6(left).Compare(xnetip.NetworkFrom6(right)))
 		}
 	})
 }
 
 // verifies the family rule on mixed pairs, antisymmetry, zero exactly
 // on equality and transitivity on random triples.
-func Test_IPNetwork_Compare_TotalOrderProperty(t *testing.T) {
+func Test_Network_Compare_TotalOrderProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPNetwork.Draw(t, "left")
-		right := genIPNetwork.Draw(t, "right")
-		third := genIPNetwork.Draw(t, "third")
+		left := genNetwork.Draw(t, "left")
+		right := genNetwork.Draw(t, "right")
+		third := genNetwork.Draw(t, "third")
 		if left.Is4() && right.Is6() {
 			require.Equal(t, -1, left.Compare(right))
 		}
@@ -1108,12 +1108,12 @@ func Test_IPNetwork_Compare_TotalOrderProperty(t *testing.T) {
 
 // verifies that sorting a random mixed slice puts every IPv4 network
 // before every IPv6 network with each family block sorted.
-func Test_IPNetwork_Compare_SortFuncProperty(t *testing.T) {
+func Test_Network_Compare_SortFuncProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		networks := rapid.SliceOfN(genIPNetwork, 0, 32).Draw(t, "networks")
+		networks := rapid.SliceOfN(genNetwork, 0, 32).Draw(t, "networks")
 		sorted := slices.Clone(networks)
-		slices.SortFunc(sorted, xnetip.IPNetwork.Compare)
-		require.True(t, slices.IsSortedFunc(sorted, xnetip.IPNetwork.Compare))
+		slices.SortFunc(sorted, xnetip.Network.Compare)
+		require.True(t, slices.IsSortedFunc(sorted, xnetip.Network.Compare))
 		require.ElementsMatch(t, networks, sorted)
 		seenIPv6 := false
 		for _, network := range sorted {
@@ -1128,7 +1128,7 @@ func Test_IPNetwork_Compare_SortFuncProperty(t *testing.T) {
 
 // verifies that on host routes the order agrees with netip.Addr's
 // family-first address order.
-func Test_IPNetwork_Compare_MatchesNetipAddrOrderOnHostRoutes(t *testing.T) {
+func Test_Network_Compare_MatchesNetipAddrOrderOnHostRoutes(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		var left, right netip.Addr
 		if rapid.Bool().Draw(t, "left is4") {
@@ -1141,9 +1141,9 @@ func Test_IPNetwork_Compare_MatchesNetipAddrOrderOnHostRoutes(t *testing.T) {
 		} else {
 			right = genNetipAddr6.Draw(t, "right6")
 		}
-		leftRoute, err := xnetip.IPNetworkFromAddr(left)
+		leftRoute, err := xnetip.NetworkFromAddr(left)
 		require.NoError(t, err)
-		rightRoute, err := xnetip.IPNetworkFromAddr(right)
+		rightRoute, err := xnetip.NetworkFromAddr(right)
 		require.NoError(t, err)
 		require.Equal(t, left.Compare(right), leftRoute.Compare(rightRoute))
 	})
@@ -1151,10 +1151,10 @@ func Test_IPNetwork_Compare_MatchesNetipAddrOrderOnHostRoutes(t *testing.T) {
 
 // verifies that comparing allocates nothing for same-family and
 // mixed-family pairs alike.
-func Test_IPNetwork_Compare_AllocationFree(t *testing.T) {
-	network4 := mustIPNetwork4(t, "10.0.0.0", "255.0.0.0")
-	other4 := mustIPNetwork4(t, "10.0.0.0", "255.255.255.0")
-	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+func Test_Network_Compare_AllocationFree(t *testing.T) {
+	network4 := mustNetworkIs4(t, "10.0.0.0", "255.0.0.0")
+	other4 := mustNetworkIs4(t, "10.0.0.0", "255.255.255.0")
+	network6 := mustNetworkIs6(t, "2001:db8::", "ffff:ffff::")
 	requireNoAllocs(t, func() { intSink = network4.Compare(other4) })
 	requireNoAllocs(t, func() { intSink = network6.Compare(network6) })
 	requireNoAllocs(t, func() { intSink = network4.Compare(network6) })
@@ -1167,29 +1167,29 @@ func Test_IPNetwork_Compare_AllocationFree(t *testing.T) {
 // network, the IPv4-mapped ones included, but no IPv4 network, and an
 // IPv4-mapped IPv6 network never contains the IPv4 network with the
 // same bytes.
-func Test_IPNetwork_Contains_FamiliesAndBoundary(t *testing.T) {
+func Test_Network_Contains_FamiliesAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		outer xnetip.IPNetwork
-		inner xnetip.IPNetwork
+		outer xnetip.Network
+		inner xnetip.Network
 		want  bool
 	}{
-		{name: "IPv4 nested", outer: xnetip.MustParseIPNetwork("192.168.0.0/16"), inner: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: true},
-		{name: "IPv4 nested reversed", outer: xnetip.MustParseIPNetwork("192.168.1.0/24"), inner: xnetip.MustParseIPNetwork("192.168.0.0/16"), want: false},
-		{name: "IPv6 nested", outer: xnetip.MustParseIPNetwork("2001:db8::/32"), inner: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: true},
-		{name: "IPv6 nested reversed", outer: xnetip.MustParseIPNetwork("2001:db8:1::/48"), inner: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
-		{name: "different families", outer: xnetip.MustParseIPNetwork("10.0.0.0/8"), inner: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
-		{name: "different families reversed", outer: xnetip.MustParseIPNetwork("2001:db8::/32"), inner: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
-		{name: "IPv6 universe does not contain an IPv4 network", outer: xnetip.IPNetwork{}, inner: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
-		{name: "IPv4 network does not contain the IPv6 universe", outer: xnetip.MustParseIPNetwork("10.0.0.0/8"), inner: xnetip.IPNetwork{}, want: false},
-		{name: "IPv6 universe contains a mapped IPv6 network", outer: xnetip.IPNetwork{}, inner: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), want: true},
-		{name: "mapped IPv6 network does not contain the universe", outer: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), inner: xnetip.IPNetwork{}, want: false},
-		{name: "IPv4 universe contains an IPv4 host", outer: xnetip.MustParseIPNetwork("0.0.0.0/0"), inner: xnetip.MustParseIPNetwork("127.0.0.1"), want: true},
-		{name: "IPv4 universe does not contain an IPv6 host", outer: xnetip.MustParseIPNetwork("0.0.0.0/0"), inner: xnetip.MustParseIPNetwork("::1"), want: false},
-		{name: "mapped IPv6 vs IPv4 with the same bytes", outer: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), inner: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
-		{name: "IPv4 vs mapped IPv6 with the same bytes", outer: xnetip.MustParseIPNetwork("10.0.0.0/8"), inner: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), want: false},
-		{name: "IPv4 host contains itself", outer: xnetip.MustParseIPNetwork("10.0.0.1/32"), inner: xnetip.MustParseIPNetwork("10.0.0.1/32"), want: true},
-		{name: "IPv6 host contains itself", outer: xnetip.MustParseIPNetwork("::1/128"), inner: xnetip.MustParseIPNetwork("::1/128"), want: true},
+		{name: "IPv4 nested", outer: xnetip.MustParseNetwork("192.168.0.0/16"), inner: xnetip.MustParseNetwork("192.168.1.0/24"), want: true},
+		{name: "IPv4 nested reversed", outer: xnetip.MustParseNetwork("192.168.1.0/24"), inner: xnetip.MustParseNetwork("192.168.0.0/16"), want: false},
+		{name: "IPv6 nested", outer: xnetip.MustParseNetwork("2001:db8::/32"), inner: xnetip.MustParseNetwork("2001:db8:1::/48"), want: true},
+		{name: "IPv6 nested reversed", outer: xnetip.MustParseNetwork("2001:db8:1::/48"), inner: xnetip.MustParseNetwork("2001:db8::/32"), want: false},
+		{name: "different families", outer: xnetip.MustParseNetwork("10.0.0.0/8"), inner: xnetip.MustParseNetwork("2001:db8::/32"), want: false},
+		{name: "different families reversed", outer: xnetip.MustParseNetwork("2001:db8::/32"), inner: xnetip.MustParseNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv6 universe does not contain an IPv4 network", outer: xnetip.Network{}, inner: xnetip.MustParseNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv4 network does not contain the IPv6 universe", outer: xnetip.MustParseNetwork("10.0.0.0/8"), inner: xnetip.Network{}, want: false},
+		{name: "IPv6 universe contains a mapped IPv6 network", outer: xnetip.Network{}, inner: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), want: true},
+		{name: "mapped IPv6 network does not contain the universe", outer: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), inner: xnetip.Network{}, want: false},
+		{name: "IPv4 universe contains an IPv4 host", outer: xnetip.MustParseNetwork("0.0.0.0/0"), inner: xnetip.MustParseNetwork("127.0.0.1"), want: true},
+		{name: "IPv4 universe does not contain an IPv6 host", outer: xnetip.MustParseNetwork("0.0.0.0/0"), inner: xnetip.MustParseNetwork("::1"), want: false},
+		{name: "mapped IPv6 vs IPv4 with the same bytes", outer: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), inner: xnetip.MustParseNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv4 vs mapped IPv6 with the same bytes", outer: xnetip.MustParseNetwork("10.0.0.0/8"), inner: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), want: false},
+		{name: "IPv4 host contains itself", outer: xnetip.MustParseNetwork("10.0.0.1/32"), inner: xnetip.MustParseNetwork("10.0.0.1/32"), want: true},
+		{name: "IPv6 host contains itself", outer: xnetip.MustParseNetwork("::1/128"), inner: xnetip.MustParseNetwork("::1/128"), want: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1203,20 +1203,20 @@ func Test_IPNetwork_Contains_FamiliesAndBoundary(t *testing.T) {
 //
 // The family rule is unaffected by mask shape: a non-contiguous
 // pattern of one family never contains one of the other.
-func Test_IPNetwork_Contains_NonContiguousMasks(t *testing.T) {
+func Test_Network_Contains_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		outer xnetip.IPNetwork
-		inner xnetip.IPNetwork
+		outer xnetip.Network
+		inner xnetip.Network
 		want  bool
 	}{
-		{name: "IPv4 pattern contains narrower pattern", outer: xnetip.MustParseIPNetwork("10.0.0.0/255.0.0.0"), inner: xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255"), want: true},
-		{name: "IPv4 narrower pattern does not contain wider", outer: xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255"), inner: xnetip.MustParseIPNetwork("10.0.0.0/255.0.0.0"), want: false},
-		{name: "IPv6 pattern contains narrower pattern", outer: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::"), inner: xnetip.MustParseIPNetwork("2001:db8::1/ffff:ffff::ffff"), want: true},
-		{name: "IPv6 narrower pattern does not contain wider", outer: xnetip.MustParseIPNetwork("2001:db8::1/ffff:ffff::ffff"), inner: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::"), want: false},
-		{name: "pattern 10.*.0.* contains matching host", outer: xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseIPNetwork("10.42.0.99"), want: true},
-		{name: "IPv4 pattern vs IPv6 pattern", outer: xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::"), want: false},
-		{name: "IPv6 pattern vs IPv4 pattern", outer: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::"), inner: xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0"), want: false},
+		{name: "IPv4 pattern contains narrower pattern", outer: xnetip.MustParseNetwork("10.0.0.0/255.0.0.0"), inner: xnetip.MustParseNetwork("10.0.0.1/255.0.0.255"), want: true},
+		{name: "IPv4 narrower pattern does not contain wider", outer: xnetip.MustParseNetwork("10.0.0.1/255.0.0.255"), inner: xnetip.MustParseNetwork("10.0.0.0/255.0.0.0"), want: false},
+		{name: "IPv6 pattern contains narrower pattern", outer: xnetip.MustParseNetwork("2001:db8::/ffff:ffff::"), inner: xnetip.MustParseNetwork("2001:db8::1/ffff:ffff::ffff"), want: true},
+		{name: "IPv6 narrower pattern does not contain wider", outer: xnetip.MustParseNetwork("2001:db8::1/ffff:ffff::ffff"), inner: xnetip.MustParseNetwork("2001:db8::/ffff:ffff::"), want: false},
+		{name: "pattern 10.*.0.* contains matching host", outer: xnetip.MustParseNetwork("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseNetwork("10.42.0.99"), want: true},
+		{name: "IPv4 pattern vs IPv6 pattern", outer: xnetip.MustParseNetwork("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseNetwork("2001:db8::/ffff:ffff::"), want: false},
+		{name: "IPv6 pattern vs IPv4 pattern", outer: xnetip.MustParseNetwork("2001:db8::/ffff:ffff::"), inner: xnetip.MustParseNetwork("10.0.0.0/255.0.255.0"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1227,38 +1227,38 @@ func Test_IPNetwork_Contains_NonContiguousMasks(t *testing.T) {
 
 // verifies that wrapped IPv4 containment equals the concrete IPv4
 // answer, so the IPv4-mapped storage form preserves the relation.
-func Test_IPNetwork_Contains_AgreesWithIPv4Property(t *testing.T) {
+func Test_Network_Contains_AgreesWithIPv4Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		outer := genIPv4Network.Draw(t, "outer")
-		inner := genIPv4Network.Draw(t, "inner")
+		outer := genNetwork4.Draw(t, "outer")
+		inner := genNetwork4.Draw(t, "inner")
 		require.Equal(
 			t,
 			outer.Contains(inner),
-			xnetip.IPNetworkFrom4(outer).Contains(xnetip.IPNetworkFrom4(inner)),
+			xnetip.NetworkFrom4(outer).Contains(xnetip.NetworkFrom4(inner)),
 		)
 	})
 }
 
 // verifies that wrapped IPv6 containment equals the concrete IPv6
 // answer.
-func Test_IPNetwork_Contains_AgreesWithIPv6Property(t *testing.T) {
+func Test_Network_Contains_AgreesWithIPv6Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		outer := genIPv6Network.Draw(t, "outer")
-		inner := genIPv6Network.Draw(t, "inner")
+		outer := genNetwork6.Draw(t, "outer")
+		inner := genNetwork6.Draw(t, "inner")
 		require.Equal(
 			t,
 			outer.Contains(inner),
-			xnetip.IPNetworkFrom6(outer).Contains(xnetip.IPNetworkFrom6(inner)),
+			xnetip.NetworkFrom6(outer).Contains(xnetip.NetworkFrom6(inner)),
 		)
 	})
 }
 
 // verifies that networks of different families never contain each
 // other, whatever their masks.
-func Test_IPNetwork_Contains_CrossFamilyAlwaysFalseProperty(t *testing.T) {
+func Test_Network_Contains_CrossFamilyAlwaysFalseProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
-		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		network4 := xnetip.NetworkFrom4(genNetwork4.Draw(t, "network4"))
+		network6 := xnetip.NetworkFrom6(genNetwork6.Draw(t, "network6"))
 		require.False(t, network4.Contains(network6))
 		require.False(t, network6.Contains(network4))
 	})
@@ -1266,29 +1266,29 @@ func Test_IPNetwork_Contains_CrossFamilyAlwaysFalseProperty(t *testing.T) {
 
 // verifies that every network contains itself, whatever the family
 // and the mask shape.
-func Test_IPNetwork_Contains_ReflexiveProperty(t *testing.T) {
+func Test_Network_Contains_ReflexiveProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		require.True(t, network.Contains(network))
 	})
 }
 
 // verifies that mutual containment holds exactly for equal networks.
-func Test_IPNetwork_Contains_AntisymmetryProperty(t *testing.T) {
+func Test_Network_Contains_AntisymmetryProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPNetwork.Draw(t, "left")
-		right := genIPNetwork.Draw(t, "right")
+		left := genNetwork.Draw(t, "left")
+		right := genNetwork.Draw(t, "right")
 		mutual := left.Contains(right) && right.Contains(left)
 		require.Equal(t, left == right, mutual)
 	})
 }
 
 // verifies that containment is transitive on random triples.
-func Test_IPNetwork_Contains_TransitivityProperty(t *testing.T) {
+func Test_Network_Contains_TransitivityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		first := genIPNetwork.Draw(t, "first")
-		second := genIPNetwork.Draw(t, "second")
-		third := genIPNetwork.Draw(t, "third")
+		first := genNetwork.Draw(t, "first")
+		second := genNetwork.Draw(t, "second")
+		third := genNetwork.Draw(t, "third")
 		if first.Contains(second) && second.Contains(third) {
 			require.True(t, first.Contains(third))
 		}
@@ -1302,7 +1302,7 @@ func Test_IPNetwork_Contains_TransitivityProperty(t *testing.T) {
 // address and its length does not exceed the inner one. It answers
 // false across families exactly as the wrapper does, so mixed draws
 // stay in the comparison.
-func Test_IPNetwork_Contains_MatchesNetipPrefixProperty(t *testing.T) {
+func Test_Network_Contains_MatchesNetipPrefixProperty(t *testing.T) {
 	drawPrefix := func(t *rapid.T, label string) netip.Prefix {
 		if rapid.Bool().Draw(t, label+" is4") {
 			return genIPv4Prefix.Draw(t, label+" v4").Masked()
@@ -1312,9 +1312,9 @@ func Test_IPNetwork_Contains_MatchesNetipPrefixProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		outerPrefix := drawPrefix(t, "outer")
 		innerPrefix := drawPrefix(t, "inner")
-		outer, ok := xnetip.IPNetworkFromPrefix(outerPrefix)
+		outer, ok := xnetip.NetworkFromPrefix(outerPrefix)
 		require.True(t, ok)
-		inner, ok := xnetip.IPNetworkFromPrefix(innerPrefix)
+		inner, ok := xnetip.NetworkFromPrefix(innerPrefix)
 		require.True(t, ok)
 		want := outerPrefix.Contains(innerPrefix.Addr()) && outerPrefix.Bits() <= innerPrefix.Bits()
 		require.Equal(t, want, outer.Contains(inner))
@@ -1323,37 +1323,37 @@ func Test_IPNetwork_Contains_MatchesNetipPrefixProperty(t *testing.T) {
 
 // verifies that the containment check allocates nothing in either
 // family and across families.
-func Test_IPNetwork_Contains_AllocationFree(t *testing.T) {
-	outer4 := xnetip.MustParseIPNetwork("10.0.0.0/8")
-	inner4 := xnetip.MustParseIPNetwork("10.1.0.0/16")
-	outer6 := xnetip.MustParseIPNetwork("2001:db8::/32")
-	inner6 := xnetip.MustParseIPNetwork("2001:db8:1::/48")
+func Test_Network_Contains_AllocationFree(t *testing.T) {
+	outer4 := xnetip.MustParseNetwork("10.0.0.0/8")
+	inner4 := xnetip.MustParseNetwork("10.1.0.0/16")
+	outer6 := xnetip.MustParseNetwork("2001:db8::/32")
+	inner6 := xnetip.MustParseNetwork("2001:db8:1::/48")
 	requireNoAllocs(t, func() { okSink = outer4.Contains(inner4) })
 	requireNoAllocs(t, func() { okSink = outer6.Contains(inner6) })
 	requireNoAllocs(t, func() { okSink = outer4.Contains(inner6) })
 }
 
-func BenchmarkIPNetwork_Contains_V4(b *testing.B) {
-	outer := xnetip.MustParseIPNetwork("10.0.0.0/8")
-	inner := xnetip.MustParseIPNetwork("10.1.0.0/16")
+func BenchmarkNetwork_Contains_V4(b *testing.B) {
+	outer := xnetip.MustParseNetwork("10.0.0.0/8")
+	inner := xnetip.MustParseNetwork("10.1.0.0/16")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = outer.Contains(inner)
 	}
 }
 
-func BenchmarkIPNetwork_Contains_V6(b *testing.B) {
-	outer := xnetip.MustParseIPNetwork("2001:db8::/32")
-	inner := xnetip.MustParseIPNetwork("2001:db8:1::/48")
+func BenchmarkNetwork_Contains_V6(b *testing.B) {
+	outer := xnetip.MustParseNetwork("2001:db8::/32")
+	inner := xnetip.MustParseNetwork("2001:db8:1::/48")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = outer.Contains(inner)
 	}
 }
 
-func BenchmarkIPNetwork_Contains_CrossFamily(b *testing.B) {
-	outer := xnetip.MustParseIPNetwork("10.0.0.0/8")
-	inner := xnetip.MustParseIPNetwork("2001:db8::/32")
+func BenchmarkNetwork_Contains_CrossFamily(b *testing.B) {
+	outer := xnetip.MustParseNetwork("10.0.0.0/8")
+	inner := xnetip.MustParseNetwork("2001:db8::/32")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = outer.Contains(inner)
@@ -1367,30 +1367,30 @@ func BenchmarkIPNetwork_Contains_CrossFamily(b *testing.B) {
 // IPv6 network, the IPv4-mapped ones included, but no IPv4 network.
 // A failing pair answers the zero network so a caller ignoring the
 // flag cannot pick up plausible garbage.
-func Test_IPNetwork_Intersection_FamiliesAndBoundary(t *testing.T) {
+func Test_Network_Intersection_FamiliesAndBoundary(t *testing.T) {
 	cases := []struct {
 		name   string
-		left   xnetip.IPNetwork
-		right  xnetip.IPNetwork
-		want   xnetip.IPNetwork
+		left   xnetip.Network
+		right  xnetip.Network
+		want   xnetip.Network
 		wantOK bool
 	}{
-		{name: "IPv4 containment yields the inner network", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: xnetip.MustParseIPNetwork("192.168.1.0/24"), wantOK: true},
-		{name: "IPv4 containment reversed", left: xnetip.MustParseIPNetwork("192.168.1.0/24"), right: xnetip.MustParseIPNetwork("192.168.0.0/16"), want: xnetip.MustParseIPNetwork("192.168.1.0/24"), wantOK: true},
-		{name: "IPv6 containment yields the inner network", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: xnetip.MustParseIPNetwork("2001:db8:1::/48"), wantOK: true},
-		{name: "IPv4 disjoint answers the zero network", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: xnetip.IPNetwork{}, wantOK: false},
-		{name: "IPv6 disjoint answers the zero network", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("fe80::/10"), want: xnetip.IPNetwork{}, wantOK: false},
-		{name: "different families", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: xnetip.IPNetwork{}, wantOK: false},
-		{name: "different families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: xnetip.IPNetwork{}, wantOK: false},
-		{name: "IPv6 universe vs IPv4 network", left: xnetip.IPNetwork{}, right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: xnetip.IPNetwork{}, wantOK: false},
-		{name: "IPv4 network vs IPv6 universe", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.IPNetwork{}, want: xnetip.IPNetwork{}, wantOK: false},
-		{name: "IPv6 universe vs mapped IPv6 network", left: xnetip.IPNetwork{}, right: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), want: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), wantOK: true},
-		{name: "IPv4 universe vs IPv4 host", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.MustParseIPNetwork("10.0.0.1/32"), want: xnetip.MustParseIPNetwork("10.0.0.1/32"), wantOK: true},
-		{name: "IPv4 host vs IPv4 universe", left: xnetip.MustParseIPNetwork("10.0.0.1/32"), right: xnetip.MustParseIPNetwork("0.0.0.0/0"), want: xnetip.MustParseIPNetwork("10.0.0.1/32"), wantOK: true},
-		{name: "mapped IPv6 vs IPv4 with the same bytes", left: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: xnetip.IPNetwork{}, wantOK: false},
-		{name: "identical IPv4", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: xnetip.MustParseIPNetwork("10.0.0.0/8"), wantOK: true},
-		{name: "identical IPv6", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: xnetip.MustParseIPNetwork("2001:db8::/32"), wantOK: true},
-		{name: "IPv4 host routes differ", left: xnetip.MustParseIPNetwork("10.0.0.1/32"), right: xnetip.MustParseIPNetwork("10.0.0.2/32"), want: xnetip.IPNetwork{}, wantOK: false},
+		{name: "IPv4 containment yields the inner network", left: xnetip.MustParseNetwork("192.168.0.0/16"), right: xnetip.MustParseNetwork("192.168.1.0/24"), want: xnetip.MustParseNetwork("192.168.1.0/24"), wantOK: true},
+		{name: "IPv4 containment reversed", left: xnetip.MustParseNetwork("192.168.1.0/24"), right: xnetip.MustParseNetwork("192.168.0.0/16"), want: xnetip.MustParseNetwork("192.168.1.0/24"), wantOK: true},
+		{name: "IPv6 containment yields the inner network", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("2001:db8:1::/48"), want: xnetip.MustParseNetwork("2001:db8:1::/48"), wantOK: true},
+		{name: "IPv4 disjoint answers the zero network", left: xnetip.MustParseNetwork("192.168.0.0/16"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: xnetip.Network{}, wantOK: false},
+		{name: "IPv6 disjoint answers the zero network", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("fe80::/10"), want: xnetip.Network{}, wantOK: false},
+		{name: "different families", left: xnetip.MustParseNetwork("10.0.0.0/8"), right: xnetip.MustParseNetwork("2001:db8::/32"), want: xnetip.Network{}, wantOK: false},
+		{name: "different families reversed", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: xnetip.Network{}, wantOK: false},
+		{name: "IPv6 universe vs IPv4 network", left: xnetip.Network{}, right: xnetip.MustParseNetwork("10.0.0.0/8"), want: xnetip.Network{}, wantOK: false},
+		{name: "IPv4 network vs IPv6 universe", left: xnetip.MustParseNetwork("10.0.0.0/8"), right: xnetip.Network{}, want: xnetip.Network{}, wantOK: false},
+		{name: "IPv6 universe vs mapped IPv6 network", left: xnetip.Network{}, right: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), want: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), wantOK: true},
+		{name: "IPv4 universe vs IPv4 host", left: xnetip.MustParseNetwork("0.0.0.0/0"), right: xnetip.MustParseNetwork("10.0.0.1/32"), want: xnetip.MustParseNetwork("10.0.0.1/32"), wantOK: true},
+		{name: "IPv4 host vs IPv4 universe", left: xnetip.MustParseNetwork("10.0.0.1/32"), right: xnetip.MustParseNetwork("0.0.0.0/0"), want: xnetip.MustParseNetwork("10.0.0.1/32"), wantOK: true},
+		{name: "mapped IPv6 vs IPv4 with the same bytes", left: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: xnetip.Network{}, wantOK: false},
+		{name: "identical IPv4", left: xnetip.MustParseNetwork("10.0.0.0/8"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: xnetip.MustParseNetwork("10.0.0.0/8"), wantOK: true},
+		{name: "identical IPv6", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("2001:db8::/32"), want: xnetip.MustParseNetwork("2001:db8::/32"), wantOK: true},
+		{name: "IPv4 host routes differ", left: xnetip.MustParseNetwork("10.0.0.1/32"), right: xnetip.MustParseNetwork("10.0.0.2/32"), want: xnetip.Network{}, wantOK: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1407,20 +1407,20 @@ func Test_IPNetwork_Intersection_FamiliesAndBoundary(t *testing.T) {
 //
 // The family rule is unaffected by mask shape: a non-contiguous
 // pattern of one family never intersects one of the other.
-func Test_IPNetwork_Intersection_NonContiguousMasks(t *testing.T) {
+func Test_Network_Intersection_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name   string
-		left   xnetip.IPNetwork
-		right  xnetip.IPNetwork
-		want   xnetip.IPNetwork
+		left   xnetip.Network
+		right  xnetip.Network
+		want   xnetip.Network
 		wantOK bool
 	}{
-		{name: "IPv4 one non-contiguous", left: xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPNetwork("10.1.0.0/255.255.0.0"), want: xnetip.MustParseIPNetwork("10.1.0.1/255.255.0.255"), wantOK: true},
-		{name: "IPv4 single common address", left: xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPNetwork("10.5.0.0/255.255.0.255"), want: xnetip.MustParseIPNetwork("10.5.0.0/32"), wantOK: true},
-		{name: "IPv4 alternating masks always intersect", left: xnetip.MustParseIPNetwork("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPNetwork("0.170.0.170/85.170.85.170"), want: xnetip.MustParseIPNetwork("170.170.170.170/32"), wantOK: true},
-		{name: "IPv6 one non-contiguous", left: xnetip.MustParseIPNetwork("2001::1/ffff::ffff"), right: xnetip.MustParseIPNetwork("2001:1::/ffff:ffff::"), want: xnetip.MustParseIPNetwork("2001:1::1/ffff:ffff::ffff"), wantOK: true},
-		{name: "IPv6 alternating masks always intersect", left: xnetip.MustParseIPNetwork("aa00:0:aa00:0:aa00:0:aa00:0/ff00:ff:ff00:ff:ff00:ff:ff00:ff"), right: xnetip.MustParseIPNetwork("bb:0:bb:0:bb:0:bb:0/ff:ff00:ff:ff00:ff:ff00:ff:ff00"), want: xnetip.MustParseIPNetwork("aabb:0:aabb:0:aabb:0:aabb:0/128"), wantOK: true},
-		{name: "IPv4 pattern vs IPv6 pattern", left: xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::"), want: xnetip.IPNetwork{}, wantOK: false},
+		{name: "IPv4 one non-contiguous", left: xnetip.MustParseNetwork("10.0.0.1/255.0.0.255"), right: xnetip.MustParseNetwork("10.1.0.0/255.255.0.0"), want: xnetip.MustParseNetwork("10.1.0.1/255.255.0.255"), wantOK: true},
+		{name: "IPv4 single common address", left: xnetip.MustParseNetwork("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork("10.5.0.0/255.255.0.255"), want: xnetip.MustParseNetwork("10.5.0.0/32"), wantOK: true},
+		{name: "IPv4 alternating masks always intersect", left: xnetip.MustParseNetwork("170.0.170.0/170.85.170.85"), right: xnetip.MustParseNetwork("0.170.0.170/85.170.85.170"), want: xnetip.MustParseNetwork("170.170.170.170/32"), wantOK: true},
+		{name: "IPv6 one non-contiguous", left: xnetip.MustParseNetwork("2001::1/ffff::ffff"), right: xnetip.MustParseNetwork("2001:1::/ffff:ffff::"), want: xnetip.MustParseNetwork("2001:1::1/ffff:ffff::ffff"), wantOK: true},
+		{name: "IPv6 alternating masks always intersect", left: xnetip.MustParseNetwork("aa00:0:aa00:0:aa00:0:aa00:0/ff00:ff:ff00:ff:ff00:ff:ff00:ff"), right: xnetip.MustParseNetwork("bb:0:bb:0:bb:0:bb:0/ff:ff00:ff:ff00:ff:ff00:ff:ff00"), want: xnetip.MustParseNetwork("aabb:0:aabb:0:aabb:0:aabb:0/128"), wantOK: true},
+		{name: "IPv4 pattern vs IPv6 pattern", left: xnetip.MustParseNetwork("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork("2001:db8::/ffff:ffff::"), want: xnetip.Network{}, wantOK: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1436,18 +1436,18 @@ func Test_IPNetwork_Intersection_NonContiguousMasks(t *testing.T) {
 //
 // The result keeps the IPv4 family tag and the mapped storage
 // invariant.
-func Test_IPNetwork_Intersection_AgreesWithIPv4Property(t *testing.T) {
+func Test_Network_Intersection_AgreesWithIPv4Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
-		got, gotOK := xnetip.IPNetworkFrom4(left).Intersection(xnetip.IPNetworkFrom4(right))
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
+		got, gotOK := xnetip.NetworkFrom4(left).Intersection(xnetip.NetworkFrom4(right))
 		want, wantOK := left.Intersection(right)
 		require.Equal(t, wantOK, gotOK)
 		if !gotOK {
-			require.Equal(t, xnetip.IPNetwork{}, got)
+			require.Equal(t, xnetip.Network{}, got)
 			return
 		}
-		require.Equal(t, xnetip.IPNetworkFrom4(want), got)
+		require.Equal(t, xnetip.NetworkFrom4(want), got)
 		require.True(t, got.Is4())
 		require.True(t, got.ToIPv6Mapped().IsIPv4MappedIPv6())
 	})
@@ -1455,43 +1455,43 @@ func Test_IPNetwork_Intersection_AgreesWithIPv4Property(t *testing.T) {
 
 // verifies that wrapped IPv6 intersection equals the concrete IPv6
 // answer.
-func Test_IPNetwork_Intersection_AgreesWithIPv6Property(t *testing.T) {
+func Test_Network_Intersection_AgreesWithIPv6Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv6Network.Draw(t, "left")
-		right := genIPv6Network.Draw(t, "right")
-		got, gotOK := xnetip.IPNetworkFrom6(left).Intersection(xnetip.IPNetworkFrom6(right))
+		left := genNetwork6.Draw(t, "left")
+		right := genNetwork6.Draw(t, "right")
+		got, gotOK := xnetip.NetworkFrom6(left).Intersection(xnetip.NetworkFrom6(right))
 		want, wantOK := left.Intersection(right)
 		require.Equal(t, wantOK, gotOK)
 		if !gotOK {
-			require.Equal(t, xnetip.IPNetwork{}, got)
+			require.Equal(t, xnetip.Network{}, got)
 			return
 		}
-		require.Equal(t, xnetip.IPNetworkFrom6(want), got)
+		require.Equal(t, xnetip.NetworkFrom6(want), got)
 		require.True(t, got.Is6())
 	})
 }
 
 // verifies that networks of different families never intersect and
 // always answer the zero network, whatever their masks.
-func Test_IPNetwork_Intersection_CrossFamilyAlwaysFalseProperty(t *testing.T) {
+func Test_Network_Intersection_CrossFamilyAlwaysFalseProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
-		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		network4 := xnetip.NetworkFrom4(genNetwork4.Draw(t, "network4"))
+		network6 := xnetip.NetworkFrom6(genNetwork6.Draw(t, "network6"))
 		got, ok := network4.Intersection(network6)
 		require.False(t, ok)
-		require.Equal(t, xnetip.IPNetwork{}, got)
+		require.Equal(t, xnetip.Network{}, got)
 		got, ok = network6.Intersection(network4)
 		require.False(t, ok)
-		require.Equal(t, xnetip.IPNetwork{}, got)
+		require.Equal(t, xnetip.Network{}, got)
 	})
 }
 
 // verifies that intersection is commutative in both the value and the
 // flag, whatever the families.
-func Test_IPNetwork_Intersection_CommutativityProperty(t *testing.T) {
+func Test_Network_Intersection_CommutativityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPNetwork.Draw(t, "left")
-		right := genIPNetwork.Draw(t, "right")
+		left := genNetwork.Draw(t, "left")
+		right := genNetwork.Draw(t, "right")
 		leftValue, leftOK := left.Intersection(right)
 		rightValue, rightOK := right.Intersection(left)
 		require.Equal(t, leftOK, rightOK)
@@ -1500,9 +1500,9 @@ func Test_IPNetwork_Intersection_CommutativityProperty(t *testing.T) {
 }
 
 // verifies that every network intersected with itself is itself.
-func Test_IPNetwork_Intersection_SelfIntersectionProperty(t *testing.T) {
+func Test_Network_Intersection_SelfIntersectionProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		got, ok := network.Intersection(network)
 		require.True(t, ok)
 		require.Equal(t, network, got)
@@ -1510,10 +1510,10 @@ func Test_IPNetwork_Intersection_SelfIntersectionProperty(t *testing.T) {
 }
 
 // verifies that an existing intersection is contained in both inputs.
-func Test_IPNetwork_Intersection_SubsetOfBothProperty(t *testing.T) {
+func Test_Network_Intersection_SubsetOfBothProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPNetwork.Draw(t, "left")
-		right := genIPNetwork.Draw(t, "right")
+		left := genNetwork.Draw(t, "left")
+		right := genNetwork.Draw(t, "right")
 		if got, ok := left.Intersection(right); ok {
 			require.True(t, left.Contains(got))
 			require.True(t, right.Contains(got))
@@ -1527,7 +1527,7 @@ func Test_IPNetwork_Intersection_SubsetOfBothProperty(t *testing.T) {
 // Two prefixes overlap exactly when the networks intersect, and the
 // oracle answers false across families exactly as the wrapper does,
 // so mixed draws stay in the comparison.
-func Test_IPNetwork_Intersection_MatchesNetipOverlapsProperty(t *testing.T) {
+func Test_Network_Intersection_MatchesNetipOverlapsProperty(t *testing.T) {
 	drawPrefix := func(t *rapid.T, label string) netip.Prefix {
 		if rapid.Bool().Draw(t, label+" is4") {
 			return genIPv4Prefix.Draw(t, label+" v4").Masked()
@@ -1537,9 +1537,9 @@ func Test_IPNetwork_Intersection_MatchesNetipOverlapsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		leftPrefix := drawPrefix(t, "left")
 		rightPrefix := drawPrefix(t, "right")
-		left, ok := xnetip.IPNetworkFromPrefix(leftPrefix)
+		left, ok := xnetip.NetworkFromPrefix(leftPrefix)
 		require.True(t, ok)
-		right, ok := xnetip.IPNetworkFromPrefix(rightPrefix)
+		right, ok := xnetip.NetworkFromPrefix(rightPrefix)
 		require.True(t, ok)
 		_, ok = left.Intersection(right)
 		require.Equal(t, leftPrefix.Overlaps(rightPrefix), ok)
@@ -1548,11 +1548,11 @@ func Test_IPNetwork_Intersection_MatchesNetipOverlapsProperty(t *testing.T) {
 
 // verifies that the intersection allocates nothing in either family
 // and across families.
-func Test_IPNetwork_Intersection_AllocationFree(t *testing.T) {
-	left4 := xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255")
-	right4 := xnetip.MustParseIPNetwork("10.1.0.0/255.255.0.0")
-	left6 := xnetip.MustParseIPNetwork("2001::1/ffff::ffff")
-	right6 := xnetip.MustParseIPNetwork("2001:1::/ffff:ffff::")
+func Test_Network_Intersection_AllocationFree(t *testing.T) {
+	left4 := xnetip.MustParseNetwork("10.0.0.1/255.0.0.255")
+	right4 := xnetip.MustParseNetwork("10.1.0.0/255.255.0.0")
+	left6 := xnetip.MustParseNetwork("2001::1/ffff::ffff")
+	right6 := xnetip.MustParseNetwork("2001:1::/ffff:ffff::")
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = left4.Intersection(right4) })
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = left6.Intersection(right6) })
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = left4.Intersection(right6) })
@@ -1564,22 +1564,22 @@ func Test_IPNetwork_Intersection_AllocationFree(t *testing.T) {
 // The family rule comes first: each family universe intersects every
 // network of its family and nothing else, and an IPv4-mapped IPv6
 // network never intersects the IPv4 network with the same bytes.
-func Test_IPNetwork_Intersects_FamiliesAndBoundary(t *testing.T) {
+func Test_Network_Intersects_FamiliesAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
 		want  bool
 	}{
-		{name: "IPv4 overlapping", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: true},
-		{name: "IPv4 disjoint", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
-		{name: "mixed families", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
-		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("192.168.0.0/16"), want: false},
-		{name: "IPv6 overlapping", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: true},
-		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.IPNetwork{}, want: false},
-		{name: "mapped IPv6 vs IPv4 with the same bytes", left: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
-		{name: "IPv4 self", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: true},
-		{name: "IPv6 self", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: true},
+		{name: "IPv4 overlapping", left: xnetip.MustParseNetwork("192.168.0.0/16"), right: xnetip.MustParseNetwork("192.168.1.0/24"), want: true},
+		{name: "IPv4 disjoint", left: xnetip.MustParseNetwork("192.168.0.0/16"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: false},
+		{name: "mixed families", left: xnetip.MustParseNetwork("192.168.0.0/16"), right: xnetip.MustParseNetwork("2001:db8::/32"), want: false},
+		{name: "mixed families reversed", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("192.168.0.0/16"), want: false},
+		{name: "IPv6 overlapping", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("2001:db8:1::/48"), want: true},
+		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseNetwork("0.0.0.0/0"), right: xnetip.Network{}, want: false},
+		{name: "mapped IPv6 vs IPv4 with the same bytes", left: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv4 self", left: xnetip.MustParseNetwork("10.0.0.0/8"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: true},
+		{name: "IPv6 self", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("2001:db8::/32"), want: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1590,15 +1590,15 @@ func Test_IPNetwork_Intersects_FamiliesAndBoundary(t *testing.T) {
 
 // verifies that non-contiguous intersection checks of both families
 // flow through the wrapper.
-func Test_IPNetwork_Intersects_NonContiguousMasks(t *testing.T) {
+func Test_Network_Intersects_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
 		want  bool
 	}{
-		{name: "IPv4 pattern overlaps block", left: xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPNetwork("10.1.0.0/255.255.0.0"), want: true},
-		{name: "IPv6 pattern disjoint from block", left: xnetip.MustParseIPNetwork("2001::1/ffff::ffff"), right: xnetip.MustParseIPNetwork("2002::/16"), want: false},
+		{name: "IPv4 pattern overlaps block", left: xnetip.MustParseNetwork("10.0.0.1/255.0.0.255"), right: xnetip.MustParseNetwork("10.1.0.0/255.255.0.0"), want: true},
+		{name: "IPv6 pattern disjoint from block", left: xnetip.MustParseNetwork("2001::1/ffff::ffff"), right: xnetip.MustParseNetwork("2002::/16"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1609,31 +1609,31 @@ func Test_IPNetwork_Intersects_NonContiguousMasks(t *testing.T) {
 
 // verifies that the wrapped predicate equals the concrete answer in
 // each family.
-func Test_IPNetwork_Intersects_AgreesWithConcreteProperty(t *testing.T) {
+func Test_Network_Intersects_AgreesWithConcreteProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left4 := genIPv4Network.Draw(t, "left4")
-		right4 := genIPv4Network.Draw(t, "right4")
+		left4 := genNetwork4.Draw(t, "left4")
+		right4 := genNetwork4.Draw(t, "right4")
 		require.Equal(
 			t,
 			left4.Intersects(right4),
-			xnetip.IPNetworkFrom4(left4).Intersects(xnetip.IPNetworkFrom4(right4)),
+			xnetip.NetworkFrom4(left4).Intersects(xnetip.NetworkFrom4(right4)),
 		)
-		left6 := genIPv6Network.Draw(t, "left6")
-		right6 := genIPv6Network.Draw(t, "right6")
+		left6 := genNetwork6.Draw(t, "left6")
+		right6 := genNetwork6.Draw(t, "right6")
 		require.Equal(
 			t,
 			left6.Intersects(right6),
-			xnetip.IPNetworkFrom6(left6).Intersects(xnetip.IPNetworkFrom6(right6)),
+			xnetip.NetworkFrom6(left6).Intersects(xnetip.NetworkFrom6(right6)),
 		)
 	})
 }
 
 // verifies that networks of different families never intersect,
 // whatever their masks.
-func Test_IPNetwork_Intersects_CrossFamilyAlwaysFalseProperty(t *testing.T) {
+func Test_Network_Intersects_CrossFamilyAlwaysFalseProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
-		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		network4 := xnetip.NetworkFrom4(genNetwork4.Draw(t, "network4"))
+		network6 := xnetip.NetworkFrom6(genNetwork6.Draw(t, "network6"))
 		require.False(t, network4.Intersects(network6))
 		require.False(t, network6.Intersects(network4))
 	})
@@ -1641,10 +1641,10 @@ func Test_IPNetwork_Intersects_CrossFamilyAlwaysFalseProperty(t *testing.T) {
 
 // verifies that the predicate is symmetric, reflexive and answers
 // exactly whether the intersection exists, whatever the families.
-func Test_IPNetwork_Intersects_SymmetryAndEquivalenceProperty(t *testing.T) {
+func Test_Network_Intersects_SymmetryAndEquivalenceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPNetwork.Draw(t, "left")
-		right := genIPNetwork.Draw(t, "right")
+		left := genNetwork.Draw(t, "left")
+		right := genNetwork.Draw(t, "right")
 		require.Equal(t, left.Intersects(right), right.Intersects(left))
 		require.True(t, left.Intersects(left))
 		_, ok := left.Intersection(right)
@@ -1654,11 +1654,11 @@ func Test_IPNetwork_Intersects_SymmetryAndEquivalenceProperty(t *testing.T) {
 
 // verifies that the predicate allocates nothing in either family and
 // across families.
-func Test_IPNetwork_Intersects_AllocationFree(t *testing.T) {
-	left4 := xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255")
-	right4 := xnetip.MustParseIPNetwork("10.1.0.0/255.255.0.0")
-	left6 := xnetip.MustParseIPNetwork("2001::1/ffff::ffff")
-	right6 := xnetip.MustParseIPNetwork("2001:1::/32")
+func Test_Network_Intersects_AllocationFree(t *testing.T) {
+	left4 := xnetip.MustParseNetwork("10.0.0.1/255.0.0.255")
+	right4 := xnetip.MustParseNetwork("10.1.0.0/255.255.0.0")
+	left6 := xnetip.MustParseNetwork("2001::1/ffff::ffff")
+	right6 := xnetip.MustParseNetwork("2001:1::/32")
 	requireNoAllocs(t, func() { okSink = left4.Intersects(right4) })
 	requireNoAllocs(t, func() { okSink = left6.Intersects(right6) })
 	requireNoAllocs(t, func() { okSink = left4.Intersects(right6) })
@@ -1669,21 +1669,21 @@ func Test_IPNetwork_Intersects_AllocationFree(t *testing.T) {
 //
 // The family universes of the two families are disjoint even though
 // the stored 128-bit sets overlap — family first.
-func Test_IPNetwork_IsDisjoint_FamiliesAndBoundary(t *testing.T) {
+func Test_Network_IsDisjoint_FamiliesAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
 		want  bool
 	}{
-		{name: "IPv4 disjoint", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: true},
-		{name: "IPv4 overlapping", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: false},
-		{name: "mixed families", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: true},
-		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("192.168.0.0/16"), want: true},
-		{name: "IPv6 disjoint", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("fe80::/10"), want: true},
-		{name: "universes of different families", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.IPNetwork{}, want: true},
-		{name: "IPv4 self", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
-		{name: "IPv6 self", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
+		{name: "IPv4 disjoint", left: xnetip.MustParseNetwork("192.168.0.0/16"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: true},
+		{name: "IPv4 overlapping", left: xnetip.MustParseNetwork("192.168.0.0/16"), right: xnetip.MustParseNetwork("192.168.1.0/24"), want: false},
+		{name: "mixed families", left: xnetip.MustParseNetwork("192.168.0.0/16"), right: xnetip.MustParseNetwork("2001:db8::/32"), want: true},
+		{name: "mixed families reversed", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("192.168.0.0/16"), want: true},
+		{name: "IPv6 disjoint", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("fe80::/10"), want: true},
+		{name: "universes of different families", left: xnetip.MustParseNetwork("0.0.0.0/0"), right: xnetip.Network{}, want: true},
+		{name: "IPv4 self", left: xnetip.MustParseNetwork("10.0.0.0/8"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv6 self", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("2001:db8::/32"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1694,15 +1694,15 @@ func Test_IPNetwork_IsDisjoint_FamiliesAndBoundary(t *testing.T) {
 
 // verifies that non-contiguous disjointness checks of both families
 // flow through the wrapper.
-func Test_IPNetwork_IsDisjoint_NonContiguousMasks(t *testing.T) {
+func Test_Network_IsDisjoint_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
 		want  bool
 	}{
-		{name: "IPv4 pattern disjoint from block", left: xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPNetwork("11.0.0.0/255.0.0.0"), want: true},
-		{name: "IPv6 pattern overlapping block", left: xnetip.MustParseIPNetwork("2001::1/ffff::ffff"), right: xnetip.MustParseIPNetwork("2001:1::/32"), want: false},
+		{name: "IPv4 pattern disjoint from block", left: xnetip.MustParseNetwork("10.0.0.1/255.0.0.255"), right: xnetip.MustParseNetwork("11.0.0.0/255.0.0.0"), want: true},
+		{name: "IPv6 pattern overlapping block", left: xnetip.MustParseNetwork("2001::1/ffff::ffff"), right: xnetip.MustParseNetwork("2001:1::/32"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1716,35 +1716,35 @@ func Test_IPNetwork_IsDisjoint_NonContiguousMasks(t *testing.T) {
 //
 // Within a family the wrapped answer equals the concrete one, so the
 // mapped storage form preserves the relation.
-func Test_IPNetwork_IsDisjoint_ComplementOfIntersectsProperty(t *testing.T) {
+func Test_Network_IsDisjoint_ComplementOfIntersectsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPNetwork.Draw(t, "left")
-		right := genIPNetwork.Draw(t, "right")
+		left := genNetwork.Draw(t, "left")
+		right := genNetwork.Draw(t, "right")
 		require.Equal(t, !left.Intersects(right), left.IsDisjoint(right))
-		left4 := genIPv4Network.Draw(t, "left4")
-		right4 := genIPv4Network.Draw(t, "right4")
+		left4 := genNetwork4.Draw(t, "left4")
+		right4 := genNetwork4.Draw(t, "right4")
 		require.Equal(
 			t,
 			left4.IsDisjoint(right4),
-			xnetip.IPNetworkFrom4(left4).IsDisjoint(xnetip.IPNetworkFrom4(right4)),
+			xnetip.NetworkFrom4(left4).IsDisjoint(xnetip.NetworkFrom4(right4)),
 		)
-		left6 := genIPv6Network.Draw(t, "left6")
-		right6 := genIPv6Network.Draw(t, "right6")
+		left6 := genNetwork6.Draw(t, "left6")
+		right6 := genNetwork6.Draw(t, "right6")
 		require.Equal(
 			t,
 			left6.IsDisjoint(right6),
-			xnetip.IPNetworkFrom6(left6).IsDisjoint(xnetip.IPNetworkFrom6(right6)),
+			xnetip.NetworkFrom6(left6).IsDisjoint(xnetip.NetworkFrom6(right6)),
 		)
 	})
 }
 
 // verifies that the predicate allocates nothing in either family and
 // across families.
-func Test_IPNetwork_IsDisjoint_AllocationFree(t *testing.T) {
-	left4 := xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255")
-	right4 := xnetip.MustParseIPNetwork("11.0.0.0/255.0.0.0")
-	left6 := xnetip.MustParseIPNetwork("2001::1/ffff::ffff")
-	right6 := xnetip.MustParseIPNetwork("2001:1::/32")
+func Test_Network_IsDisjoint_AllocationFree(t *testing.T) {
+	left4 := xnetip.MustParseNetwork("10.0.0.1/255.0.0.255")
+	right4 := xnetip.MustParseNetwork("11.0.0.0/255.0.0.0")
+	left6 := xnetip.MustParseNetwork("2001::1/ffff::ffff")
+	right6 := xnetip.MustParseNetwork("2001:1::/32")
 	requireNoAllocs(t, func() { okSink = left4.IsDisjoint(right4) })
 	requireNoAllocs(t, func() { okSink = left6.IsDisjoint(right6) })
 	requireNoAllocs(t, func() { okSink = left4.IsDisjoint(right6) })
@@ -1755,20 +1755,20 @@ func Test_IPNetwork_IsDisjoint_AllocationFree(t *testing.T) {
 //
 // The family rule is absolute: even the IPv4-mapped IPv6 siblings of
 // two adjacent IPv4 networks are not adjacent to the IPv4 originals.
-func Test_IPNetwork_IsAdjacent_FamiliesAndBoundary(t *testing.T) {
+func Test_Network_IsAdjacent_FamiliesAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
 		want  bool
 	}{
-		{name: "IPv4 siblings", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: true},
-		{name: "IPv6 siblings", left: xnetip.MustParseIPNetwork("2001:db8::/48"), right: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: true},
-		{name: "mixed families", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
-		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
-		{name: "IPv4 identical", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.0.0/24"), want: false},
-		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.IPNetwork{}, want: false},
-		{name: "mapped IPv6 sibling vs the IPv4 sibling", left: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/120"), right: xnetip.MustParseIPNetwork("10.0.1.0/24"), want: false},
+		{name: "IPv4 siblings", left: xnetip.MustParseNetwork("192.168.0.0/24"), right: xnetip.MustParseNetwork("192.168.1.0/24"), want: true},
+		{name: "IPv6 siblings", left: xnetip.MustParseNetwork("2001:db8::/48"), right: xnetip.MustParseNetwork("2001:db8:1::/48"), want: true},
+		{name: "mixed families", left: xnetip.MustParseNetwork("10.0.0.0/8"), right: xnetip.MustParseNetwork("2001:db8::/32"), want: false},
+		{name: "mixed families reversed", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv4 identical", left: xnetip.MustParseNetwork("192.168.0.0/24"), right: xnetip.MustParseNetwork("192.168.0.0/24"), want: false},
+		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseNetwork("0.0.0.0/0"), right: xnetip.Network{}, want: false},
+		{name: "mapped IPv6 sibling vs the IPv4 sibling", left: xnetip.MustParseNetwork("::ffff:10.0.0.0/120"), right: xnetip.MustParseNetwork("10.0.1.0/24"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1779,15 +1779,15 @@ func Test_IPNetwork_IsAdjacent_FamiliesAndBoundary(t *testing.T) {
 
 // verifies that non-contiguous adjacency of both families flows
 // through the wrapper.
-func Test_IPNetwork_IsAdjacent_NonContiguousMasks(t *testing.T) {
+func Test_Network_IsAdjacent_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
 		want  bool
 	}{
-		{name: "IPv4 pattern siblings", left: xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPNetwork("10.1.0.1/255.255.0.255"), want: true},
-		{name: "IPv6 two-run siblings", left: xnetip.MustParseIPNetwork("::/ffff:ffff::ffff"), right: xnetip.MustParseIPNetwork("::1/ffff:ffff::ffff"), want: true},
+		{name: "IPv4 pattern siblings", left: xnetip.MustParseNetwork("10.0.0.1/255.255.0.255"), right: xnetip.MustParseNetwork("10.1.0.1/255.255.0.255"), want: true},
+		{name: "IPv6 two-run siblings", left: xnetip.MustParseNetwork("::/ffff:ffff::ffff"), right: xnetip.MustParseNetwork("::1/ffff:ffff::ffff"), want: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1802,44 +1802,44 @@ func Test_IPNetwork_IsAdjacent_NonContiguousMasks(t *testing.T) {
 // A sibling flips the lowest set mask bit of the address, so every
 // draw with a non-empty mask exercises the adjacent case that random
 // pairs almost never hit.
-func Test_IPNetwork_IsAdjacent_AgreesWithConcreteProperty(t *testing.T) {
+func Test_Network_IsAdjacent_AgreesWithConcreteProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left4 := genIPv4Network.Draw(t, "left4")
-		right4 := genIPv4Network.Draw(t, "right4")
+		left4 := genNetwork4.Draw(t, "left4")
+		right4 := genNetwork4.Draw(t, "right4")
 		require.Equal(
 			t,
 			left4.IsAdjacent(right4),
-			xnetip.IPNetworkFrom4(left4).IsAdjacent(xnetip.IPNetworkFrom4(right4)),
+			xnetip.NetworkFrom4(left4).IsAdjacent(xnetip.NetworkFrom4(right4)),
 		)
 		maskBytes := left4.Mask().As4()
 		maskBits := binary.BigEndian.Uint32(maskBytes[:])
 		if maskBits != 0 {
 			addrBytes := left4.Addr().As4()
 			addrBits := binary.BigEndian.Uint32(addrBytes[:])
-			sibling, err := xnetip.IPv4NetworkFrom(
+			sibling, err := xnetip.Network4From(
 				netipAddrFrom4Bits(addrBits^(maskBits&-maskBits)),
 				netipAddrFrom4Bits(maskBits),
 			)
 			require.NoError(t, err)
 			require.True(t, left4.IsAdjacent(sibling))
-			require.True(t, xnetip.IPNetworkFrom4(left4).IsAdjacent(xnetip.IPNetworkFrom4(sibling)))
+			require.True(t, xnetip.NetworkFrom4(left4).IsAdjacent(xnetip.NetworkFrom4(sibling)))
 		}
-		left6 := genIPv6Network.Draw(t, "left6")
-		right6 := genIPv6Network.Draw(t, "right6")
+		left6 := genNetwork6.Draw(t, "left6")
+		right6 := genNetwork6.Draw(t, "right6")
 		require.Equal(
 			t,
 			left6.IsAdjacent(right6),
-			xnetip.IPNetworkFrom6(left6).IsAdjacent(xnetip.IPNetworkFrom6(right6)),
+			xnetip.NetworkFrom6(left6).IsAdjacent(xnetip.NetworkFrom6(right6)),
 		)
 	})
 }
 
 // verifies that networks of different families are never adjacent,
 // whatever their masks.
-func Test_IPNetwork_IsAdjacent_CrossFamilyAlwaysFalseProperty(t *testing.T) {
+func Test_Network_IsAdjacent_CrossFamilyAlwaysFalseProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
-		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		network4 := xnetip.NetworkFrom4(genNetwork4.Draw(t, "network4"))
+		network6 := xnetip.NetworkFrom6(genNetwork6.Draw(t, "network6"))
 		require.False(t, network4.IsAdjacent(network6))
 		require.False(t, network6.IsAdjacent(network4))
 	})
@@ -1847,10 +1847,10 @@ func Test_IPNetwork_IsAdjacent_CrossFamilyAlwaysFalseProperty(t *testing.T) {
 
 // verifies that adjacency is symmetric and irreflexive, whatever the
 // families.
-func Test_IPNetwork_IsAdjacent_SymmetryProperty(t *testing.T) {
+func Test_Network_IsAdjacent_SymmetryProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPNetwork.Draw(t, "left")
-		right := genIPNetwork.Draw(t, "right")
+		left := genNetwork.Draw(t, "left")
+		right := genNetwork.Draw(t, "right")
 		require.Equal(t, left.IsAdjacent(right), right.IsAdjacent(left))
 		require.False(t, left.IsAdjacent(left))
 	})
@@ -1858,11 +1858,11 @@ func Test_IPNetwork_IsAdjacent_SymmetryProperty(t *testing.T) {
 
 // verifies that the predicate allocates nothing in either family and
 // across families.
-func Test_IPNetwork_IsAdjacent_AllocationFree(t *testing.T) {
-	left4 := xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255")
-	right4 := xnetip.MustParseIPNetwork("10.1.0.1/255.255.0.255")
-	left6 := xnetip.MustParseIPNetwork("::/ffff:ffff::ffff")
-	right6 := xnetip.MustParseIPNetwork("::1/ffff:ffff::ffff")
+func Test_Network_IsAdjacent_AllocationFree(t *testing.T) {
+	left4 := xnetip.MustParseNetwork("10.0.0.1/255.255.0.255")
+	right4 := xnetip.MustParseNetwork("10.1.0.1/255.255.0.255")
+	left6 := xnetip.MustParseNetwork("::/ffff:ffff::ffff")
+	right6 := xnetip.MustParseNetwork("::1/ffff:ffff::ffff")
 	requireNoAllocs(t, func() { okSink = left4.IsAdjacent(right4) })
 	requireNoAllocs(t, func() { okSink = left6.IsAdjacent(right6) })
 	requireNoAllocs(t, func() { okSink = left4.IsAdjacent(right6) })
@@ -1870,28 +1870,28 @@ func Test_IPNetwork_IsAdjacent_AllocationFree(t *testing.T) {
 
 // verifies that contiguity is judged in the network's own family, the
 // concrete types' positive and negative pins lifted through the wrap.
-func Test_IPNetwork_IsContiguous_JudgedInOwnFamily(t *testing.T) {
+func Test_Network_IsContiguous_JudgedInOwnFamily(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 		want    bool
 	}{
-		{name: "IPv4 universe", network: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"), want: true},
-		{name: "IPv4 /19", network: mustIPNetwork4(t, "213.180.192.0", "255.255.224.0"), want: true},
-		{name: "IPv4 host route", network: mustIPNetwork4(t, "10.0.0.1", "255.255.255.255"), want: true},
-		{name: "IPv6 universe", network: mustIPNetwork6(t, "::", "::"), want: true},
-		{name: "IPv6 /40", network: mustIPNetwork6(t, "2a02:6b8:c00::", "ffff:ffff:ff00::"), want: true},
-		{name: "IPv6 run ends at the half boundary", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff:ffff:ffff::"), want: true},
-		{name: "IPv6 run crosses the half boundary", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff:ffff:ffff:8000::"), want: true},
-		{name: "zero value is the IPv6 universe", network: xnetip.IPNetwork{}, want: true},
-		{name: "mapped IPv6 with contiguous low mask", network: mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: true},
-		{name: "IPv4 top mask bit clear", network: mustIPNetwork4(t, "0.0.0.0", "127.255.255.255"), want: false},
-		{name: "IPv4 hole in the third octet", network: mustIPNetwork4(t, "213.180.0.192", "255.255.0.255"), want: false},
-		{name: "IPv4 two runs", network: mustIPNetwork4(t, "192.168.0.1", "255.0.255.0"), want: false},
-		{name: "IPv4 alternating", network: mustIPNetwork4(t, "170.85.170.85", "170.85.170.85"), want: false},
-		{name: "IPv6 two runs", network: mustIPNetwork6(t, "2a02:6b8:c00::f800:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: false},
-		{name: "IPv6 hole at bits 64..95", network: mustIPNetwork6(t, "2a02:6b8:0:0:1234:5678::", "ffff:ffff:0:0:ffff:ffff:0:0"), want: false},
-		{name: "IPv6 hole straddling bit 64", network: mustIPNetwork6(t, "::", "ffff:ffff:ffff:fffe:8000::"), want: false},
+		{name: "IPv4 universe", network: mustNetworkIs4(t, "0.0.0.0", "0.0.0.0"), want: true},
+		{name: "IPv4 /19", network: mustNetworkIs4(t, "213.180.192.0", "255.255.224.0"), want: true},
+		{name: "IPv4 host route", network: mustNetworkIs4(t, "10.0.0.1", "255.255.255.255"), want: true},
+		{name: "IPv6 universe", network: mustNetworkIs6(t, "::", "::"), want: true},
+		{name: "IPv6 /40", network: mustNetworkIs6(t, "2a02:6b8:c00::", "ffff:ffff:ff00::"), want: true},
+		{name: "IPv6 run ends at the half boundary", network: mustNetworkIs6(t, "2001:db8::", "ffff:ffff:ffff:ffff::"), want: true},
+		{name: "IPv6 run crosses the half boundary", network: mustNetworkIs6(t, "2001:db8::", "ffff:ffff:ffff:ffff:8000::"), want: true},
+		{name: "zero value is the IPv6 universe", network: xnetip.Network{}, want: true},
+		{name: "mapped IPv6 with contiguous low mask", network: mustNetworkIs6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: true},
+		{name: "IPv4 top mask bit clear", network: mustNetworkIs4(t, "0.0.0.0", "127.255.255.255"), want: false},
+		{name: "IPv4 hole in the third octet", network: mustNetworkIs4(t, "213.180.0.192", "255.255.0.255"), want: false},
+		{name: "IPv4 two runs", network: mustNetworkIs4(t, "192.168.0.1", "255.0.255.0"), want: false},
+		{name: "IPv4 alternating", network: mustNetworkIs4(t, "170.85.170.85", "170.85.170.85"), want: false},
+		{name: "IPv6 two runs", network: mustNetworkIs6(t, "2a02:6b8:c00::f800:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: false},
+		{name: "IPv6 hole at bits 64..95", network: mustNetworkIs6(t, "2a02:6b8:0:0:1234:5678::", "ffff:ffff:0:0:ffff:ffff:0:0"), want: false},
+		{name: "IPv6 hole straddling bit 64", network: mustNetworkIs6(t, "::", "ffff:ffff:ffff:fffe:8000::"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1902,27 +1902,27 @@ func Test_IPNetwork_IsContiguous_JudgedInOwnFamily(t *testing.T) {
 
 // verifies that the lifted predicate always equals the concrete IPv4
 // one, the equivalence that licenses the branch-free stored form.
-func Test_IPNetwork_IsContiguous_AgreesWithIPv4Property(t *testing.T) {
+func Test_Network_IsContiguous_AgreesWithIPv4Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		require.Equal(t, network.IsContiguous(), xnetip.IPNetworkFrom4(network).IsContiguous())
+		network := genNetwork4.Draw(t, "network")
+		require.Equal(t, network.IsContiguous(), xnetip.NetworkFrom4(network).IsContiguous())
 	})
 }
 
 // verifies that the lifted predicate always equals the concrete IPv6
 // one.
-func Test_IPNetwork_IsContiguous_AgreesWithIPv6Property(t *testing.T) {
+func Test_Network_IsContiguous_AgreesWithIPv6Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		require.Equal(t, network.IsContiguous(), xnetip.IPNetworkFrom6(network).IsContiguous())
+		network := genNetwork6.Draw(t, "network")
+		require.Equal(t, network.IsContiguous(), xnetip.NetworkFrom6(network).IsContiguous())
 	})
 }
 
 // verifies that the predicate agrees with the brute-force scan of the
 // family-typed mask bytes, whatever the family.
-func Test_IPNetwork_IsContiguous_MatchesBitScanProperty(t *testing.T) {
+func Test_Network_IsContiguous_MatchesBitScanProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		want := true
 		seenZero := false
 		for _, maskByte := range network.Mask().AsSlice() {
@@ -1941,9 +1941,9 @@ func Test_IPNetwork_IsContiguous_MatchesBitScanProperty(t *testing.T) {
 }
 
 // verifies that the predicate allocates nothing for either family.
-func Test_IPNetwork_IsContiguous_AllocationFree(t *testing.T) {
-	network4 := mustIPNetwork4(t, "192.168.0.0", "255.255.0.0")
-	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+func Test_Network_IsContiguous_AllocationFree(t *testing.T) {
+	network4 := mustNetworkIs4(t, "192.168.0.0", "255.255.0.0")
+	network6 := mustNetworkIs6(t, "2001:db8::", "ffff:ffff::")
 	requireNoAllocs(t, func() { okSink = network4.IsContiguous() })
 	requireNoAllocs(t, func() { okSink = network6.IsContiguous() })
 }
@@ -1953,21 +1953,21 @@ func Test_IPNetwork_IsContiguous_AllocationFree(t *testing.T) {
 //
 // IPv4 answers 0 through 32 despite the mapped storage, IPv6 answers
 // 0 through 128, mapped IPv6 networks included.
-func Test_IPNetwork_PrefixLen_FamilyNativeLength(t *testing.T) {
+func Test_Network_PrefixLen_FamilyNativeLength(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 		want    int
 	}{
-		{name: "IPv4 /24", network: mustIPNetwork4(t, "192.168.1.0", "255.255.255.0"), want: 24},
-		{name: "IPv6 /40", network: mustIPNetwork6(t, "2a02:6b8::", "ffff:ffff:ff00::"), want: 40},
-		{name: "IPv6 host route /128", network: mustIPNetwork6(t, "2a02:6b8::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: 128},
-		{name: "IPv4 universe /0", network: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"), want: 0},
-		{name: "IPv4 host route /32", network: mustIPNetwork4(t, "10.0.0.1", "255.255.255.255"), want: 32},
-		{name: "IPv4 single leading bit /1", network: mustIPNetwork4(t, "128.0.0.0", "128.0.0.0"), want: 1},
-		{name: "IPv6 universe /0", network: mustIPNetwork6(t, "::", "::"), want: 0},
-		{name: "zero value is the IPv6 universe", network: xnetip.IPNetwork{}, want: 0},
-		{name: "mapped IPv6 network keeps its 128-bit length", network: mustIPNetwork6(t, "::ffff:8.8.8.0", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: 120},
+		{name: "IPv4 /24", network: mustNetworkIs4(t, "192.168.1.0", "255.255.255.0"), want: 24},
+		{name: "IPv6 /40", network: mustNetworkIs6(t, "2a02:6b8::", "ffff:ffff:ff00::"), want: 40},
+		{name: "IPv6 host route /128", network: mustNetworkIs6(t, "2a02:6b8::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: 128},
+		{name: "IPv4 universe /0", network: mustNetworkIs4(t, "0.0.0.0", "0.0.0.0"), want: 0},
+		{name: "IPv4 host route /32", network: mustNetworkIs4(t, "10.0.0.1", "255.255.255.255"), want: 32},
+		{name: "IPv4 single leading bit /1", network: mustNetworkIs4(t, "128.0.0.0", "128.0.0.0"), want: 1},
+		{name: "IPv6 universe /0", network: mustNetworkIs6(t, "::", "::"), want: 0},
+		{name: "zero value is the IPv6 universe", network: xnetip.Network{}, want: 0},
+		{name: "mapped IPv6 network keeps its 128-bit length", network: mustNetworkIs6(t, "::ffff:8.8.8.0", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: 120},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1980,15 +1980,15 @@ func Test_IPNetwork_PrefixLen_FamilyNativeLength(t *testing.T) {
 
 // verifies that a non-contiguous mask has no prefix length in either
 // family and reports zero.
-func Test_IPNetwork_PrefixLen_NonContiguousHasNone(t *testing.T) {
+func Test_Network_PrefixLen_NonContiguousHasNone(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 	}{
-		{name: "IPv4 hole in the middle", network: mustIPNetwork4(t, "10.0.0.1", "255.0.0.255")},
-		{name: "IPv4 alternating", network: mustIPNetwork4(t, "170.85.170.85", "170.85.170.85")},
-		{name: "IPv6 two runs", network: mustIPNetwork6(t, "2001:db8::1", "ffff:ffff::ffff")},
-		{name: "IPv6 hole ending at the half boundary", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff:ff00::ffff:ffff:0:0")},
+		{name: "IPv4 hole in the middle", network: mustNetworkIs4(t, "10.0.0.1", "255.0.0.255")},
+		{name: "IPv4 alternating", network: mustNetworkIs4(t, "170.85.170.85", "170.85.170.85")},
+		{name: "IPv6 two runs", network: mustNetworkIs6(t, "2001:db8::1", "ffff:ffff::ffff")},
+		{name: "IPv6 hole ending at the half boundary", network: mustNetworkIs6(t, "2001:db8::", "ffff:ffff:ff00::ffff:ffff:0:0")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -2003,11 +2003,11 @@ func Test_IPNetwork_PrefixLen_NonContiguousHasNone(t *testing.T) {
 // IPv4 length, value and presence alike.
 //
 // The mapped storage width must never leak into the answer.
-func Test_IPNetwork_PrefixLen_AgreesWithIPv4Property(t *testing.T) {
+func Test_Network_PrefixLen_AgreesWithIPv4Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		wantPrefix, wantOk := network.PrefixLen()
-		prefix, ok := xnetip.IPNetworkFrom4(network).PrefixLen()
+		prefix, ok := xnetip.NetworkFrom4(network).PrefixLen()
 		require.Equal(t, wantOk, ok)
 		require.Equal(t, wantPrefix, prefix)
 	})
@@ -2015,11 +2015,11 @@ func Test_IPNetwork_PrefixLen_AgreesWithIPv4Property(t *testing.T) {
 
 // verifies that wrapping an IPv6 network reports exactly the concrete
 // IPv6 length, value and presence alike.
-func Test_IPNetwork_PrefixLen_AgreesWithIPv6Property(t *testing.T) {
+func Test_Network_PrefixLen_AgreesWithIPv6Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
+		network := genNetwork6.Draw(t, "network")
 		wantPrefix, wantOk := network.PrefixLen()
-		prefix, ok := xnetip.IPNetworkFrom6(network).PrefixLen()
+		prefix, ok := xnetip.NetworkFrom6(network).PrefixLen()
 		require.Equal(t, wantOk, ok)
 		require.Equal(t, wantPrefix, prefix)
 	})
@@ -2027,9 +2027,9 @@ func Test_IPNetwork_PrefixLen_AgreesWithIPv6Property(t *testing.T) {
 
 // verifies that a prefix length exists exactly for contiguous masks,
 // whatever the family, and that the absent case reports zero.
-func Test_IPNetwork_PrefixLen_SomeIffContiguousProperty(t *testing.T) {
+func Test_Network_PrefixLen_SomeIffContiguousProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		prefix, ok := network.PrefixLen()
 		require.Equal(t, network.IsContiguous(), ok)
 		if !ok {
@@ -2043,11 +2043,11 @@ func Test_IPNetwork_PrefixLen_SomeIffContiguousProperty(t *testing.T) {
 //
 // The sweep covers the whole 0 through 32 and 0 through 128 ranges
 // every run rather than sampling them.
-func Test_IPNetwork_PrefixLen_RoundTripsCIDRProperty(t *testing.T) {
+func Test_Network_PrefixLen_RoundTripsCIDRProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr4 := genNetipAddr4.Draw(t, "addr4")
 		for cidr := range 33 {
-			network, err := xnetip.IPNetworkFromCIDR(addr4, cidr)
+			network, err := xnetip.NetworkFromCIDR(addr4, cidr)
 			require.NoError(t, err)
 			prefix, ok := network.PrefixLen()
 			require.True(t, ok)
@@ -2055,7 +2055,7 @@ func Test_IPNetwork_PrefixLen_RoundTripsCIDRProperty(t *testing.T) {
 		}
 		addr6 := genNetipAddr6.Draw(t, "addr6")
 		for cidr := range 129 {
-			network, err := xnetip.IPNetworkFromCIDR(addr6, cidr)
+			network, err := xnetip.NetworkFromCIDR(addr6, cidr)
 			require.NoError(t, err)
 			prefix, ok := network.PrefixLen()
 			require.True(t, ok)
@@ -2066,11 +2066,11 @@ func Test_IPNetwork_PrefixLen_RoundTripsCIDRProperty(t *testing.T) {
 
 // verifies that computing the prefix allocates nothing for either
 // family and either outcome.
-func Test_IPNetwork_PrefixLen_AllocationFree(t *testing.T) {
-	contiguous4 := mustIPNetwork4(t, "192.168.0.0", "255.255.0.0")
-	nonContiguous4 := mustIPNetwork4(t, "192.168.0.1", "255.255.0.255")
-	contiguous6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
-	nonContiguous6 := mustIPNetwork6(t, "2001:db8::1", "ffff:ffff::ffff")
+func Test_Network_PrefixLen_AllocationFree(t *testing.T) {
+	contiguous4 := mustNetworkIs4(t, "192.168.0.0", "255.255.0.0")
+	nonContiguous4 := mustNetworkIs4(t, "192.168.0.1", "255.255.0.255")
+	contiguous6 := mustNetworkIs6(t, "2001:db8::", "ffff:ffff::")
+	nonContiguous6 := mustNetworkIs6(t, "2001:db8::1", "ffff:ffff::ffff")
 	requireNoAllocs(t, func() { intSink, okSink = contiguous4.PrefixLen() })
 	requireNoAllocs(t, func() { intSink, okSink = nonContiguous4.PrefixLen() })
 	requireNoAllocs(t, func() { intSink, okSink = contiguous6.PrefixLen() })
@@ -2079,20 +2079,20 @@ func Test_IPNetwork_PrefixLen_AllocationFree(t *testing.T) {
 
 // verifies that a network prints in its own family's text form: IPv4
 // unmapped with a family-native suffix, IPv6 as the wrapped network.
-func Test_IPNetwork_String_PrintsFamilyForm(t *testing.T) {
+func Test_Network_String_PrintsFamilyForm(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 		want    string
 	}{
-		{name: "IPv4 CIDR", network: mustIPNetwork4(t, "10.0.0.0", "255.0.0.0"), want: "10.0.0.0/8"},
-		{name: "IPv6 CIDR", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"), want: "2001:db8::/32"},
-		{name: "IPv4 host route keeps /32", network: mustIPNetwork4(t, "127.0.0.1", "255.255.255.255"), want: "127.0.0.1/32"},
-		{name: "IPv4 universe hides the stored /96", network: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"), want: "0.0.0.0/0"},
-		{name: "IPv6 universe", network: mustIPNetwork6(t, "::", "::"), want: "::/0"},
-		{name: "zero value", network: xnetip.IPNetwork{}, want: "::/0"},
-		{name: "IPv6 mapped stays IPv6 text", network: xnetip.IPNetworkFrom6(mustIPv6Network(t, "::ffff:192.0.2.0", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00")), want: "::ffff:192.0.2.0/120"},
-		{name: "IPv4 wrapped explicitly", network: xnetip.IPNetworkFrom4(mustIPv4Network(t, "192.0.2.0", "255.255.255.0")), want: "192.0.2.0/24"},
+		{name: "IPv4 CIDR", network: mustNetworkIs4(t, "10.0.0.0", "255.0.0.0"), want: "10.0.0.0/8"},
+		{name: "IPv6 CIDR", network: mustNetworkIs6(t, "2001:db8::", "ffff:ffff::"), want: "2001:db8::/32"},
+		{name: "IPv4 host route keeps /32", network: mustNetworkIs4(t, "127.0.0.1", "255.255.255.255"), want: "127.0.0.1/32"},
+		{name: "IPv4 universe hides the stored /96", network: mustNetworkIs4(t, "0.0.0.0", "0.0.0.0"), want: "0.0.0.0/0"},
+		{name: "IPv6 universe", network: mustNetworkIs6(t, "::", "::"), want: "::/0"},
+		{name: "zero value", network: xnetip.Network{}, want: "::/0"},
+		{name: "IPv6 mapped stays IPv6 text", network: xnetip.NetworkFrom6(mustNetwork6(t, "::ffff:192.0.2.0", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00")), want: "::ffff:192.0.2.0/120"},
+		{name: "IPv4 wrapped explicitly", network: xnetip.NetworkFrom4(mustNetwork4(t, "192.0.2.0", "255.255.255.0")), want: "192.0.2.0/24"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -2103,15 +2103,15 @@ func Test_IPNetwork_String_PrintsFamilyForm(t *testing.T) {
 
 // verifies that a non-contiguous mask prints in its family's mask
 // form, the IPv4 one unmapped from the 128-bit storage.
-func Test_IPNetwork_String_NonContiguousUsesMaskForm(t *testing.T) {
+func Test_Network_String_NonContiguousUsesMaskForm(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 		want    string
 	}{
-		{name: "IPv4 two-run", network: mustIPNetwork4(t, "192.168.0.1", "255.255.0.255"), want: "192.168.0.1/255.255.0.255"},
-		{name: "IPv6 two-run", network: mustIPNetwork6(t, "2a02:6b8:0:0:0:1234::", "ffff:ffff:0:0:ffff:ffff:0:0"), want: "2a02:6b8::1234:0:0/ffff:ffff::ffff:ffff:0:0"},
-		{name: "IPv4 alternating", network: mustIPNetwork4(t, "170.85.170.85", "170.85.170.85"), want: "170.85.170.85/170.85.170.85"},
+		{name: "IPv4 two-run", network: mustNetworkIs4(t, "192.168.0.1", "255.255.0.255"), want: "192.168.0.1/255.255.0.255"},
+		{name: "IPv6 two-run", network: mustNetworkIs6(t, "2a02:6b8:0:0:0:1234::", "ffff:ffff:0:0:ffff:ffff:0:0"), want: "2a02:6b8::1234:0:0/ffff:ffff::ffff:ffff:0:0"},
+		{name: "IPv4 alternating", network: mustNetworkIs4(t, "170.85.170.85", "170.85.170.85"), want: "170.85.170.85/170.85.170.85"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -2122,32 +2122,32 @@ func Test_IPNetwork_String_NonContiguousUsesMaskForm(t *testing.T) {
 
 // verifies that appending writes after the caller's bytes and leaves
 // them intact.
-func Test_IPNetwork_AppendTo_KeepsExistingBytes(t *testing.T) {
-	network := mustIPNetwork4(t, "10.0.0.0", "255.0.0.0")
+func Test_Network_AppendTo_KeepsExistingBytes(t *testing.T) {
+	network := mustNetworkIs4(t, "10.0.0.0", "255.0.0.0")
 	require.Equal(t, "x 10.0.0.0/8", string(network.AppendTo([]byte("x "))))
 }
 
 // verifies that wrapping an IPv4 network changes nothing in its text.
-func Test_IPNetwork_String_MatchesIPv4Property(t *testing.T) {
+func Test_Network_String_MatchesIPv4Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		require.Equal(t, network.String(), xnetip.IPNetworkFrom4(network).String())
+		network := genNetwork4.Draw(t, "network")
+		require.Equal(t, network.String(), xnetip.NetworkFrom4(network).String())
 	})
 }
 
 // verifies that wrapping an IPv6 network changes nothing in its text.
-func Test_IPNetwork_String_MatchesIPv6Property(t *testing.T) {
+func Test_Network_String_MatchesIPv6Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		require.Equal(t, network.String(), xnetip.IPNetworkFrom6(network).String())
+		network := genNetwork6.Draw(t, "network")
+		require.Equal(t, network.String(), xnetip.NetworkFrom6(network).String())
 	})
 }
 
 // verifies that appending to an empty buffer yields the same bytes the
 // string form has, and that drawn buffer content survives untouched.
-func Test_IPNetwork_AppendTo_MatchesStringProperty(t *testing.T) {
+func Test_Network_AppendTo_MatchesStringProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		prefix := rapid.SliceOf(rapid.Byte()).Draw(t, "buffer")
 		require.Equal(t, network.String(), string(network.AppendTo(nil)))
 		extended := network.AppendTo(slices.Clone(prefix))
@@ -2158,9 +2158,9 @@ func Test_IPNetwork_AppendTo_MatchesStringProperty(t *testing.T) {
 
 // verifies that appending into a buffer with enough capacity allocates
 // nothing for either family, the IPv4 extraction included.
-func Test_IPNetwork_AppendTo_AllocationFree(t *testing.T) {
-	network4 := mustIPNetwork4(t, "192.168.0.1", "255.255.0.255")
-	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff:ff00::ffff:ffff:0:0")
+func Test_Network_AppendTo_AllocationFree(t *testing.T) {
+	network4 := mustNetworkIs4(t, "192.168.0.1", "255.255.0.255")
+	network6 := mustNetworkIs6(t, "2001:db8::", "ffff:ffff:ff00::ffff:ffff:0:0")
 	buffer := make([]byte, 0, 128)
 	requireNoAllocs(t, func() { bytesSink = network4.AppendTo(buffer[:0]) })
 	requireNoAllocs(t, func() { bytesSink = network6.AppendTo(buffer[:0]) })
@@ -2168,31 +2168,31 @@ func Test_IPNetwork_AppendTo_AllocationFree(t *testing.T) {
 
 // verifies that rendering to a string costs exactly the one string
 // conversion for either family.
-func Test_IPNetwork_String_SingleAllocation(t *testing.T) {
-	network4 := mustIPNetwork4(t, "10.0.0.0", "255.0.0.0")
-	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+func Test_Network_String_SingleAllocation(t *testing.T) {
+	network4 := mustNetworkIs4(t, "10.0.0.0", "255.0.0.0")
+	network6 := mustNetworkIs6(t, "2001:db8::", "ffff:ffff::")
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = network4.String() })))
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = network6.String() })))
 }
 
-func BenchmarkIPNetwork_String_IPv4(b *testing.B) {
-	network := mustIPNetwork4(b, "10.0.0.0", "255.0.0.0")
+func BenchmarkNetwork_String_IPv4(b *testing.B) {
+	network := mustNetworkIs4(b, "10.0.0.0", "255.0.0.0")
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = network.String()
 	}
 }
 
-func BenchmarkIPNetwork_String_IPv6(b *testing.B) {
-	network := mustIPNetwork6(b, "2001:db8::", "ffff:ffff::")
+func BenchmarkNetwork_String_IPv6(b *testing.B) {
+	network := mustNetworkIs6(b, "2001:db8::", "ffff:ffff::")
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = network.String()
 	}
 }
 
-func BenchmarkIPNetwork_AppendTo_IPv4(b *testing.B) {
-	network := mustIPNetwork4(b, "10.0.0.0", "255.0.0.0")
+func BenchmarkNetwork_AppendTo_IPv4(b *testing.B) {
+	network := mustNetworkIs4(b, "10.0.0.0", "255.0.0.0")
 	buffer := make([]byte, 0, 32)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -2202,7 +2202,7 @@ func BenchmarkIPNetwork_AppendTo_IPv4(b *testing.B) {
 
 // verifies that the address part selects the family: every accepted
 // form lands on the concrete network of its own family.
-func Test_ParseIPNetwork_AcceptsBothFamilies(t *testing.T) {
+func Test_ParseNetwork_AcceptsBothFamilies(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
@@ -2223,12 +2223,12 @@ func Test_ParseIPNetwork_AcceptsBothFamilies(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPNetwork(testCase.input)
+			network, err := xnetip.ParseNetwork(testCase.input)
 			require.NoError(t, err)
 			if testCase.want4 {
-				require.Equal(t, mustIPNetwork4(t, testCase.wantAddr, testCase.wantMask), network)
+				require.Equal(t, mustNetworkIs4(t, testCase.wantAddr, testCase.wantMask), network)
 			} else {
-				require.Equal(t, mustIPNetwork6(t, testCase.wantAddr, testCase.wantMask), network)
+				require.Equal(t, mustNetworkIs6(t, testCase.wantAddr, testCase.wantMask), network)
 			}
 		})
 	}
@@ -2236,7 +2236,7 @@ func Test_ParseIPNetwork_AcceptsBothFamilies(t *testing.T) {
 
 // verifies that all six documented forms parse and print back to their
 // canonical text, the family following the address part.
-func Test_ParseIPNetwork_SixDocumentedForms(t *testing.T) {
+func Test_ParseNetwork_SixDocumentedForms(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -2252,7 +2252,7 @@ func Test_ParseIPNetwork_SixDocumentedForms(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPNetwork(testCase.input)
+			network, err := xnetip.ParseNetwork(testCase.input)
 			require.NoError(t, err)
 			require.Equal(t, testCase.want4, network.Is4())
 			require.Equal(t, testCase.want, network.String())
@@ -2262,8 +2262,8 @@ func Test_ParseIPNetwork_SixDocumentedForms(t *testing.T) {
 
 // verifies that IPv4-mapped text is an IPv6 network, exactly as the
 // mapped address itself reports the IPv6 family.
-func Test_ParseIPNetwork_MappedTextIsIPv6(t *testing.T) {
-	network, err := xnetip.ParseIPNetwork("::ffff:192.0.2.0/120")
+func Test_ParseNetwork_MappedTextIsIPv6(t *testing.T) {
+	network, err := xnetip.ParseNetwork("::ffff:192.0.2.0/120")
 	require.NoError(t, err)
 	require.True(t, network.Is6())
 	_, ok := network.IPv4()
@@ -2273,22 +2273,22 @@ func Test_ParseIPNetwork_MappedTextIsIPv6(t *testing.T) {
 
 // verifies that each family's universe parses into its own family: the
 // IPv4 one is not the IPv6 zero value and reports a zero prefix.
-func Test_ParseIPNetwork_UniversePerFamily(t *testing.T) {
-	network4, err := xnetip.ParseIPNetwork("0.0.0.0/0")
+func Test_ParseNetwork_UniversePerFamily(t *testing.T) {
+	network4, err := xnetip.ParseNetwork("0.0.0.0/0")
 	require.NoError(t, err)
 	require.True(t, network4.Is4())
 	bits, ok := network4.PrefixLen()
 	require.True(t, ok)
 	require.Equal(t, 0, bits)
-	network6, err := xnetip.ParseIPNetwork("::/0")
+	network6, err := xnetip.ParseNetwork("::/0")
 	require.NoError(t, err)
 	require.True(t, network6.Is6())
-	require.Equal(t, xnetip.IPNetwork{}, network6)
+	require.Equal(t, xnetip.Network{}, network6)
 }
 
 // verifies that a digits-only suffix past the family's own limit is a
 // prefix-length overflow in either family.
-func Test_ParseIPNetwork_RejectsPrefixOverflow(t *testing.T) {
+func Test_ParseNetwork_RejectsPrefixOverflow(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -2299,16 +2299,16 @@ func Test_ParseIPNetwork_RejectsPrefixOverflow(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPNetwork(testCase.input)
+			network, err := xnetip.ParseNetwork(testCase.input)
 			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
-			require.Equal(t, xnetip.IPNetwork{}, network)
+			require.Equal(t, xnetip.Network{}, network)
 		})
 	}
 }
 
 // verifies that the strict prefix grammar and the same-family mask rule
 // hold through the family-agnostic entry point.
-func Test_ParseIPNetwork_RejectsBadSuffix(t *testing.T) {
+func Test_ParseNetwork_RejectsBadSuffix(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -2324,24 +2324,24 @@ func Test_ParseIPNetwork_RejectsBadSuffix(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPNetwork(testCase.input)
+			network, err := xnetip.ParseNetwork(testCase.input)
 			require.ErrorIs(t, err, xnetip.ErrInvalidMask)
-			require.Equal(t, xnetip.IPNetwork{}, network)
+			require.Equal(t, xnetip.Network{}, network)
 		})
 	}
 }
 
 // verifies that a cross-family mask keeps the family sentinel in the
 // chain behind the mask sentinel.
-func Test_ParseIPNetwork_CrossFamilyMaskKeepsBothSentinels(t *testing.T) {
-	_, err := xnetip.ParseIPNetwork("2001:db8::1/255.255.255.0")
+func Test_ParseNetwork_CrossFamilyMaskKeepsBothSentinels(t *testing.T) {
+	_, err := xnetip.ParseNetwork("2001:db8::1/255.255.255.0")
 	require.ErrorIs(t, err, xnetip.ErrInvalidMask)
 	require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
 }
 
 // verifies that text whose address part is no address of either family
 // is rejected with the parse sentinel.
-func Test_ParseIPNetwork_RejectsBadAddress(t *testing.T) {
+func Test_ParseNetwork_RejectsBadAddress(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -2356,24 +2356,24 @@ func Test_ParseIPNetwork_RejectsBadAddress(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPNetwork(testCase.input)
+			network, err := xnetip.ParseNetwork(testCase.input)
 			require.ErrorIs(t, err, xnetip.ErrParse)
-			require.Equal(t, xnetip.IPNetwork{}, network)
+			require.Equal(t, xnetip.Network{}, network)
 		})
 	}
 }
 
 // verifies that a zone suffix is rejected with the zone sentinel
 // through the family-agnostic entry point.
-func Test_ParseIPNetwork_RejectsZone(t *testing.T) {
-	network, err := xnetip.ParseIPNetwork("fe80::1%eth0/64")
+func Test_ParseNetwork_RejectsZone(t *testing.T) {
+	network, err := xnetip.ParseNetwork("fe80::1%eth0/64")
 	require.ErrorIs(t, err, xnetip.ErrZone)
-	require.Equal(t, xnetip.IPNetwork{}, network)
+	require.Equal(t, xnetip.Network{}, network)
 }
 
 // verifies that non-contiguous masks of both families flow through the
 // family-agnostic parser verbatim.
-func Test_ParseIPNetwork_NonContiguousMasks(t *testing.T) {
+func Test_ParseNetwork_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
@@ -2388,12 +2388,12 @@ func Test_ParseIPNetwork_NonContiguousMasks(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPNetwork(testCase.input)
+			network, err := xnetip.ParseNetwork(testCase.input)
 			require.NoError(t, err)
 			if testCase.want4 {
-				require.Equal(t, mustIPNetwork4(t, testCase.wantAddr, testCase.wantMask), network)
+				require.Equal(t, mustNetworkIs4(t, testCase.wantAddr, testCase.wantMask), network)
 			} else {
-				require.Equal(t, mustIPNetwork6(t, testCase.wantAddr, testCase.wantMask), network)
+				require.Equal(t, mustNetworkIs6(t, testCase.wantAddr, testCase.wantMask), network)
 			}
 		})
 	}
@@ -2401,53 +2401,53 @@ func Test_ParseIPNetwork_NonContiguousMasks(t *testing.T) {
 
 // verifies that the must variant panics on invalid input instead of
 // returning an error.
-func Test_MustParseIPNetwork_PanicsOnInvalidInput(t *testing.T) {
-	require.Panics(t, func() { xnetip.MustParseIPNetwork("hello") })
+func Test_MustParseNetwork_PanicsOnInvalidInput(t *testing.T) {
+	require.Panics(t, func() { xnetip.MustParseNetwork("hello") })
 }
 
 // verifies that the must variant passes a valid parse through.
-func Test_MustParseIPNetwork_ReturnsParsedNetwork(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("10.0.0.0/8")
-	require.Equal(t, mustIPNetwork4(t, "10.0.0.0", "255.0.0.0"), network)
+func Test_MustParseNetwork_ReturnsParsedNetwork(t *testing.T) {
+	network := xnetip.MustParseNetwork("10.0.0.0/8")
+	require.Equal(t, mustNetworkIs4(t, "10.0.0.0", "255.0.0.0"), network)
 }
 
 // verifies that every parse error names this parser and echoes the
 // rejected input in quotes.
-func Test_ParseIPNetwork_ErrorEchoesInput(t *testing.T) {
-	_, err := xnetip.ParseIPNetwork("192.168.1.0/33")
+func Test_ParseNetwork_ErrorEchoesInput(t *testing.T) {
+	_, err := xnetip.ParseNetwork("192.168.1.0/33")
 	require.Error(t, err)
-	require.True(t, strings.HasPrefix(err.Error(), "xnetip.ParseIPNetwork("))
+	require.True(t, strings.HasPrefix(err.Error(), "xnetip.ParseNetwork("))
 	require.Contains(t, err.Error(), `"192.168.1.0/33"`)
 }
 
 // verifies that the dispatcher never disagrees with the family parsers
 // on text either of them accepts.
-func Test_ParseIPNetwork_AgreesWithFamilyParsersProperty(t *testing.T) {
+func Test_ParseNetwork_AgreesWithFamilyParsersProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		if rapid.Bool().Draw(t, "is4") {
-			text := genIPv4Network.Draw(t, "network4").String()
-			concrete, err := xnetip.ParseIPv4Network(text)
+			text := genNetwork4.Draw(t, "network4").String()
+			concrete, err := xnetip.ParseNetwork4(text)
 			require.NoError(t, err)
-			agnostic, err := xnetip.ParseIPNetwork(text)
+			agnostic, err := xnetip.ParseNetwork(text)
 			require.NoError(t, err)
-			require.Equal(t, xnetip.IPNetworkFrom4(concrete), agnostic)
+			require.Equal(t, xnetip.NetworkFrom4(concrete), agnostic)
 		} else {
-			text := genIPv6Network.Draw(t, "network6").String()
-			concrete, err := xnetip.ParseIPv6Network(text)
+			text := genNetwork6.Draw(t, "network6").String()
+			concrete, err := xnetip.ParseNetwork6(text)
 			require.NoError(t, err)
-			agnostic, err := xnetip.ParseIPNetwork(text)
+			agnostic, err := xnetip.ParseNetwork(text)
 			require.NoError(t, err)
-			require.Equal(t, xnetip.IPNetworkFrom6(concrete), agnostic)
+			require.Equal(t, xnetip.NetworkFrom6(concrete), agnostic)
 		}
 	})
 }
 
 // verifies that parsing the string form recovers the network exactly,
 // family flag included.
-func Test_ParseIPNetwork_StringRoundTripProperty(t *testing.T) {
+func Test_ParseNetwork_StringRoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
-		parsed, err := xnetip.ParseIPNetwork(network.String())
+		network := genNetwork.Draw(t, "network")
+		parsed, err := xnetip.ParseNetwork(network.String())
 		require.NoError(t, err)
 		require.Equal(t, network, parsed)
 	})
@@ -2455,19 +2455,19 @@ func Test_ParseIPNetwork_StringRoundTripProperty(t *testing.T) {
 
 // verifies that the dispatcher rejects a string exactly when both
 // family parsers reject it, and never panics on any byte string.
-func Test_ParseIPNetwork_RejectAgreementProperty(t *testing.T) {
+func Test_ParseNetwork_RejectAgreementProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		input := string(rapid.SliceOfN(rapid.Byte(), 0, 60).Draw(t, "input"))
-		_, err := xnetip.ParseIPNetwork(input)
-		_, err4 := xnetip.ParseIPv4Network(input)
-		_, err6 := xnetip.ParseIPv6Network(input)
+		_, err := xnetip.ParseNetwork(input)
+		_, err4 := xnetip.ParseNetwork4(input)
+		_, err6 := xnetip.ParseNetwork6(input)
 		require.Equal(t, err4 != nil && err6 != nil, err != nil)
 	})
 }
 
 // verifies that on CIDR-shaped text of either family the accept set,
 // the family and the parsed value are those of the std prefix parser.
-func Test_ParseIPNetwork_MatchesNetipParsePrefixProperty(t *testing.T) {
+func Test_ParseNetwork_MatchesNetipParsePrefixProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		var addr netip.Addr
 		if rapid.Bool().Draw(t, "is4") {
@@ -2477,7 +2477,7 @@ func Test_ParseIPNetwork_MatchesNetipParsePrefixProperty(t *testing.T) {
 		}
 		limit := 140
 		input := addr.String() + "/" + strconv.Itoa(rapid.IntRange(0, limit).Draw(t, "bits"))
-		parsed, err := xnetip.ParseIPNetwork(input)
+		parsed, err := xnetip.ParseNetwork(input)
 		stdPrefix, stdErr := netip.ParsePrefix(input)
 		if stdErr != nil {
 			require.Error(t, err)
@@ -2494,12 +2494,12 @@ func Test_ParseIPNetwork_MatchesNetipParsePrefixProperty(t *testing.T) {
 
 // verifies that accepting a network of either family allocates
 // nothing: the input is only ever sliced, never copied.
-func Test_ParseIPNetwork_AllocationFree(t *testing.T) {
-	requireNoAllocs(t, func() { ipNetworkSink, errSink = xnetip.ParseIPNetwork("10.0.0.0/8") })
-	requireNoAllocs(t, func() { ipNetworkSink, errSink = xnetip.ParseIPNetwork("2001:db8::/32") })
+func Test_ParseNetwork_AllocationFree(t *testing.T) {
+	requireNoAllocs(t, func() { ipNetworkSink, errSink = xnetip.ParseNetwork("10.0.0.0/8") })
+	requireNoAllocs(t, func() { ipNetworkSink, errSink = xnetip.ParseNetwork("2001:db8::/32") })
 }
 
-func FuzzParseIPNetwork(f *testing.F) {
+func FuzzParseNetwork(f *testing.F) {
 	seeds := []string{
 		"192.168.1.0/24", "10.0.0.0/8", "10.0.0.0/255.0.0.0", "77.88.55.242/16",
 		"192.168.1.1", "2a02:6b8:c00::/40", "2001:db8::/32", "2001:db8::1/ffff:ffff::ffff",
@@ -2517,9 +2517,9 @@ func FuzzParseIPNetwork(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input string) {
-		network, err := xnetip.ParseIPNetwork(input)
+		network, err := xnetip.ParseNetwork(input)
 		if err == nil {
-			back, err := xnetip.ParseIPNetwork(network.String())
+			back, err := xnetip.ParseNetwork(network.String())
 			if err != nil {
 				t.Fatalf("round trip of %q rejected %q: %v", input, network.String(), err)
 			}
@@ -2555,37 +2555,37 @@ func FuzzParseIPNetwork(f *testing.F) {
 	})
 }
 
-func BenchmarkParseIPNetwork_IPv4CIDR(b *testing.B) {
+func BenchmarkParseNetwork_IPv4CIDR(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		ipNetworkSink, errSink = xnetip.ParseIPNetwork("10.0.0.0/8")
+		ipNetworkSink, errSink = xnetip.ParseNetwork("10.0.0.0/8")
 	}
 }
 
-func BenchmarkParseIPNetwork_IPv6CIDR(b *testing.B) {
+func BenchmarkParseNetwork_IPv6CIDR(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		ipNetworkSink, errSink = xnetip.ParseIPNetwork("2001:db8::/32")
+		ipNetworkSink, errSink = xnetip.ParseNetwork("2001:db8::/32")
 	}
 }
 
-func BenchmarkParseIPNetwork_IPv4Bare(b *testing.B) {
+func BenchmarkParseNetwork_IPv4Bare(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		ipNetworkSink, errSink = xnetip.ParseIPNetwork("10.0.0.1")
+		ipNetworkSink, errSink = xnetip.ParseNetwork("10.0.0.1")
 	}
 }
 
-func BenchmarkParseIPNetwork_Reject(b *testing.B) {
+func BenchmarkParseNetwork_Reject(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		ipNetworkSink, errSink = xnetip.ParseIPNetwork("hello")
+		ipNetworkSink, errSink = xnetip.ParseNetwork("hello")
 	}
 }
 
 // verifies that the marshaled text is the string form in the network's
 // own family: the IPv4-mapped storage form never leaks.
-func Test_IPNetwork_MarshalText_MatchesStringForm(t *testing.T) {
+func Test_Network_MarshalText_MatchesStringForm(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -2602,7 +2602,7 @@ func Test_IPNetwork_MarshalText_MatchesStringForm(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			text, err := xnetip.MustParseIPNetwork(testCase.input).MarshalText()
+			text, err := xnetip.MustParseNetwork(testCase.input).MarshalText()
 			require.NoError(t, err)
 			require.Equal(t, testCase.want, string(text))
 		})
@@ -2610,15 +2610,15 @@ func Test_IPNetwork_MarshalText_MatchesStringForm(t *testing.T) {
 }
 
 // verifies that the zero value marshals as the IPv6 universe.
-func Test_IPNetwork_MarshalText_ZeroValueIsIPv6Universe(t *testing.T) {
-	text, err := xnetip.IPNetwork{}.MarshalText()
+func Test_Network_MarshalText_ZeroValueIsIPv6Universe(t *testing.T) {
+	text, err := xnetip.Network{}.MarshalText()
 	require.NoError(t, err)
 	require.Equal(t, "::/0", string(text))
 }
 
 // verifies that unmarshaling detects the family from the address part
 // and lands on the concrete network of that family.
-func Test_IPNetwork_UnmarshalText_SetsFamilyFromText(t *testing.T) {
+func Test_Network_UnmarshalText_SetsFamilyFromText(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
@@ -2632,12 +2632,12 @@ func Test_IPNetwork_UnmarshalText_SetsFamilyFromText(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			var network xnetip.IPNetwork
+			var network xnetip.Network
 			require.NoError(t, network.UnmarshalText([]byte(testCase.input)))
 			if testCase.want4 {
-				require.Equal(t, mustIPNetwork4(t, testCase.wantAddr, testCase.wantMask), network)
+				require.Equal(t, mustNetworkIs4(t, testCase.wantAddr, testCase.wantMask), network)
 			} else {
-				require.Equal(t, mustIPNetwork6(t, testCase.wantAddr, testCase.wantMask), network)
+				require.Equal(t, mustNetworkIs6(t, testCase.wantAddr, testCase.wantMask), network)
 			}
 		})
 	}
@@ -2645,8 +2645,8 @@ func Test_IPNetwork_UnmarshalText_SetsFamilyFromText(t *testing.T) {
 
 // verifies that IPv4-mapped text unmarshals as an IPv6 network, never
 // collapsing into the IPv4 family.
-func Test_IPNetwork_UnmarshalText_MappedTextIsIPv6(t *testing.T) {
-	var network xnetip.IPNetwork
+func Test_Network_UnmarshalText_MappedTextIsIPv6(t *testing.T) {
+	var network xnetip.Network
 	require.NoError(t, network.UnmarshalText([]byte("::ffff:10.0.0.0/104")))
 	require.True(t, network.Is6())
 	_, ok := network.IPv4()
@@ -2655,16 +2655,16 @@ func Test_IPNetwork_UnmarshalText_MappedTextIsIPv6(t *testing.T) {
 
 // verifies that empty text is an error, because the zero value is the
 // valid universe network and must not appear out of a missing field.
-func Test_IPNetwork_UnmarshalText_EmptyTextIsError(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("10.0.0.0/8")
+func Test_Network_UnmarshalText_EmptyTextIsError(t *testing.T) {
+	network := xnetip.MustParseNetwork("10.0.0.0/8")
 	err := network.UnmarshalText(nil)
 	require.ErrorIs(t, err, xnetip.ErrEmptyInput)
-	require.Equal(t, xnetip.MustParseIPNetwork("10.0.0.0/8"), network)
+	require.Equal(t, xnetip.MustParseNetwork("10.0.0.0/8"), network)
 }
 
 // verifies that a failed unmarshal reports the parser's sentinel and
 // leaves the receiver untouched.
-func Test_IPNetwork_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
+func Test_Network_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
@@ -2676,25 +2676,25 @@ func Test_IPNetwork_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network := xnetip.MustParseIPNetwork("192.168.0.0/24")
+			network := xnetip.MustParseNetwork("192.168.0.0/24")
 			err := network.UnmarshalText([]byte(testCase.input))
 			require.ErrorIs(t, err, testCase.sentinel)
-			require.Equal(t, xnetip.MustParseIPNetwork("192.168.0.0/24"), network)
+			require.Equal(t, xnetip.MustParseNetwork("192.168.0.0/24"), network)
 		})
 	}
 }
 
 // verifies that a slice mixing both families round-trips through JSON
 // with each element's family preserved.
-func Test_IPNetwork_MarshalText_JSONMixedFamilies(t *testing.T) {
-	value := []xnetip.IPNetwork{
-		xnetip.MustParseIPNetwork("10.0.0.0/8"),
-		xnetip.MustParseIPNetwork("2001:db8::/32"),
+func Test_Network_MarshalText_JSONMixedFamilies(t *testing.T) {
+	value := []xnetip.Network{
+		xnetip.MustParseNetwork("10.0.0.0/8"),
+		xnetip.MustParseNetwork("2001:db8::/32"),
 	}
 	encoded, err := json.Marshal(value)
 	require.NoError(t, err)
 	require.Equal(t, `["10.0.0.0/8","2001:db8::/32"]`, string(encoded))
-	var decoded []xnetip.IPNetwork
+	var decoded []xnetip.Network
 	require.NoError(t, json.Unmarshal(encoded, &decoded))
 	require.Equal(t, value, decoded)
 	require.True(t, decoded[0].Is4())
@@ -2703,25 +2703,25 @@ func Test_IPNetwork_MarshalText_JSONMixedFamilies(t *testing.T) {
 
 // verifies that the type works as a JSON map key, which encoding/json
 // routes through the text marshaler pair.
-func Test_IPNetwork_MarshalText_JSONMapKeyRoundTrip(t *testing.T) {
-	value := map[xnetip.IPNetwork]int{xnetip.MustParseIPNetwork("10.0.0.0/8"): 1}
+func Test_Network_MarshalText_JSONMapKeyRoundTrip(t *testing.T) {
+	value := map[xnetip.Network]int{xnetip.MustParseNetwork("10.0.0.0/8"): 1}
 	encoded, err := json.Marshal(value)
 	require.NoError(t, err)
 	require.Equal(t, `{"10.0.0.0/8":1}`, string(encoded))
-	var decoded map[xnetip.IPNetwork]int
+	var decoded map[xnetip.Network]int
 	require.NoError(t, json.Unmarshal(encoded, &decoded))
 	require.Equal(t, value, decoded)
 }
 
 // verifies that unmarshaling the marshaled text recovers the network
 // exactly, the family flag included.
-func Test_IPNetwork_MarshalText_RoundTripProperty(t *testing.T) {
+func Test_Network_MarshalText_RoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		text, err := network.MarshalText()
 		require.NoError(t, err)
 		require.Equal(t, []byte(network.String()), text)
-		var back xnetip.IPNetwork
+		var back xnetip.Network
 		require.NoError(t, back.UnmarshalText(text))
 		require.Equal(t, network, back)
 	})
@@ -2729,20 +2729,20 @@ func Test_IPNetwork_MarshalText_RoundTripProperty(t *testing.T) {
 
 // verifies that the family-agnostic text never differs from the
 // concrete type's text for the same network.
-func Test_IPNetwork_MarshalText_AgreesWithConcreteTypesProperty(t *testing.T) {
+func Test_Network_MarshalText_AgreesWithConcreteTypesProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		if rapid.Bool().Draw(t, "is4") {
-			network := genIPv4Network.Draw(t, "network4")
+			network := genNetwork4.Draw(t, "network4")
 			concreteText, err := network.MarshalText()
 			require.NoError(t, err)
-			agnosticText, err := xnetip.IPNetworkFrom4(network).MarshalText()
+			agnosticText, err := xnetip.NetworkFrom4(network).MarshalText()
 			require.NoError(t, err)
 			require.Equal(t, concreteText, agnosticText)
 		} else {
-			network := genIPv6Network.Draw(t, "network6")
+			network := genNetwork6.Draw(t, "network6")
 			concreteText, err := network.MarshalText()
 			require.NoError(t, err)
-			agnosticText, err := xnetip.IPNetworkFrom6(network).MarshalText()
+			agnosticText, err := xnetip.NetworkFrom6(network).MarshalText()
 			require.NoError(t, err)
 			require.Equal(t, concreteText, agnosticText)
 		}
@@ -2751,12 +2751,12 @@ func Test_IPNetwork_MarshalText_AgreesWithConcreteTypesProperty(t *testing.T) {
 
 // verifies that a JSON round trip of a slice mixing families preserves
 // every element for every mask shape.
-func Test_IPNetwork_MarshalText_JSONRoundTripProperty(t *testing.T) {
+func Test_Network_MarshalText_JSONRoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		value := rapid.SliceOfN(genIPNetwork, 0, 8).Draw(t, "networks")
+		value := rapid.SliceOfN(genNetwork, 0, 8).Draw(t, "networks")
 		encoded, err := json.Marshal(value)
 		require.NoError(t, err)
-		var decoded []xnetip.IPNetwork
+		var decoded []xnetip.Network
 		require.NoError(t, json.Unmarshal(encoded, &decoded))
 		if len(value) == 0 {
 			require.Empty(t, decoded)
@@ -2768,9 +2768,9 @@ func Test_IPNetwork_MarshalText_JSONRoundTripProperty(t *testing.T) {
 
 // verifies that on contiguous networks of either family the marshaled
 // text is byte-identical to the netip prefix marshaling.
-func Test_IPNetwork_MarshalText_MatchesNetipPrefixProperty(t *testing.T) {
+func Test_Network_MarshalText_MatchesNetipPrefixProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		bits, ok := network.PrefixLen()
 		if !ok {
 			return
@@ -2788,59 +2788,59 @@ func Test_IPNetwork_MarshalText_MatchesNetipPrefixProperty(t *testing.T) {
 //
 // The zero netip prefix is invalid and safe to produce, while the zero
 // network here is the whole IPv6 universe.
-func Test_IPNetwork_UnmarshalText_EmptyTextDivergesFromNetip(t *testing.T) {
+func Test_Network_UnmarshalText_EmptyTextDivergesFromNetip(t *testing.T) {
 	var stdPrefix netip.Prefix
 	require.NoError(t, stdPrefix.UnmarshalText(nil))
-	var network xnetip.IPNetwork
+	var network xnetip.Network
 	require.Error(t, network.UnmarshalText(nil))
 }
 
 // verifies that marshaling allocates exactly the returned slice in
 // both families.
-func Test_IPNetwork_MarshalText_SingleAllocation(t *testing.T) {
-	network4 := xnetip.MustParseIPNetwork("10.0.0.0/8")
-	network6 := xnetip.MustParseIPNetwork("2001:db8::/32")
+func Test_Network_MarshalText_SingleAllocation(t *testing.T) {
+	network4 := xnetip.MustParseNetwork("10.0.0.0/8")
+	network6 := xnetip.MustParseNetwork("2001:db8::/32")
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = network4.MarshalText() })))
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = network6.MarshalText() })))
 }
 
 // verifies that a valid netip.Prefix converts into the network of its
 // address's family, host bits cleared.
-func Test_IPNetworkFromPrefix_ConvertsValidPrefixes(t *testing.T) {
+func Test_NetworkFromPrefix_ConvertsValidPrefixes(t *testing.T) {
 	cases := []struct {
 		name   string
 		prefix netip.Prefix
-		want   xnetip.IPNetwork
+		want   xnetip.Network
 	}{
 		{
 			name:   "IPv4 prefix",
 			prefix: netip.MustParsePrefix("10.0.0.0/8"),
-			want:   xnetip.MustParseIPNetwork("10.0.0.0/8"),
+			want:   xnetip.MustParseNetwork("10.0.0.0/8"),
 		},
 		{
 			name:   "IPv6 prefix",
 			prefix: netip.MustParsePrefix("2001:db8::/32"),
-			want:   xnetip.MustParseIPNetwork("2001:db8::/32"),
+			want:   xnetip.MustParseNetwork("2001:db8::/32"),
 		},
 		{
 			name:   "IPv4 host bits cleared",
 			prefix: netip.MustParsePrefix("10.1.2.3/8"),
-			want:   xnetip.MustParseIPNetwork("10.0.0.0/8"),
+			want:   xnetip.MustParseNetwork("10.0.0.0/8"),
 		},
 		{
 			name:   "IPv6 host bits cleared",
 			prefix: netip.MustParsePrefix("2001:db8::1/32"),
-			want:   xnetip.MustParseIPNetwork("2001:db8::/32"),
+			want:   xnetip.MustParseNetwork("2001:db8::/32"),
 		},
 		{
 			name:   "IPv6 /0 is the zero value",
 			prefix: netip.MustParsePrefix("::/0"),
-			want:   xnetip.IPNetwork{},
+			want:   xnetip.Network{},
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, ok := xnetip.IPNetworkFromPrefix(testCase.prefix)
+			network, ok := xnetip.NetworkFromPrefix(testCase.prefix)
 			require.True(t, ok)
 			require.Equal(t, testCase.want, network)
 		})
@@ -2849,19 +2849,19 @@ func Test_IPNetworkFromPrefix_ConvertsValidPrefixes(t *testing.T) {
 
 // verifies that an IPv4-mapped prefix converts into an IPv6 network,
 // never into its IPv4 counterpart, the netip family rule.
-func Test_IPNetworkFromPrefix_MappedPrefixStaysIPv6(t *testing.T) {
-	network, ok := xnetip.IPNetworkFromPrefix(netip.MustParsePrefix("::ffff:10.0.0.0/104"))
+func Test_NetworkFromPrefix_MappedPrefixStaysIPv6(t *testing.T) {
+	network, ok := xnetip.NetworkFromPrefix(netip.MustParsePrefix("::ffff:10.0.0.0/104"))
 	require.True(t, ok)
 	require.True(t, network.Is6())
 	_, isIPv4 := network.IPv4()
 	require.False(t, isIPv4)
-	require.Equal(t, xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), network)
+	require.Equal(t, xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), network)
 }
 
 // verifies that the IPv4 universe converts with its family length,
 // not the 96-bit one of the mapped storage form.
-func Test_IPNetworkFromPrefix_IPv4UniverseKeepsFamilyLength(t *testing.T) {
-	network, ok := xnetip.IPNetworkFromPrefix(netip.MustParsePrefix("0.0.0.0/0"))
+func Test_NetworkFromPrefix_IPv4UniverseKeepsFamilyLength(t *testing.T) {
+	network, ok := xnetip.NetworkFromPrefix(netip.MustParsePrefix("0.0.0.0/0"))
 	require.True(t, ok)
 	require.True(t, network.Is4())
 	prefixLen, ok := network.PrefixLen()
@@ -2870,43 +2870,43 @@ func Test_IPNetworkFromPrefix_IPv4UniverseKeepsFamilyLength(t *testing.T) {
 }
 
 // verifies that the invalid zero prefix is rejected.
-func Test_IPNetworkFromPrefix_RejectsInvalidPrefix(t *testing.T) {
-	network, ok := xnetip.IPNetworkFromPrefix(netip.Prefix{})
+func Test_NetworkFromPrefix_RejectsInvalidPrefix(t *testing.T) {
+	network, ok := xnetip.NetworkFromPrefix(netip.Prefix{})
 	require.False(t, ok)
-	require.Equal(t, xnetip.IPNetwork{}, network)
+	require.Equal(t, xnetip.Network{}, network)
 }
 
 // verifies that a contiguous network converts to the already-masked
 // netip.Prefix of its own family, never the mapped storage form.
-func Test_IPNetwork_Prefix_OwnFamilyForms(t *testing.T) {
+func Test_Network_Prefix_OwnFamilyForms(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 		want    netip.Prefix
 	}{
 		{
 			name:    "IPv4 network yields an IPv4 prefix",
-			network: xnetip.MustParseIPNetwork("192.168.0.0/24"),
+			network: xnetip.MustParseNetwork("192.168.0.0/24"),
 			want:    netip.MustParsePrefix("192.168.0.0/24"),
 		},
 		{
 			name:    "IPv4 universe stays 0.0.0.0/0",
-			network: xnetip.MustParseIPNetwork("0.0.0.0/0"),
+			network: xnetip.MustParseNetwork("0.0.0.0/0"),
 			want:    netip.MustParsePrefix("0.0.0.0/0"),
 		},
 		{
 			name:    "IPv6 network",
-			network: xnetip.MustParseIPNetwork("2a02:6b8:c00::/40"),
+			network: xnetip.MustParseNetwork("2a02:6b8:c00::/40"),
 			want:    netip.MustParsePrefix("2a02:6b8:c00::/40"),
 		},
 		{
 			name:    "IPv4-mapped IPv6 network stays IPv6",
-			network: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"),
+			network: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"),
 			want:    netip.MustParsePrefix("::ffff:10.0.0.0/104"),
 		},
 		{
 			name:    "zero value is the IPv6 universe",
-			network: xnetip.IPNetwork{},
+			network: xnetip.Network{},
 			want:    netip.MustParsePrefix("::/0"),
 		},
 	}
@@ -2918,10 +2918,10 @@ func Test_IPNetwork_Prefix_OwnFamilyForms(t *testing.T) {
 			require.Equal(t, prefix.Masked(), prefix)
 		})
 	}
-	mapped, ok := xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104").Prefix()
+	mapped, ok := xnetip.MustParseNetwork("::ffff:10.0.0.0/104").Prefix()
 	require.True(t, ok)
 	require.True(t, mapped.Addr().Is4In6())
-	plain, ok := xnetip.MustParseIPNetwork("192.168.0.0/24").Prefix()
+	plain, ok := xnetip.MustParseNetwork("192.168.0.0/24").Prefix()
 	require.True(t, ok)
 	require.True(t, plain.Addr().Is4())
 	require.Equal(t, 24, plain.Bits())
@@ -2929,14 +2929,14 @@ func Test_IPNetwork_Prefix_OwnFamilyForms(t *testing.T) {
 
 // verifies that a non-contiguous mask of either family has no prefix
 // form and answers the invalid zero netip.Prefix.
-func Test_IPNetwork_Prefix_NonContiguousHasNone(t *testing.T) {
+func Test_Network_Prefix_NonContiguousHasNone(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 	}{
-		{name: "IPv4 two runs", network: xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0")},
-		{name: "IPv6 two runs", network: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::ffff:ffff:0:0")},
-		{name: "IPv4 alternating", network: xnetip.MustParseIPNetwork("170.85.170.85/170.85.170.85")},
+		{name: "IPv4 two runs", network: xnetip.MustParseNetwork("10.0.0.0/255.0.255.0")},
+		{name: "IPv6 two runs", network: xnetip.MustParseNetwork("2001:db8::/ffff:ffff::ffff:ffff:0:0")},
+		{name: "IPv4 alternating", network: xnetip.MustParseNetwork("170.85.170.85/170.85.170.85")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -2949,7 +2949,7 @@ func Test_IPNetwork_Prefix_NonContiguousHasNone(t *testing.T) {
 
 // verifies that any valid prefix of either family converts into a
 // network of that family and back to its masked self.
-func Test_IPNetworkFromPrefix_FamilyFollowsAddressProperty(t *testing.T) {
+func Test_NetworkFromPrefix_FamilyFollowsAddressProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		var stdPrefix netip.Prefix
 		if rapid.Bool().Draw(t, "is4") {
@@ -2957,7 +2957,7 @@ func Test_IPNetworkFromPrefix_FamilyFollowsAddressProperty(t *testing.T) {
 		} else {
 			stdPrefix = genIPv6Prefix.Draw(t, "prefix6")
 		}
-		network, ok := xnetip.IPNetworkFromPrefix(stdPrefix)
+		network, ok := xnetip.NetworkFromPrefix(stdPrefix)
 		require.True(t, ok)
 		require.Equal(t, stdPrefix.Addr().Is4(), network.Is4())
 		back, ok := network.Prefix()
@@ -2968,9 +2968,9 @@ func Test_IPNetworkFromPrefix_FamilyFollowsAddressProperty(t *testing.T) {
 
 // verifies that a prefix form exists exactly for contiguous masks,
 // whatever the drawn family and mask shape.
-func Test_IPNetwork_Prefix_SomeIffContiguousProperty(t *testing.T) {
+func Test_Network_Prefix_SomeIffContiguousProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		prefix, ok := network.Prefix()
 		require.Equal(t, network.IsContiguous(), ok)
 		if !ok {
@@ -2981,14 +2981,14 @@ func Test_IPNetwork_Prefix_SomeIffContiguousProperty(t *testing.T) {
 
 // verifies that a contiguous network survives the round trip through
 // netip.Prefix unchanged, its family included.
-func Test_IPNetwork_Prefix_RoundTripProperty(t *testing.T) {
+func Test_Network_Prefix_RoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		stdPrefix, ok := network.Prefix()
 		if !ok {
 			return
 		}
-		back, ok := xnetip.IPNetworkFromPrefix(stdPrefix)
+		back, ok := xnetip.NetworkFromPrefix(stdPrefix)
 		require.True(t, ok)
 		require.Equal(t, network, back)
 	})
@@ -2996,16 +2996,16 @@ func Test_IPNetwork_Prefix_RoundTripProperty(t *testing.T) {
 
 // verifies that wrapping a concrete network changes neither the
 // prefix form nor its existence.
-func Test_IPNetwork_Prefix_AgreesWithConcreteTypesProperty(t *testing.T) {
+func Test_Network_Prefix_AgreesWithConcreteTypesProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network4 := genIPv4Network.Draw(t, "network4")
+		network4 := genNetwork4.Draw(t, "network4")
 		concrete4, concrete4Ok := network4.Prefix()
-		wrapped4, wrapped4Ok := xnetip.IPNetworkFrom4(network4).Prefix()
+		wrapped4, wrapped4Ok := xnetip.NetworkFrom4(network4).Prefix()
 		require.Equal(t, concrete4Ok, wrapped4Ok)
 		require.Equal(t, concrete4, wrapped4)
-		network6 := genIPv6Network.Draw(t, "network6")
+		network6 := genNetwork6.Draw(t, "network6")
 		concrete6, concrete6Ok := network6.Prefix()
-		wrapped6, wrapped6Ok := xnetip.IPNetworkFrom6(network6).Prefix()
+		wrapped6, wrapped6Ok := xnetip.NetworkFrom6(network6).Prefix()
 		require.Equal(t, concrete6Ok, wrapped6Ok)
 		require.Equal(t, concrete6, wrapped6)
 	})
@@ -3013,20 +3013,20 @@ func Test_IPNetwork_Prefix_AgreesWithConcreteTypesProperty(t *testing.T) {
 
 // verifies that both conversion directions allocate nothing for
 // either family on any outcome.
-func Test_IPNetworkFromPrefix_AllocationFree(t *testing.T) {
+func Test_NetworkFromPrefix_AllocationFree(t *testing.T) {
 	prefix4 := netip.MustParsePrefix("10.0.0.0/8")
 	prefix6 := netip.MustParsePrefix("2001:db8::/32")
-	requireNoAllocs(t, func() { ipNetworkSink, okSink = xnetip.IPNetworkFromPrefix(prefix4) })
-	requireNoAllocs(t, func() { ipNetworkSink, okSink = xnetip.IPNetworkFromPrefix(prefix6) })
-	requireNoAllocs(t, func() { ipNetworkSink, okSink = xnetip.IPNetworkFromPrefix(netip.Prefix{}) })
+	requireNoAllocs(t, func() { ipNetworkSink, okSink = xnetip.NetworkFromPrefix(prefix4) })
+	requireNoAllocs(t, func() { ipNetworkSink, okSink = xnetip.NetworkFromPrefix(prefix6) })
+	requireNoAllocs(t, func() { ipNetworkSink, okSink = xnetip.NetworkFromPrefix(netip.Prefix{}) })
 }
 
 // verifies that converting out to a netip.Prefix allocates nothing
 // for either family, whatever the mask's shape.
-func Test_IPNetwork_Prefix_AllocationFree(t *testing.T) {
-	network4 := xnetip.MustParseIPNetwork("192.168.0.0/24")
-	network6 := xnetip.MustParseIPNetwork("2a02:6b8:c00::/40")
-	nonContiguous := xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0")
+func Test_Network_Prefix_AllocationFree(t *testing.T) {
+	network4 := xnetip.MustParseNetwork("192.168.0.0/24")
+	network6 := xnetip.MustParseNetwork("2a02:6b8:c00::/40")
+	nonContiguous := xnetip.MustParseNetwork("10.0.0.0/255.0.255.0")
 	requireNoAllocs(t, func() { prefixSink, okSink = network4.Prefix() })
 	requireNoAllocs(t, func() { prefixSink, okSink = network6.Prefix() })
 	requireNoAllocs(t, func() { prefixSink, okSink = nonContiguous.Prefix() })
@@ -3034,19 +3034,19 @@ func Test_IPNetwork_Prefix_AllocationFree(t *testing.T) {
 
 // verifies that the last address comes back in the network's own
 // family: an Is4 address for IPv4, an Is6 one for IPv6.
-func Test_IPNetwork_LastAddr_FamilyPreserved(t *testing.T) {
+func Test_Network_LastAddr_FamilyPreserved(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 		want    netip.Addr
 	}{
-		{name: "IPv4 /24 broadcast", network: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: netip.MustParseAddr("192.168.1.255")},
-		{name: "IPv4 host route", network: xnetip.MustParseIPNetwork("10.0.0.1"), want: netip.MustParseAddr("10.0.0.1")},
-		{name: "IPv4 default route", network: xnetip.MustParseIPNetwork("0.0.0.0/0"), want: netip.MustParseAddr("255.255.255.255")},
-		{name: "IPv6 /64", network: xnetip.MustParseIPNetwork("2001:db8:1::/64"), want: netip.MustParseAddr("2001:db8:1::ffff:ffff:ffff:ffff")},
-		{name: "IPv6 host route", network: xnetip.MustParseIPNetwork("2a02:6b8::1"), want: netip.MustParseAddr("2a02:6b8::1")},
-		{name: "IPv6 default route", network: xnetip.MustParseIPNetwork("::/0"), want: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
-		{name: "zero value is the IPv6 default route", network: xnetip.IPNetwork{}, want: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "IPv4 /24 broadcast", network: xnetip.MustParseNetwork("192.168.1.0/24"), want: netip.MustParseAddr("192.168.1.255")},
+		{name: "IPv4 host route", network: xnetip.MustParseNetwork("10.0.0.1"), want: netip.MustParseAddr("10.0.0.1")},
+		{name: "IPv4 default route", network: xnetip.MustParseNetwork("0.0.0.0/0"), want: netip.MustParseAddr("255.255.255.255")},
+		{name: "IPv6 /64", network: xnetip.MustParseNetwork("2001:db8:1::/64"), want: netip.MustParseAddr("2001:db8:1::ffff:ffff:ffff:ffff")},
+		{name: "IPv6 host route", network: xnetip.MustParseNetwork("2a02:6b8::1"), want: netip.MustParseAddr("2a02:6b8::1")},
+		{name: "IPv6 default route", network: xnetip.MustParseNetwork("::/0"), want: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "zero value is the IPv6 default route", network: xnetip.Network{}, want: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3059,14 +3059,14 @@ func Test_IPNetwork_LastAddr_FamilyPreserved(t *testing.T) {
 
 // verifies that a non-contiguous mask sets every host bit in either
 // family, holes outside the trailing run included.
-func Test_IPNetwork_LastAddr_NonContiguousMasks(t *testing.T) {
+func Test_Network_LastAddr_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 		want    netip.Addr
 	}{
-		{name: "IPv4 two-run mask", network: mustIPNetwork4(t, "192.168.0.1", "255.255.0.255"), want: netip.MustParseAddr("192.168.255.1")},
-		{name: "IPv6 two-run mask", network: mustIPNetwork6(t, "2a02:6b8:c00::1234:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: netip.MustParseAddr("2a02:6b8:cff:ffff:0:1234:ffff:ffff")},
+		{name: "IPv4 two-run mask", network: mustNetworkIs4(t, "192.168.0.1", "255.255.0.255"), want: netip.MustParseAddr("192.168.255.1")},
+		{name: "IPv6 two-run mask", network: mustNetworkIs6(t, "2a02:6b8:c00::1234:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: netip.MustParseAddr("2a02:6b8:cff:ffff:0:1234:ffff:ffff")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3077,10 +3077,10 @@ func Test_IPNetwork_LastAddr_NonContiguousMasks(t *testing.T) {
 
 // verifies that a wrapped IPv4 network answers exactly what the
 // concrete type answers, as an Is4 address.
-func Test_IPNetwork_LastAddr_MatchesIPv4Property(t *testing.T) {
+func Test_Network_LastAddr_MatchesIPv4Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		last := xnetip.IPNetworkFrom4(network).LastAddr()
+		network := genNetwork4.Draw(t, "network")
+		last := xnetip.NetworkFrom4(network).LastAddr()
 		require.Equal(t, network.LastAddr(), last)
 		require.True(t, last.Is4())
 	})
@@ -3088,10 +3088,10 @@ func Test_IPNetwork_LastAddr_MatchesIPv4Property(t *testing.T) {
 
 // verifies that a wrapped IPv6 network answers exactly what the
 // concrete type answers.
-func Test_IPNetwork_LastAddr_MatchesIPv6Property(t *testing.T) {
+func Test_Network_LastAddr_MatchesIPv6Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		require.Equal(t, network.LastAddr(), xnetip.IPNetworkFrom6(network).LastAddr())
+		network := genNetwork6.Draw(t, "network")
+		require.Equal(t, network.LastAddr(), xnetip.NetworkFrom6(network).LastAddr())
 	})
 }
 
@@ -3102,10 +3102,10 @@ func Test_IPNetwork_LastAddr_MatchesIPv6Property(t *testing.T) {
 // the stored form touches only the low 32 and the 128-bit result is
 // the mapped IPv4 result — the encoding invariant the method relies
 // on to compute once and only unmap the view.
-func Test_IPNetwork_LastAddr_StoredFormEquivalenceProperty(t *testing.T) {
+func Test_Network_LastAddr_StoredFormEquivalenceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		wrapped := xnetip.IPNetworkFrom4(network)
+		network := genNetwork4.Draw(t, "network")
+		wrapped := xnetip.NetworkFrom4(network)
 		storedLast := wrapped.ToIPv6Mapped().LastAddr()
 		lastBytes := wrapped.LastAddr().As4()
 		mappedLast := netipAddrFrom6Bits(0, 0x0000ffff00000000|uint64(binary.BigEndian.Uint32(lastBytes[:])))
@@ -3115,29 +3115,29 @@ func Test_IPNetwork_LastAddr_StoredFormEquivalenceProperty(t *testing.T) {
 
 // verifies that the last address is computed without allocating in
 // either family, whatever the mask's shape.
-func Test_IPNetwork_LastAddr_AllocationFree(t *testing.T) {
-	four := xnetip.MustParseIPNetwork("192.168.0.1/255.255.0.255")
-	six := xnetip.MustParseIPNetwork("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
+func Test_Network_LastAddr_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseNetwork("192.168.0.1/255.255.0.255")
+	six := xnetip.MustParseNetwork("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
 	requireNoAllocs(t, func() { addrSink = four.LastAddr() })
 	requireNoAllocs(t, func() { addrSink = six.LastAddr() })
 }
 
 // verifies that the count is family-native: the mapped storage of an
 // IPv4 network contributes no host bits above its 32 family bits.
-func Test_IPNetwork_NumHostBits_FamilyNativeCount(t *testing.T) {
+func Test_Network_NumHostBits_FamilyNativeCount(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 		want    int
 	}{
-		{name: "IPv4 default route frees 32 bits", network: xnetip.MustParseIPNetwork("0.0.0.0/0"), want: 32},
-		{name: "IPv4 /24", network: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: 8},
-		{name: "IPv4 host route", network: xnetip.MustParseIPNetwork("10.0.0.1"), want: 0},
-		{name: "IPv6 default route frees 128 bits", network: xnetip.MustParseIPNetwork("::/0"), want: 128},
-		{name: "IPv6 /64", network: xnetip.MustParseIPNetwork("2001:db8::/64"), want: 64},
-		{name: "IPv6 host route", network: xnetip.MustParseIPNetwork("2a02:6b8::1"), want: 0},
-		{name: "mapped /96 stays IPv6 and frees 32 bits", network: xnetip.MustParseIPNetwork("::ffff:0.0.0.0/96"), want: 32},
-		{name: "zero value is the IPv6 default route", network: xnetip.IPNetwork{}, want: 128},
+		{name: "IPv4 default route frees 32 bits", network: xnetip.MustParseNetwork("0.0.0.0/0"), want: 32},
+		{name: "IPv4 /24", network: xnetip.MustParseNetwork("192.168.1.0/24"), want: 8},
+		{name: "IPv4 host route", network: xnetip.MustParseNetwork("10.0.0.1"), want: 0},
+		{name: "IPv6 default route frees 128 bits", network: xnetip.MustParseNetwork("::/0"), want: 128},
+		{name: "IPv6 /64", network: xnetip.MustParseNetwork("2001:db8::/64"), want: 64},
+		{name: "IPv6 host route", network: xnetip.MustParseNetwork("2a02:6b8::1"), want: 0},
+		{name: "mapped /96 stays IPv6 and frees 32 bits", network: xnetip.MustParseNetwork("::ffff:0.0.0.0/96"), want: 32},
+		{name: "zero value is the IPv6 default route", network: xnetip.Network{}, want: 128},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3148,14 +3148,14 @@ func Test_IPNetwork_NumHostBits_FamilyNativeCount(t *testing.T) {
 
 // verifies that host bits are counted wherever the mask leaves them
 // in either family, not only in a trailing run.
-func Test_IPNetwork_NumHostBits_NonContiguousMasks(t *testing.T) {
+func Test_Network_NumHostBits_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 		want    int
 	}{
-		{name: "IPv4 two-run mask", network: mustIPNetwork4(t, "10.0.0.0", "255.0.255.0"), want: 16},
-		{name: "IPv6 two-run mask", network: mustIPNetwork6(t, "2a02:6b8:c00::1234:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: 56},
+		{name: "IPv4 two-run mask", network: mustNetworkIs4(t, "10.0.0.0", "255.0.255.0"), want: 16},
+		{name: "IPv6 two-run mask", network: mustNetworkIs6(t, "2a02:6b8:c00::1234:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: 56},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3170,10 +3170,10 @@ func Test_IPNetwork_NumHostBits_NonContiguousMasks(t *testing.T) {
 // The second check pins the encoding invariant the delegation relies
 // on: the mapped mask's top 96 bits are ones and contribute nothing,
 // so the whole-word count of the stored form is the IPv4 count.
-func Test_IPNetwork_NumHostBits_MatchesIPv4Property(t *testing.T) {
+func Test_Network_NumHostBits_MatchesIPv4Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		wrapped := xnetip.IPNetworkFrom4(network)
+		network := genNetwork4.Draw(t, "network")
+		wrapped := xnetip.NetworkFrom4(network)
 		require.Equal(t, network.NumHostBits(), wrapped.NumHostBits())
 		storedMaskBytes := wrapped.ToIPv6Mapped().Mask().As16()
 		storedHostBits := 0
@@ -3186,17 +3186,17 @@ func Test_IPNetwork_NumHostBits_MatchesIPv4Property(t *testing.T) {
 
 // verifies that a wrapped IPv6 network answers exactly what the
 // concrete type answers.
-func Test_IPNetwork_NumHostBits_MatchesIPv6Property(t *testing.T) {
+func Test_Network_NumHostBits_MatchesIPv6Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		require.Equal(t, network.NumHostBits(), xnetip.IPNetworkFrom6(network).NumHostBits())
+		network := genNetwork6.Draw(t, "network")
+		require.Equal(t, network.NumHostBits(), xnetip.NetworkFrom6(network).NumHostBits())
 	})
 }
 
 // verifies that the count stays inside the family's word width.
-func Test_IPNetwork_NumHostBits_WithinFamilyRangeProperty(t *testing.T) {
+func Test_Network_NumHostBits_WithinFamilyRangeProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		width := 128
 		if network.Is4() {
 			width = 32
@@ -3208,17 +3208,17 @@ func Test_IPNetwork_NumHostBits_WithinFamilyRangeProperty(t *testing.T) {
 
 // verifies that the count is computed without allocating in either
 // family, whatever the mask's shape.
-func Test_IPNetwork_NumHostBits_AllocationFree(t *testing.T) {
-	four := xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0")
-	six := xnetip.MustParseIPNetwork("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
+func Test_Network_NumHostBits_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseNetwork("10.0.0.0/255.0.255.0")
+	six := xnetip.MustParseNetwork("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
 	requireNoAllocs(t, func() { intSink = four.NumHostBits() })
 	requireNoAllocs(t, func() { intSink = six.NumHostBits() })
 }
 
 // verifies that a wrapped IPv4 network yields its addresses in host
 // index order with every item in the IPv4 family.
-func Test_IPNetwork_Addrs_IPv4FamilyAndOrder(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("10.0.0.0/30")
+func Test_Network_Addrs_IPv4FamilyAndOrder(t *testing.T) {
+	network := xnetip.MustParseNetwork("10.0.0.0/30")
 	collected := slices.Collect(network.Addrs())
 	require.Equal(t, []netip.Addr{
 		netip.MustParseAddr("10.0.0.0"),
@@ -3233,8 +3233,8 @@ func Test_IPNetwork_Addrs_IPv4FamilyAndOrder(t *testing.T) {
 
 // verifies that a wrapped IPv6 network yields its addresses in host
 // index order with every item in the IPv6 family.
-func Test_IPNetwork_Addrs_IPv6FamilyAndOrder(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("2001:db8::/126")
+func Test_Network_Addrs_IPv6FamilyAndOrder(t *testing.T) {
+	network := xnetip.MustParseNetwork("2001:db8::/126")
 	collected := slices.Collect(network.Addrs())
 	require.Equal(t, []netip.Addr{
 		netip.MustParseAddr("2001:db8::"),
@@ -3248,8 +3248,8 @@ func Test_IPNetwork_Addrs_IPv6FamilyAndOrder(t *testing.T) {
 }
 
 // verifies that an IPv4 host route yields exactly its single address.
-func Test_IPNetwork_Addrs_IPv4HostRouteSingle(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("1.2.3.4/32")
+func Test_Network_Addrs_IPv4HostRouteSingle(t *testing.T) {
+	network := xnetip.MustParseNetwork("1.2.3.4/32")
 	collected := slices.Collect(network.Addrs())
 	require.Equal(t, []netip.Addr{netip.MustParseAddr("1.2.3.4")}, collected)
 	require.True(t, collected[0].Is4())
@@ -3257,8 +3257,8 @@ func Test_IPNetwork_Addrs_IPv4HostRouteSingle(t *testing.T) {
 
 // verifies that an IPv4-mapped IPv6 network stays IPv6: its items
 // keep the mapped 16-byte form and never unmap to the IPv4 family.
-func Test_IPNetwork_Addrs_MappedIPv6StaysIPv6(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("::ffff:1.2.3.4/126")
+func Test_Network_Addrs_MappedIPv6StaysIPv6(t *testing.T) {
+	network := xnetip.MustParseNetwork("::ffff:1.2.3.4/126")
 	require.True(t, network.Is6())
 	collected := slices.Collect(network.Addrs())
 	require.Len(t, collected, 4)
@@ -3271,8 +3271,8 @@ func Test_IPNetwork_Addrs_MappedIPv6StaysIPv6(t *testing.T) {
 
 // verifies that the IPv4 default route starts at the unspecified
 // address and steps to its successor, in the IPv4 family.
-func Test_IPNetwork_Addrs_IPv4UniverseHead(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("0.0.0.0/0")
+func Test_Network_Addrs_IPv4UniverseHead(t *testing.T) {
+	network := xnetip.MustParseNetwork("0.0.0.0/0")
 	head := collectHead(network.Addrs(), 2)
 	require.Equal(t, []netip.Addr{
 		netip.MustParseAddr("0.0.0.0"),
@@ -3282,8 +3282,8 @@ func Test_IPNetwork_Addrs_IPv4UniverseHead(t *testing.T) {
 
 // verifies that breaking out of the loop stops the sequence after
 // exactly the consumed items.
-func Test_IPNetwork_Addrs_EarlyBreakStops(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("2001:db8::/120")
+func Test_Network_Addrs_EarlyBreakStops(t *testing.T) {
+	network := xnetip.MustParseNetwork("2001:db8::/120")
 	consumed := 0
 	for range network.Addrs() {
 		consumed++
@@ -3296,8 +3296,8 @@ func Test_IPNetwork_Addrs_EarlyBreakStops(t *testing.T) {
 
 // verifies the pinned IPv4 non-contiguous order through the wrapper:
 // the four-bit hole steps the third octet by sixteen, in Is4 items.
-func Test_IPNetwork_Addrs_IPv4NonContiguousPinnedOrder(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("10.0.0.1/255.255.15.255")
+func Test_Network_Addrs_IPv4NonContiguousPinnedOrder(t *testing.T) {
+	network := xnetip.MustParseNetwork("10.0.0.1/255.255.15.255")
 	expected := make([]netip.Addr, 0, 16)
 	for value := range 16 {
 		expected = append(expected, netip.AddrFrom4([4]byte{10, 0, byte(16 * value), 1}))
@@ -3310,8 +3310,8 @@ func Test_IPNetwork_Addrs_IPv4NonContiguousPinnedOrder(t *testing.T) {
 // The host bits sit at positions 12 through 15 and 80 through 83, so
 // index bits 0 through 3 fill the lower run and index bits 4 through
 // 7 the upper one, exactly as in the concrete IPv6 sequence.
-func Test_IPNetwork_Addrs_IPv6NonContiguousTwoRunOrder(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("2001:db8::1/ffff:ffff:fff0:ffff:ffff:ffff:ffff:0fff")
+func Test_Network_Addrs_IPv6NonContiguousTwoRunOrder(t *testing.T) {
+	network := xnetip.MustParseNetwork("2001:db8::1/ffff:ffff:fff0:ffff:ffff:ffff:ffff:0fff")
 	expected := make([]netip.Addr, 0, 256)
 	for value := range 256 {
 		expected = append(expected, netipAddrFrom6Bits(
@@ -3324,21 +3324,21 @@ func Test_IPNetwork_Addrs_IPv6NonContiguousTwoRunOrder(t *testing.T) {
 
 // verifies that the wrapper's sequence equals the concrete type's
 // sequence element by element, for either family.
-func Test_IPNetwork_Addrs_DelegatesToFamilyProperty(t *testing.T) {
+func Test_Network_Addrs_DelegatesToFamilyProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		if rapid.Bool().Draw(t, "is4") {
-			network := drawBoundedIPv4Network(t, 14)
+			network := drawBoundedNetwork4(t, 14)
 			require.Equal(
 				t,
 				slices.Collect(network.Addrs()),
-				slices.Collect(xnetip.IPNetworkFrom4(network).Addrs()),
+				slices.Collect(xnetip.NetworkFrom4(network).Addrs()),
 			)
 		} else {
-			network := drawBoundedIPv6Network(t, 14)
+			network := drawBoundedNetwork6(t, 14)
 			require.Equal(
 				t,
 				slices.Collect(network.Addrs()),
-				slices.Collect(xnetip.IPNetworkFrom6(network).Addrs()),
+				slices.Collect(xnetip.NetworkFrom6(network).Addrs()),
 			)
 		}
 	})
@@ -3346,9 +3346,9 @@ func Test_IPNetwork_Addrs_DelegatesToFamilyProperty(t *testing.T) {
 
 // verifies that every yielded address carries the network's own
 // address family, probing the head of unbounded draws.
-func Test_IPNetwork_Addrs_FamilyMatchesNetworkProperty(t *testing.T) {
+func Test_Network_Addrs_FamilyMatchesNetworkProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
+		network := genNetwork.Draw(t, "network")
 		for _, addr := range collectHead(network.Addrs(), 8) {
 			require.Equal(t, network.Is4(), addr.Is4())
 			require.Equal(t, network.Is6(), addr.Is6())
@@ -3358,13 +3358,13 @@ func Test_IPNetwork_Addrs_FamilyMatchesNetworkProperty(t *testing.T) {
 
 // verifies on bounded spaces that the yielded count is exactly two to
 // the number of host bits, in either family.
-func Test_IPNetwork_Addrs_CountMatchesHostBitsProperty(t *testing.T) {
+func Test_Network_Addrs_CountMatchesHostBitsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		var network xnetip.IPNetwork
+		var network xnetip.Network
 		if rapid.Bool().Draw(t, "is4") {
-			network = xnetip.IPNetworkFrom4(drawBoundedIPv4Network(t, 14))
+			network = xnetip.NetworkFrom4(drawBoundedNetwork4(t, 14))
 		} else {
-			network = xnetip.IPNetworkFrom6(drawBoundedIPv6Network(t, 14))
+			network = xnetip.NetworkFrom6(drawBoundedNetwork6(t, 14))
 		}
 		count := 0
 		for range network.Addrs() {
@@ -3376,9 +3376,9 @@ func Test_IPNetwork_Addrs_CountMatchesHostBitsProperty(t *testing.T) {
 
 // verifies that a full drain of the sequence performs no allocation
 // in either family.
-func Test_IPNetwork_Addrs_AllocationFree(t *testing.T) {
-	four := xnetip.MustParseIPNetwork("192.168.1.0/24")
-	six := xnetip.MustParseIPNetwork("2a02:6b8:c00::1234:0:0/120")
+func Test_Network_Addrs_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseNetwork("192.168.1.0/24")
+	six := xnetip.MustParseNetwork("2a02:6b8:c00::1234:0:0/120")
 	requireNoAllocs(t, func() {
 		for addr := range four.Addrs() {
 			addrSink = addr
@@ -3393,22 +3393,22 @@ func Test_IPNetwork_Addrs_AllocationFree(t *testing.T) {
 
 // verifies that merging works within a family, never across families,
 // and keeps the family of its inputs.
-func Test_IPNetwork_Merge_FamiliesAndBoundary(t *testing.T) {
+func Test_Network_Merge_FamiliesAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
-		want  xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
+		want  xnetip.Network
 		ok    bool
 	}{
-		{name: "IPv4 siblings", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: xnetip.MustParseIPNetwork("192.168.0.0/23"), ok: true},
-		{name: "IPv6 siblings", left: xnetip.MustParseIPNetwork("2001:db8::/48"), right: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: xnetip.MustParseIPNetwork("2001:db8::/47"), ok: true},
-		{name: "mixed families", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), ok: false},
-		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("192.168.0.0/24"), ok: false},
-		{name: "IPv4 containment", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("10.1.0.0/16"), want: xnetip.MustParseIPNetwork("10.0.0.0/8"), ok: true},
-		{name: "IPv4 non-mergeable", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.3.0/24"), ok: false},
-		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.IPNetwork{}, ok: false},
-		{name: "mapped IPv6 network vs the IPv4 it encodes", left: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), ok: false},
+		{name: "IPv4 siblings", left: xnetip.MustParseNetwork("192.168.0.0/24"), right: xnetip.MustParseNetwork("192.168.1.0/24"), want: xnetip.MustParseNetwork("192.168.0.0/23"), ok: true},
+		{name: "IPv6 siblings", left: xnetip.MustParseNetwork("2001:db8::/48"), right: xnetip.MustParseNetwork("2001:db8:1::/48"), want: xnetip.MustParseNetwork("2001:db8::/47"), ok: true},
+		{name: "mixed families", left: xnetip.MustParseNetwork("192.168.0.0/24"), right: xnetip.MustParseNetwork("2001:db8::/32"), ok: false},
+		{name: "mixed families reversed", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("192.168.0.0/24"), ok: false},
+		{name: "IPv4 containment", left: xnetip.MustParseNetwork("10.0.0.0/8"), right: xnetip.MustParseNetwork("10.1.0.0/16"), want: xnetip.MustParseNetwork("10.0.0.0/8"), ok: true},
+		{name: "IPv4 non-mergeable", left: xnetip.MustParseNetwork("192.168.0.0/24"), right: xnetip.MustParseNetwork("192.168.3.0/24"), ok: false},
+		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseNetwork("0.0.0.0/0"), right: xnetip.Network{}, ok: false},
+		{name: "mapped IPv6 network vs the IPv4 it encodes", left: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), right: xnetip.MustParseNetwork("10.0.0.0/8"), ok: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3421,26 +3421,26 @@ func Test_IPNetwork_Merge_FamiliesAndBoundary(t *testing.T) {
 
 // verifies that an IPv4 sibling merge at a higher bit stays an IPv4
 // network even though the result mask turns non-contiguous.
-func Test_IPNetwork_Merge_NonContiguousResultKeepsFamily(t *testing.T) {
-	left := xnetip.MustParseIPNetwork("10.0.0.0/24")
-	right := xnetip.MustParseIPNetwork("10.0.2.0/24")
+func Test_Network_Merge_NonContiguousResultKeepsFamily(t *testing.T) {
+	left := xnetip.MustParseNetwork("10.0.0.0/24")
+	right := xnetip.MustParseNetwork("10.0.2.0/24")
 	merged, ok := left.Merge(right)
 	require.True(t, ok)
-	require.Equal(t, xnetip.MustParseIPNetwork("10.0.0.0/255.255.253.0"), merged)
+	require.Equal(t, xnetip.MustParseNetwork("10.0.0.0/255.255.253.0"), merged)
 	require.True(t, merged.Is4())
 }
 
 // verifies that non-contiguous sibling merges of both families flow
 // through the wrapper.
-func Test_IPNetwork_Merge_NonContiguousMasks(t *testing.T) {
+func Test_Network_Merge_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
-		want  xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
+		want  xnetip.Network
 	}{
-		{name: "IPv4 pattern siblings", left: xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPNetwork("10.1.0.1/255.255.0.255"), want: xnetip.MustParseIPNetwork("10.0.0.1/255.254.0.255")},
-		{name: "IPv6 pattern siblings", left: xnetip.MustParseIPNetwork("2001::1/ffff:ff00::ffff"), right: xnetip.MustParseIPNetwork("2001:100::1/ffff:ff00::ffff"), want: xnetip.MustParseIPNetwork("2001::1/ffff:fe00::ffff")},
+		{name: "IPv4 pattern siblings", left: xnetip.MustParseNetwork("10.0.0.1/255.255.0.255"), right: xnetip.MustParseNetwork("10.1.0.1/255.255.0.255"), want: xnetip.MustParseNetwork("10.0.0.1/255.254.0.255")},
+		{name: "IPv6 pattern siblings", left: xnetip.MustParseNetwork("2001::1/ffff:ff00::ffff"), right: xnetip.MustParseNetwork("2001:100::1/ffff:ff00::ffff"), want: xnetip.MustParseNetwork("2001::1/ffff:fe00::ffff")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3458,38 +3458,38 @@ func Test_IPNetwork_Merge_NonContiguousMasks(t *testing.T) {
 // the lowest set mask bit of the address, so every draw with a
 // non-empty mask exercises the merge case that random pairs almost
 // never hit.
-func Test_IPNetwork_Merge_AgreesWithConcreteProperty(t *testing.T) {
+func Test_Network_Merge_AgreesWithConcreteProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left4 := genIPv4Network.Draw(t, "left4")
-		right4 := genIPv4Network.Draw(t, "right4")
+		left4 := genNetwork4.Draw(t, "left4")
+		right4 := genNetwork4.Draw(t, "right4")
 		want4, wantOK4 := left4.Merge(right4)
-		merged4, ok4 := xnetip.IPNetworkFrom4(left4).Merge(xnetip.IPNetworkFrom4(right4))
+		merged4, ok4 := xnetip.NetworkFrom4(left4).Merge(xnetip.NetworkFrom4(right4))
 		require.Equal(t, wantOK4, ok4)
 		if ok4 {
-			require.Equal(t, xnetip.IPNetworkFrom4(want4), merged4)
+			require.Equal(t, xnetip.NetworkFrom4(want4), merged4)
 			require.True(t, merged4.Is4())
 		}
 		addrBits, maskBits := ipv4NetworkBits(left4)
 		if maskBits != 0 {
-			sibling, err := xnetip.IPv4NetworkFrom(
+			sibling, err := xnetip.Network4From(
 				netipAddrFrom4Bits(addrBits^(maskBits&-maskBits)),
 				netipAddrFrom4Bits(maskBits),
 			)
 			require.NoError(t, err)
 			wantSibling, wantSiblingOK := left4.Merge(sibling)
 			require.True(t, wantSiblingOK)
-			mergedSibling, ok := xnetip.IPNetworkFrom4(left4).Merge(xnetip.IPNetworkFrom4(sibling))
+			mergedSibling, ok := xnetip.NetworkFrom4(left4).Merge(xnetip.NetworkFrom4(sibling))
 			require.True(t, ok)
-			require.Equal(t, xnetip.IPNetworkFrom4(wantSibling), mergedSibling)
+			require.Equal(t, xnetip.NetworkFrom4(wantSibling), mergedSibling)
 			require.True(t, mergedSibling.Is4())
 		}
-		left6 := genIPv6Network.Draw(t, "left6")
-		right6 := genIPv6Network.Draw(t, "right6")
+		left6 := genNetwork6.Draw(t, "left6")
+		right6 := genNetwork6.Draw(t, "right6")
 		want6, wantOK6 := left6.Merge(right6)
-		merged6, ok6 := xnetip.IPNetworkFrom6(left6).Merge(xnetip.IPNetworkFrom6(right6))
+		merged6, ok6 := xnetip.NetworkFrom6(left6).Merge(xnetip.NetworkFrom6(right6))
 		require.Equal(t, wantOK6, ok6)
 		if ok6 {
-			require.Equal(t, xnetip.IPNetworkFrom6(want6), merged6)
+			require.Equal(t, xnetip.NetworkFrom6(want6), merged6)
 			require.True(t, merged6.Is6())
 		}
 	})
@@ -3497,10 +3497,10 @@ func Test_IPNetwork_Merge_AgreesWithConcreteProperty(t *testing.T) {
 
 // verifies that networks of different families never merge, whatever
 // their masks.
-func Test_IPNetwork_Merge_CrossFamilyNeverMergesProperty(t *testing.T) {
+func Test_Network_Merge_CrossFamilyNeverMergesProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
-		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		network4 := xnetip.NetworkFrom4(genNetwork4.Draw(t, "network4"))
+		network6 := xnetip.NetworkFrom6(genNetwork6.Draw(t, "network6"))
 		_, ok := network4.Merge(network6)
 		require.False(t, ok)
 		_, ok = network6.Merge(network4)
@@ -3510,10 +3510,10 @@ func Test_IPNetwork_Merge_CrossFamilyNeverMergesProperty(t *testing.T) {
 
 // verifies that merging is commutative in both the value and the
 // flag, whatever the families.
-func Test_IPNetwork_Merge_CommutativityProperty(t *testing.T) {
+func Test_Network_Merge_CommutativityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPNetwork.Draw(t, "left")
-		right := genIPNetwork.Draw(t, "right")
+		left := genNetwork.Draw(t, "left")
+		right := genNetwork.Draw(t, "right")
 		leftMerged, leftOK := left.Merge(right)
 		rightMerged, rightOK := right.Merge(left)
 		require.Equal(t, leftOK, rightOK)
@@ -3522,11 +3522,11 @@ func Test_IPNetwork_Merge_CommutativityProperty(t *testing.T) {
 }
 
 // verifies that merging allocates nothing in either family.
-func Test_IPNetwork_Merge_AllocationFree(t *testing.T) {
-	four := xnetip.MustParseIPNetwork("192.168.0.0/24")
-	fourBuddy := xnetip.MustParseIPNetwork("192.168.1.0/24")
-	six := xnetip.MustParseIPNetwork("2001:db8::/48")
-	sixBuddy := xnetip.MustParseIPNetwork("2001:db8:1::/48")
+func Test_Network_Merge_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseNetwork("192.168.0.0/24")
+	fourBuddy := xnetip.MustParseNetwork("192.168.1.0/24")
+	six := xnetip.MustParseNetwork("2001:db8::/48")
+	sixBuddy := xnetip.MustParseNetwork("2001:db8:1::/48")
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = four.Merge(fourBuddy) })
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = six.Merge(sixBuddy) })
 }
@@ -3537,22 +3537,22 @@ func Test_IPNetwork_Merge_AllocationFree(t *testing.T) {
 // Two IPv4 default routes are the pitfall of mapped storage: their
 // stored /96 masks are equal and non-empty, but their addresses are
 // equal too, so the 128-bit predicate still refuses them.
-func Test_IPNetwork_IsAdjacentByLowestMaskBit_FamiliesAndBoundary(t *testing.T) {
+func Test_Network_IsAdjacentByLowestMaskBit_FamiliesAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
 		want  bool
 	}{
-		{name: "IPv4 CIDR siblings", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: true},
-		{name: "IPv6 CIDR siblings", left: xnetip.MustParseIPNetwork("2001:db8::/48"), right: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: true},
-		{name: "mixed families", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
-		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
-		{name: "IPv4 adjacent at the top bit", left: xnetip.MustParseIPNetwork("0.0.0.0/2"), right: xnetip.MustParseIPNetwork("128.0.0.0/2"), want: false},
-		{name: "IPv4 default route with itself", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.MustParseIPNetwork("0.0.0.0/0"), want: false},
-		{name: "IPv6 default route with itself", left: xnetip.MustParseIPNetwork("::/0"), right: xnetip.MustParseIPNetwork("::/0"), want: false},
-		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.IPNetwork{}, want: false},
-		{name: "mapped IPv6 siblings vs IPv4 siblings", left: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/120"), right: xnetip.MustParseIPNetwork("10.0.0.0/24"), want: false},
+		{name: "IPv4 CIDR siblings", left: xnetip.MustParseNetwork("192.168.0.0/24"), right: xnetip.MustParseNetwork("192.168.1.0/24"), want: true},
+		{name: "IPv6 CIDR siblings", left: xnetip.MustParseNetwork("2001:db8::/48"), right: xnetip.MustParseNetwork("2001:db8:1::/48"), want: true},
+		{name: "mixed families", left: xnetip.MustParseNetwork("10.0.0.0/8"), right: xnetip.MustParseNetwork("2001:db8::/32"), want: false},
+		{name: "mixed families reversed", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv4 adjacent at the top bit", left: xnetip.MustParseNetwork("0.0.0.0/2"), right: xnetip.MustParseNetwork("128.0.0.0/2"), want: false},
+		{name: "IPv4 default route with itself", left: xnetip.MustParseNetwork("0.0.0.0/0"), right: xnetip.MustParseNetwork("0.0.0.0/0"), want: false},
+		{name: "IPv6 default route with itself", left: xnetip.MustParseNetwork("::/0"), right: xnetip.MustParseNetwork("::/0"), want: false},
+		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseNetwork("0.0.0.0/0"), right: xnetip.Network{}, want: false},
+		{name: "mapped IPv6 siblings vs IPv4 siblings", left: xnetip.MustParseNetwork("::ffff:10.0.0.0/120"), right: xnetip.MustParseNetwork("10.0.0.0/24"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3563,16 +3563,16 @@ func Test_IPNetwork_IsAdjacentByLowestMaskBit_FamiliesAndBoundary(t *testing.T) 
 
 // verifies that non-contiguous lowest-bit adjacency of both families
 // flows through the wrapper.
-func Test_IPNetwork_IsAdjacentByLowestMaskBit_NonContiguousMasks(t *testing.T) {
+func Test_Network_IsAdjacentByLowestMaskBit_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
 		want  bool
 	}{
-		{name: "IPv4 two-run mask at its lowest bit", left: xnetip.MustParseIPNetwork("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255"), want: true},
-		{name: "IPv4 two-run mask at the higher boundary", left: xnetip.MustParseIPNetwork("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPNetwork("10.1.0.0/255.255.0.255"), want: false},
-		{name: "IPv6 two-run mask at its lowest bit", left: xnetip.MustParseIPNetwork("::/ffff:ffff::ffff"), right: xnetip.MustParseIPNetwork("::1/ffff:ffff::ffff"), want: true},
+		{name: "IPv4 two-run mask at its lowest bit", left: xnetip.MustParseNetwork("10.0.0.0/255.255.0.255"), right: xnetip.MustParseNetwork("10.0.0.1/255.255.0.255"), want: true},
+		{name: "IPv4 two-run mask at the higher boundary", left: xnetip.MustParseNetwork("10.0.0.0/255.255.0.255"), right: xnetip.MustParseNetwork("10.1.0.0/255.255.0.255"), want: false},
+		{name: "IPv6 two-run mask at its lowest bit", left: xnetip.MustParseNetwork("::/ffff:ffff::ffff"), right: xnetip.MustParseNetwork("::1/ffff:ffff::ffff"), want: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3587,41 +3587,41 @@ func Test_IPNetwork_IsAdjacentByLowestMaskBit_NonContiguousMasks(t *testing.T) {
 // The buddy flips the lowest set mask bit of the address, so every
 // draw with a non-empty mask exercises the accepting case that
 // random pairs almost never hit.
-func Test_IPNetwork_IsAdjacentByLowestMaskBit_AgreesWithConcreteProperty(t *testing.T) {
+func Test_Network_IsAdjacentByLowestMaskBit_AgreesWithConcreteProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left4 := genIPv4Network.Draw(t, "left4")
-		right4 := genIPv4Network.Draw(t, "right4")
+		left4 := genNetwork4.Draw(t, "left4")
+		right4 := genNetwork4.Draw(t, "right4")
 		require.Equal(
 			t,
 			left4.IsAdjacentByLowestMaskBit(right4),
-			xnetip.IPNetworkFrom4(left4).IsAdjacentByLowestMaskBit(xnetip.IPNetworkFrom4(right4)),
+			xnetip.NetworkFrom4(left4).IsAdjacentByLowestMaskBit(xnetip.NetworkFrom4(right4)),
 		)
 		addrBits, maskBits := ipv4NetworkBits(left4)
 		if maskBits != 0 {
-			buddy, err := xnetip.IPv4NetworkFrom(
+			buddy, err := xnetip.Network4From(
 				netipAddrFrom4Bits(addrBits^(maskBits&-maskBits)),
 				netipAddrFrom4Bits(maskBits),
 			)
 			require.NoError(t, err)
 			require.True(t, left4.IsAdjacentByLowestMaskBit(buddy))
-			require.True(t, xnetip.IPNetworkFrom4(left4).IsAdjacentByLowestMaskBit(xnetip.IPNetworkFrom4(buddy)))
+			require.True(t, xnetip.NetworkFrom4(left4).IsAdjacentByLowestMaskBit(xnetip.NetworkFrom4(buddy)))
 		}
-		left6 := genIPv6Network.Draw(t, "left6")
-		right6 := genIPv6Network.Draw(t, "right6")
+		left6 := genNetwork6.Draw(t, "left6")
+		right6 := genNetwork6.Draw(t, "right6")
 		require.Equal(
 			t,
 			left6.IsAdjacentByLowestMaskBit(right6),
-			xnetip.IPNetworkFrom6(left6).IsAdjacentByLowestMaskBit(xnetip.IPNetworkFrom6(right6)),
+			xnetip.NetworkFrom6(left6).IsAdjacentByLowestMaskBit(xnetip.NetworkFrom6(right6)),
 		)
 	})
 }
 
 // verifies that networks of different families never qualify,
 // whatever their masks.
-func Test_IPNetwork_IsAdjacentByLowestMaskBit_CrossFamilyAlwaysFalseProperty(t *testing.T) {
+func Test_Network_IsAdjacentByLowestMaskBit_CrossFamilyAlwaysFalseProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
-		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		network4 := xnetip.NetworkFrom4(genNetwork4.Draw(t, "network4"))
+		network6 := xnetip.NetworkFrom6(genNetwork6.Draw(t, "network6"))
 		require.False(t, network4.IsAdjacentByLowestMaskBit(network6))
 		require.False(t, network6.IsAdjacentByLowestMaskBit(network4))
 	})
@@ -3629,42 +3629,42 @@ func Test_IPNetwork_IsAdjacentByLowestMaskBit_CrossFamilyAlwaysFalseProperty(t *
 
 // verifies that the predicate is symmetric and irreflexive, whatever
 // the families of the operands.
-func Test_IPNetwork_IsAdjacentByLowestMaskBit_SymmetryProperty(t *testing.T) {
+func Test_Network_IsAdjacentByLowestMaskBit_SymmetryProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPNetwork.Draw(t, "left")
-		right := genIPNetwork.Draw(t, "right")
+		left := genNetwork.Draw(t, "left")
+		right := genNetwork.Draw(t, "right")
 		require.Equal(t, left.IsAdjacentByLowestMaskBit(right), right.IsAdjacentByLowestMaskBit(left))
 		require.False(t, left.IsAdjacentByLowestMaskBit(left))
 	})
 }
 
 // verifies that the predicate allocates nothing in either family.
-func Test_IPNetwork_IsAdjacentByLowestMaskBit_AllocationFree(t *testing.T) {
-	four := xnetip.MustParseIPNetwork("10.0.0.0/255.255.0.255")
-	fourBuddy := xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255")
-	six := xnetip.MustParseIPNetwork("::/ffff:ffff::ffff")
-	sixBuddy := xnetip.MustParseIPNetwork("::1/ffff:ffff::ffff")
+func Test_Network_IsAdjacentByLowestMaskBit_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseNetwork("10.0.0.0/255.255.0.255")
+	fourBuddy := xnetip.MustParseNetwork("10.0.0.1/255.255.0.255")
+	six := xnetip.MustParseNetwork("::/ffff:ffff::ffff")
+	sixBuddy := xnetip.MustParseNetwork("::1/ffff:ffff::ffff")
 	requireNoAllocs(t, func() { okSink = four.IsAdjacentByLowestMaskBit(fourBuddy) })
 	requireNoAllocs(t, func() { okSink = six.IsAdjacentByLowestMaskBit(sixBuddy) })
 }
 
 // verifies that the class-closed merge works within a family, never
 // across families, and keeps the family of its inputs.
-func Test_IPNetwork_MergeByLowestMaskBit_FamiliesAndBoundary(t *testing.T) {
+func Test_Network_MergeByLowestMaskBit_FamiliesAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPNetwork
-		right xnetip.IPNetwork
-		want  xnetip.IPNetwork
+		left  xnetip.Network
+		right xnetip.Network
+		want  xnetip.Network
 		ok    bool
 	}{
-		{name: "IPv4 siblings", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: xnetip.MustParseIPNetwork("192.168.0.0/23"), ok: true},
-		{name: "IPv6 siblings", left: xnetip.MustParseIPNetwork("2001:db8::/48"), right: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: xnetip.MustParseIPNetwork("2001:db8::/47"), ok: true},
-		{name: "mixed families", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), ok: false},
-		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), ok: false},
-		{name: "IPv4 default route absorbs an IPv4 network", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: xnetip.MustParseIPNetwork("0.0.0.0/0"), ok: true},
-		{name: "IPv4 higher-bit adjacency refused", left: xnetip.MustParseIPNetwork("0.0.0.0/2"), right: xnetip.MustParseIPNetwork("128.0.0.0/2"), ok: false},
-		{name: "mapped IPv6 network vs IPv4 network stay foreign", left: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), ok: false},
+		{name: "IPv4 siblings", left: xnetip.MustParseNetwork("192.168.0.0/24"), right: xnetip.MustParseNetwork("192.168.1.0/24"), want: xnetip.MustParseNetwork("192.168.0.0/23"), ok: true},
+		{name: "IPv6 siblings", left: xnetip.MustParseNetwork("2001:db8::/48"), right: xnetip.MustParseNetwork("2001:db8:1::/48"), want: xnetip.MustParseNetwork("2001:db8::/47"), ok: true},
+		{name: "mixed families", left: xnetip.MustParseNetwork("10.0.0.0/8"), right: xnetip.MustParseNetwork("2001:db8::/32"), ok: false},
+		{name: "mixed families reversed", left: xnetip.MustParseNetwork("2001:db8::/32"), right: xnetip.MustParseNetwork("10.0.0.0/8"), ok: false},
+		{name: "IPv4 default route absorbs an IPv4 network", left: xnetip.MustParseNetwork("0.0.0.0/0"), right: xnetip.MustParseNetwork("10.0.0.0/8"), want: xnetip.MustParseNetwork("0.0.0.0/0"), ok: true},
+		{name: "IPv4 higher-bit adjacency refused", left: xnetip.MustParseNetwork("0.0.0.0/2"), right: xnetip.MustParseNetwork("128.0.0.0/2"), ok: false},
+		{name: "mapped IPv6 network vs IPv4 network stay foreign", left: xnetip.MustParseNetwork("::ffff:10.0.0.0/104"), right: xnetip.MustParseNetwork("10.0.0.0/8"), ok: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3677,9 +3677,9 @@ func Test_IPNetwork_MergeByLowestMaskBit_FamiliesAndBoundary(t *testing.T) {
 
 // verifies that an IPv4 default-route containment result keeps the
 // IPv4 family through the mapped storage form.
-func Test_IPNetwork_MergeByLowestMaskBit_ContainmentKeepsFamily(t *testing.T) {
-	universe := xnetip.MustParseIPNetwork("0.0.0.0/0")
-	contained := xnetip.MustParseIPNetwork("10.0.0.0/8")
+func Test_Network_MergeByLowestMaskBit_ContainmentKeepsFamily(t *testing.T) {
+	universe := xnetip.MustParseNetwork("0.0.0.0/0")
+	contained := xnetip.MustParseNetwork("10.0.0.0/8")
 	merged, ok := universe.MergeByLowestMaskBit(contained)
 	require.True(t, ok)
 	require.True(t, merged.Is4())
@@ -3688,15 +3688,15 @@ func Test_IPNetwork_MergeByLowestMaskBit_ContainmentKeepsFamily(t *testing.T) {
 
 // verifies that non-contiguous merges of both families flow through
 // the wrapper with their family preserved.
-func Test_IPNetwork_MergeByLowestMaskBit_NonContiguousMasks(t *testing.T) {
-	fourLeft := xnetip.MustParseIPNetwork("10.0.0.0/255.255.0.255")
-	fourRight := xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255")
+func Test_Network_MergeByLowestMaskBit_NonContiguousMasks(t *testing.T) {
+	fourLeft := xnetip.MustParseNetwork("10.0.0.0/255.255.0.255")
+	fourRight := xnetip.MustParseNetwork("10.0.0.1/255.255.0.255")
 	merged, ok := fourLeft.MergeByLowestMaskBit(fourRight)
 	require.True(t, ok)
-	require.Equal(t, xnetip.MustParseIPNetwork("10.0.0.0/255.255.0.254"), merged)
+	require.Equal(t, xnetip.MustParseNetwork("10.0.0.0/255.255.0.254"), merged)
 	require.True(t, merged.Is4())
-	sixLeft := xnetip.MustParseIPNetwork("2001::1/ffff:ff00::ffff")
-	sixRight := xnetip.MustParseIPNetwork("2001:100::1/ffff:ff00::ffff")
+	sixLeft := xnetip.MustParseNetwork("2001::1/ffff:ff00::ffff")
+	sixRight := xnetip.MustParseNetwork("2001:100::1/ffff:ff00::ffff")
 	_, ok = sixLeft.MergeByLowestMaskBit(sixRight)
 	require.False(t, ok)
 }
@@ -3706,49 +3706,49 @@ func Test_IPNetwork_MergeByLowestMaskBit_NonContiguousMasks(t *testing.T) {
 //
 // A successful result must keep the inputs' family. The buddy pairs
 // exercise the sibling case that random pairs almost never hit.
-func Test_IPNetwork_MergeByLowestMaskBit_AgreesWithConcreteProperty(t *testing.T) {
+func Test_Network_MergeByLowestMaskBit_AgreesWithConcreteProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left4 := genIPv4Network.Draw(t, "left4")
-		right4 := genIPv4Network.Draw(t, "right4")
+		left4 := genNetwork4.Draw(t, "left4")
+		right4 := genNetwork4.Draw(t, "right4")
 		want4, wantOK4 := left4.MergeByLowestMaskBit(right4)
-		merged4, ok4 := xnetip.IPNetworkFrom4(left4).MergeByLowestMaskBit(xnetip.IPNetworkFrom4(right4))
+		merged4, ok4 := xnetip.NetworkFrom4(left4).MergeByLowestMaskBit(xnetip.NetworkFrom4(right4))
 		require.Equal(t, wantOK4, ok4)
 		if ok4 {
-			require.Equal(t, xnetip.IPNetworkFrom4(want4), merged4)
+			require.Equal(t, xnetip.NetworkFrom4(want4), merged4)
 			require.True(t, merged4.Is4())
 		}
 		pair4 := genIPv4LowestBitSiblingPair.Draw(t, "pair4")
 		wantSibling4, wantSiblingOK4 := pair4[0].MergeByLowestMaskBit(pair4[1])
 		require.True(t, wantSiblingOK4)
-		mergedSibling4, ok := xnetip.IPNetworkFrom4(pair4[0]).MergeByLowestMaskBit(xnetip.IPNetworkFrom4(pair4[1]))
+		mergedSibling4, ok := xnetip.NetworkFrom4(pair4[0]).MergeByLowestMaskBit(xnetip.NetworkFrom4(pair4[1]))
 		require.True(t, ok)
-		require.Equal(t, xnetip.IPNetworkFrom4(wantSibling4), mergedSibling4)
+		require.Equal(t, xnetip.NetworkFrom4(wantSibling4), mergedSibling4)
 		require.True(t, mergedSibling4.Is4())
-		left6 := genIPv6Network.Draw(t, "left6")
-		right6 := genIPv6Network.Draw(t, "right6")
+		left6 := genNetwork6.Draw(t, "left6")
+		right6 := genNetwork6.Draw(t, "right6")
 		want6, wantOK6 := left6.MergeByLowestMaskBit(right6)
-		merged6, ok6 := xnetip.IPNetworkFrom6(left6).MergeByLowestMaskBit(xnetip.IPNetworkFrom6(right6))
+		merged6, ok6 := xnetip.NetworkFrom6(left6).MergeByLowestMaskBit(xnetip.NetworkFrom6(right6))
 		require.Equal(t, wantOK6, ok6)
 		if ok6 {
-			require.Equal(t, xnetip.IPNetworkFrom6(want6), merged6)
+			require.Equal(t, xnetip.NetworkFrom6(want6), merged6)
 			require.True(t, merged6.Is6())
 		}
 		pair6 := genIPv6LowestBitSiblingPair.Draw(t, "pair6")
 		wantSibling6, wantSiblingOK6 := pair6[0].MergeByLowestMaskBit(pair6[1])
 		require.True(t, wantSiblingOK6)
-		mergedSibling6, ok := xnetip.IPNetworkFrom6(pair6[0]).MergeByLowestMaskBit(xnetip.IPNetworkFrom6(pair6[1]))
+		mergedSibling6, ok := xnetip.NetworkFrom6(pair6[0]).MergeByLowestMaskBit(xnetip.NetworkFrom6(pair6[1]))
 		require.True(t, ok)
-		require.Equal(t, xnetip.IPNetworkFrom6(wantSibling6), mergedSibling6)
+		require.Equal(t, xnetip.NetworkFrom6(wantSibling6), mergedSibling6)
 		require.True(t, mergedSibling6.Is6())
 	})
 }
 
 // verifies that networks of different families never merge, whatever
 // their masks.
-func Test_IPNetwork_MergeByLowestMaskBit_CrossFamilyNeverMergesProperty(t *testing.T) {
+func Test_Network_MergeByLowestMaskBit_CrossFamilyNeverMergesProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
-		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		network4 := xnetip.NetworkFrom4(genNetwork4.Draw(t, "network4"))
+		network6 := xnetip.NetworkFrom6(genNetwork6.Draw(t, "network6"))
 		_, ok := network4.MergeByLowestMaskBit(network6)
 		require.False(t, ok)
 		_, ok = network6.MergeByLowestMaskBit(network4)
@@ -3757,32 +3757,32 @@ func Test_IPNetwork_MergeByLowestMaskBit_CrossFamilyNeverMergesProperty(t *testi
 }
 
 // verifies that the merge allocates nothing in either family.
-func Test_IPNetwork_MergeByLowestMaskBit_AllocationFree(t *testing.T) {
-	four := xnetip.MustParseIPNetwork("192.168.0.0/24")
-	fourBuddy := xnetip.MustParseIPNetwork("192.168.1.0/24")
-	six := xnetip.MustParseIPNetwork("2001:db8::/48")
-	sixBuddy := xnetip.MustParseIPNetwork("2001:db8:1::/48")
+func Test_Network_MergeByLowestMaskBit_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseNetwork("192.168.0.0/24")
+	fourBuddy := xnetip.MustParseNetwork("192.168.1.0/24")
+	six := xnetip.MustParseNetwork("2001:db8::/48")
+	sixBuddy := xnetip.MustParseNetwork("2001:db8:1::/48")
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = four.MergeByLowestMaskBit(fourBuddy) })
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = six.MergeByLowestMaskBit(sixBuddy) })
 }
 
 // verifies that the fold works within either family, never across
 // families, and keeps the family of its inputs.
-func Test_IPNetwork_SupernetFor_FamiliesAndBoundary(t *testing.T) {
+func Test_Network_SupernetFor_FamiliesAndBoundary(t *testing.T) {
 	cases := []struct {
 		name     string
-		receiver xnetip.IPNetwork
-		nets     []xnetip.IPNetwork
-		want     xnetip.IPNetwork
+		receiver xnetip.Network
+		nets     []xnetip.Network
+		want     xnetip.Network
 		ok       bool
 	}{
-		{name: "IPv4 halves fold to the /24", receiver: xnetip.MustParseIPNetwork("192.0.2.0/25"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("192.0.2.128/25")}, want: xnetip.MustParseIPNetwork("192.0.2.0/24"), ok: true},
-		{name: "IPv6 pair folds to the shared /32", receiver: xnetip.MustParseIPNetwork("2001:db8:1::/32"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("2001:db8:2::/39")}, want: xnetip.MustParseIPNetwork("2001:db8::/32"), ok: true},
-		{name: "empty slice returns the IPv4 receiver", receiver: xnetip.MustParseIPNetwork("10.0.0.0/8"), nets: nil, want: xnetip.MustParseIPNetwork("10.0.0.0/8"), ok: true},
-		{name: "empty slice returns the IPv6 receiver", receiver: xnetip.MustParseIPNetwork("2001:db8::/32"), nets: nil, want: xnetip.MustParseIPNetwork("2001:db8::/32"), ok: true},
-		{name: "mixed slice with an IPv4 receiver", receiver: xnetip.MustParseIPNetwork("10.0.0.0/8"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("10.1.0.0/16"), xnetip.MustParseIPNetwork("2001:db8::/32")}, ok: false},
-		{name: "mixed slice with an IPv6 receiver", receiver: xnetip.MustParseIPNetwork("2001:db8::/32"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("10.0.0.0/8")}, ok: false},
-		{name: "mapped IPv6 element is foreign to an IPv4 receiver", receiver: xnetip.MustParseIPNetwork("10.0.0.0/8"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104")}, ok: false},
+		{name: "IPv4 halves fold to the /24", receiver: xnetip.MustParseNetwork("192.0.2.0/25"), nets: []xnetip.Network{xnetip.MustParseNetwork("192.0.2.128/25")}, want: xnetip.MustParseNetwork("192.0.2.0/24"), ok: true},
+		{name: "IPv6 pair folds to the shared /32", receiver: xnetip.MustParseNetwork("2001:db8:1::/32"), nets: []xnetip.Network{xnetip.MustParseNetwork("2001:db8:2::/39")}, want: xnetip.MustParseNetwork("2001:db8::/32"), ok: true},
+		{name: "empty slice returns the IPv4 receiver", receiver: xnetip.MustParseNetwork("10.0.0.0/8"), nets: nil, want: xnetip.MustParseNetwork("10.0.0.0/8"), ok: true},
+		{name: "empty slice returns the IPv6 receiver", receiver: xnetip.MustParseNetwork("2001:db8::/32"), nets: nil, want: xnetip.MustParseNetwork("2001:db8::/32"), ok: true},
+		{name: "mixed slice with an IPv4 receiver", receiver: xnetip.MustParseNetwork("10.0.0.0/8"), nets: []xnetip.Network{xnetip.MustParseNetwork("10.1.0.0/16"), xnetip.MustParseNetwork("2001:db8::/32")}, ok: false},
+		{name: "mixed slice with an IPv6 receiver", receiver: xnetip.MustParseNetwork("2001:db8::/32"), nets: []xnetip.Network{xnetip.MustParseNetwork("10.0.0.0/8")}, ok: false},
+		{name: "mapped IPv6 element is foreign to an IPv4 receiver", receiver: xnetip.MustParseNetwork("10.0.0.0/8"), nets: []xnetip.Network{xnetip.MustParseNetwork("::ffff:10.0.0.0/104")}, ok: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3795,25 +3795,25 @@ func Test_IPNetwork_SupernetFor_FamiliesAndBoundary(t *testing.T) {
 
 // verifies that an IPv4 fold whose result mask turns non-contiguous
 // stays an IPv4 network.
-func Test_IPNetwork_SupernetFor_NonContiguousResultKeepsFamily(t *testing.T) {
-	receiver := xnetip.MustParseIPNetwork("10.0.0.0/24")
-	result, ok := receiver.SupernetFor([]xnetip.IPNetwork{xnetip.MustParseIPNetwork("10.1.0.0/24")})
+func Test_Network_SupernetFor_NonContiguousResultKeepsFamily(t *testing.T) {
+	receiver := xnetip.MustParseNetwork("10.0.0.0/24")
+	result, ok := receiver.SupernetFor([]xnetip.Network{xnetip.MustParseNetwork("10.1.0.0/24")})
 	require.True(t, ok)
-	require.Equal(t, xnetip.MustParseIPNetwork("10.0.0.0/255.254.255.0"), result)
+	require.Equal(t, xnetip.MustParseNetwork("10.0.0.0/255.254.255.0"), result)
 	require.True(t, result.Is4())
 }
 
 // verifies that non-contiguous folds of both families flow through
 // the wrapper.
-func Test_IPNetwork_SupernetFor_NonContiguousMasks(t *testing.T) {
+func Test_Network_SupernetFor_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name     string
-		receiver xnetip.IPNetwork
-		nets     []xnetip.IPNetwork
-		want     xnetip.IPNetwork
+		receiver xnetip.Network
+		nets     []xnetip.Network
+		want     xnetip.Network
 	}{
-		{name: "IPv4 two-run networks crossing the first octet", receiver: xnetip.MustParseIPNetwork("10.40.0.1/255.255.0.255"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("10.40.0.2/255.255.0.255"), xnetip.MustParseIPNetwork("11.40.0.3/255.255.0.255")}, want: xnetip.MustParseIPNetwork("10.40.0.0/254.255.0.252")},
-		{name: "IPv6 two-run networks sharing the high runs", receiver: xnetip.MustParseIPNetwork("2a02:6b8:c00::48aa:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), nets: []xnetip.IPNetwork{xnetip.MustParseIPNetwork("2a02:6b8:c00::4707:0:0/ffff:ffff:ff00::ffff:ffff:0:0")}, want: xnetip.MustParseIPNetwork("2a02:6b8:c00::4002:0:0/ffff:ffff:ff00:0:ffff:f052::")},
+		{name: "IPv4 two-run networks crossing the first octet", receiver: xnetip.MustParseNetwork("10.40.0.1/255.255.0.255"), nets: []xnetip.Network{xnetip.MustParseNetwork("10.40.0.2/255.255.0.255"), xnetip.MustParseNetwork("11.40.0.3/255.255.0.255")}, want: xnetip.MustParseNetwork("10.40.0.0/254.255.0.252")},
+		{name: "IPv6 two-run networks sharing the high runs", receiver: xnetip.MustParseNetwork("2a02:6b8:c00::48aa:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), nets: []xnetip.Network{xnetip.MustParseNetwork("2a02:6b8:c00::4707:0:0/ffff:ffff:ff00::ffff:ffff:0:0")}, want: xnetip.MustParseNetwork("2a02:6b8:c00::4002:0:0/ffff:ffff:ff00:0:ffff:f052::")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3829,33 +3829,33 @@ func Test_IPNetwork_SupernetFor_NonContiguousMasks(t *testing.T) {
 //
 // The equality is bit-exact on the stored form, so for IPv4 it also
 // pins the mapped-storage invariant of the result.
-func Test_IPNetwork_SupernetFor_AgreesWithConcreteProperty(t *testing.T) {
+func Test_Network_SupernetFor_AgreesWithConcreteProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		receiver4 := genIPv4Network.Draw(t, "receiver4")
-		nets4 := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "nets4")
-		wrapped4 := make([]xnetip.IPNetwork, len(nets4))
+		receiver4 := genNetwork4.Draw(t, "receiver4")
+		nets4 := rapid.SliceOfN(genNetwork4, 0, 32).Draw(t, "nets4")
+		wrapped4 := make([]xnetip.Network, len(nets4))
 		for idx, network := range nets4 {
-			wrapped4[idx] = xnetip.IPNetworkFrom4(network)
+			wrapped4[idx] = xnetip.NetworkFrom4(network)
 		}
-		result4, ok4 := xnetip.IPNetworkFrom4(receiver4).SupernetFor(wrapped4)
+		result4, ok4 := xnetip.NetworkFrom4(receiver4).SupernetFor(wrapped4)
 		require.True(t, ok4)
-		require.Equal(t, xnetip.IPNetworkFrom4(receiver4.SupernetFor(nets4)), result4)
+		require.Equal(t, xnetip.NetworkFrom4(receiver4.SupernetFor(nets4)), result4)
 		require.True(t, result4.Is4())
-		require.True(t, result4.Contains(xnetip.IPNetworkFrom4(receiver4)))
+		require.True(t, result4.Contains(xnetip.NetworkFrom4(receiver4)))
 		for _, network := range wrapped4 {
 			require.True(t, result4.Contains(network), "element %v", network)
 		}
-		receiver6 := genIPv6Network.Draw(t, "receiver6")
-		nets6 := rapid.SliceOfN(genIPv6Network, 0, 32).Draw(t, "nets6")
-		wrapped6 := make([]xnetip.IPNetwork, len(nets6))
+		receiver6 := genNetwork6.Draw(t, "receiver6")
+		nets6 := rapid.SliceOfN(genNetwork6, 0, 32).Draw(t, "nets6")
+		wrapped6 := make([]xnetip.Network, len(nets6))
 		for idx, network := range nets6 {
-			wrapped6[idx] = xnetip.IPNetworkFrom6(network)
+			wrapped6[idx] = xnetip.NetworkFrom6(network)
 		}
-		result6, ok6 := xnetip.IPNetworkFrom6(receiver6).SupernetFor(wrapped6)
+		result6, ok6 := xnetip.NetworkFrom6(receiver6).SupernetFor(wrapped6)
 		require.True(t, ok6)
-		require.Equal(t, xnetip.IPNetworkFrom6(receiver6.SupernetFor(nets6)), result6)
+		require.Equal(t, xnetip.NetworkFrom6(receiver6.SupernetFor(nets6)), result6)
 		require.True(t, result6.Is6())
-		require.True(t, result6.Contains(xnetip.IPNetworkFrom6(receiver6)))
+		require.True(t, result6.Contains(xnetip.NetworkFrom6(receiver6)))
 		for _, network := range wrapped6 {
 			require.True(t, result6.Contains(network), "element %v", network)
 		}
@@ -3864,43 +3864,43 @@ func Test_IPNetwork_SupernetFor_AgreesWithConcreteProperty(t *testing.T) {
 
 // verifies that one foreign-family element anywhere in the slice
 // makes the fold report false, in both family directions.
-func Test_IPNetwork_SupernetFor_MixedSliceProperty(t *testing.T) {
+func Test_Network_SupernetFor_MixedSliceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		nets4 := rapid.SliceOfN(genIPv4Network, 0, 31).Draw(t, "nets4")
-		mixed4 := make([]xnetip.IPNetwork, len(nets4))
+		nets4 := rapid.SliceOfN(genNetwork4, 0, 31).Draw(t, "nets4")
+		mixed4 := make([]xnetip.Network, len(nets4))
 		for idx, network := range nets4 {
-			mixed4[idx] = xnetip.IPNetworkFrom4(network)
+			mixed4[idx] = xnetip.NetworkFrom4(network)
 		}
-		foreign6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "foreign6"))
+		foreign6 := xnetip.NetworkFrom6(genNetwork6.Draw(t, "foreign6"))
 		position4 := rapid.IntRange(0, len(mixed4)).Draw(t, "position4")
 		mixed4 = slices.Insert(mixed4, position4, foreign6)
-		result, ok := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "receiver4")).SupernetFor(mixed4)
+		result, ok := xnetip.NetworkFrom4(genNetwork4.Draw(t, "receiver4")).SupernetFor(mixed4)
 		require.False(t, ok)
-		require.Equal(t, xnetip.IPNetwork{}, result)
-		nets6 := rapid.SliceOfN(genIPv6Network, 0, 31).Draw(t, "nets6")
-		mixed6 := make([]xnetip.IPNetwork, len(nets6))
+		require.Equal(t, xnetip.Network{}, result)
+		nets6 := rapid.SliceOfN(genNetwork6, 0, 31).Draw(t, "nets6")
+		mixed6 := make([]xnetip.Network, len(nets6))
 		for idx, network := range nets6 {
-			mixed6[idx] = xnetip.IPNetworkFrom6(network)
+			mixed6[idx] = xnetip.NetworkFrom6(network)
 		}
-		foreign4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "foreign4"))
+		foreign4 := xnetip.NetworkFrom4(genNetwork4.Draw(t, "foreign4"))
 		position6 := rapid.IntRange(0, len(mixed6)).Draw(t, "position6")
 		mixed6 = slices.Insert(mixed6, position6, foreign4)
-		result, ok = xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "receiver6")).SupernetFor(mixed6)
+		result, ok = xnetip.NetworkFrom6(genNetwork6.Draw(t, "receiver6")).SupernetFor(mixed6)
 		require.False(t, ok)
-		require.Equal(t, xnetip.IPNetwork{}, result)
+		require.Equal(t, xnetip.Network{}, result)
 	})
 }
 
 // verifies that the fold allocates nothing over a 64-element
 // same-family slice, in either family.
-func Test_IPNetwork_SupernetFor_AllocationFree(t *testing.T) {
-	four := make([]xnetip.IPNetwork, 0, 64)
+func Test_Network_SupernetFor_AllocationFree(t *testing.T) {
+	four := make([]xnetip.Network, 0, 64)
 	for _, network := range ipv4RelatedNetworks(t, 64) {
-		four = append(four, xnetip.IPNetworkFrom4(network))
+		four = append(four, xnetip.NetworkFrom4(network))
 	}
-	six := make([]xnetip.IPNetwork, 0, 64)
+	six := make([]xnetip.Network, 0, 64)
 	for _, network := range ipv6RelatedNetworks(t, 64) {
-		six = append(six, xnetip.IPNetworkFrom6(network))
+		six = append(six, xnetip.NetworkFrom6(network))
 	}
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = four[0].SupernetFor(four[1:]) })
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = six[0].SupernetFor(six[1:]) })

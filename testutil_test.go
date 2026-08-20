@@ -2,7 +2,7 @@
 // its shared infrastructure: assertion helpers and rapid generators.
 //
 // Generators are package-level values named after the type they draw
-// (genIPv4Network, …), added by the session that introduces the type.
+// (genNetwork4, …), added by the session that introduces the type.
 // Each draws its boundary shapes — all-zero, all-ones, host route,
 // alternating and other non-contiguous masks, masks straddling bit 64 —
 // with fixed weights rather than relying on shrinking, because a shrunk
@@ -86,47 +86,47 @@ func collectHead(sequence iter.Seq[netip.Addr], limit int) []netip.Addr {
 	return head
 }
 
-// mustIPv4Network builds an IPv4Network from an address and mask pair
+// mustNetwork4 builds a Network4 from an address and mask pair
 // given in string form, stopping the test on any constructor error.
-func mustIPv4Network(t require.TestingT, addr, mask string) xnetip.IPv4Network {
+func mustNetwork4(t require.TestingT, addr, mask string) xnetip.Network4 {
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
-	network, err := xnetip.IPv4NetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	network, err := xnetip.Network4From(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
 	require.NoError(t, err)
 	return network
 }
 
-// mustIPv6Network builds an IPv6Network from an address and mask pair
+// mustNetwork6 builds a Network6 from an address and mask pair
 // given in string form, stopping the test on any constructor error.
-func mustIPv6Network(t require.TestingT, addr, mask string) xnetip.IPv6Network {
+func mustNetwork6(t require.TestingT, addr, mask string) xnetip.Network6 {
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
-	network, err := xnetip.IPv6NetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	network, err := xnetip.Network6From(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
 	require.NoError(t, err)
 	return network
 }
 
-// mustIPNetwork4 builds the IPNetwork of an Is4 address and mask pair
+// mustNetworkIs4 builds the Network of an Is4 address and mask pair
 // given in string form, stopping the test on any constructor error.
-func mustIPNetwork4(t require.TestingT, addr, mask string) xnetip.IPNetwork {
+func mustNetworkIs4(t require.TestingT, addr, mask string) xnetip.Network {
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
-	network, err := xnetip.IPNetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	network, err := xnetip.NetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
 	require.NoError(t, err)
 	require.True(t, network.Is4())
 	return network
 }
 
-// mustIPNetwork6 builds the IPNetwork of an Is6 address and mask pair
+// mustNetworkIs6 builds the Network of an Is6 address and mask pair
 // given in string form, stopping the test on any constructor error.
-func mustIPNetwork6(t require.TestingT, addr, mask string) xnetip.IPNetwork {
+func mustNetworkIs6(t require.TestingT, addr, mask string) xnetip.Network {
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
-	network, err := xnetip.IPNetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	network, err := xnetip.NetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
 	require.NoError(t, err)
 	require.True(t, network.Is6())
 	return network
@@ -196,7 +196,7 @@ var genNetipAddr6 = rapid.Custom(func(t *rapid.T) netip.Addr {
 	return netipAddrFrom6Bits(hi, lo)
 })
 
-// genIPv4Network draws an IPv4 network through the checked
+// genNetwork4 draws an IPv4 network through the checked
 // constructor, asserting every draw normalized.
 //
 // The address is uniform and the mask comes from fixed-weight shapes:
@@ -206,7 +206,7 @@ var genNetipAddr6 = rapid.Custom(func(t *rapid.T) netip.Addr {
 // shapes appear in every run instead of relying on shrinking. The
 // normalization assertion makes every property test that draws a
 // network inherit the invariant check of the type's birth session.
-var genIPv4Network = rapid.Custom(func(t *rapid.T) xnetip.IPv4Network {
+var genNetwork4 = rapid.Custom(func(t *rapid.T) xnetip.Network4 {
 	addressBits := rapid.Uint32().Draw(t, "addr")
 	var maskBits uint32
 	switch rapid.IntRange(0, 9).Draw(t, "mask shape") {
@@ -221,7 +221,7 @@ var genIPv4Network = rapid.Custom(func(t *rapid.T) xnetip.IPv4Network {
 	default:
 		maskBits = math.MaxUint32
 	}
-	network, err := xnetip.IPv4NetworkFrom(
+	network, err := xnetip.Network4From(
 		netipAddrFrom4Bits(addressBits),
 		netipAddrFrom4Bits(maskBits),
 	)
@@ -250,17 +250,17 @@ var genIPv4Prefix = rapid.Custom(func(t *rapid.T) netip.Prefix {
 // Such a pair is adjacent by the lowest mask bit by construction, so
 // it exercises the merging case that random pairs almost never hit,
 // over every mask shape the network generator draws.
-var genIPv4LowestBitSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv4Network {
-	network := genIPv4Network.Filter(func(network xnetip.IPv4Network) bool {
+var genIPv4LowestBitSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.Network4 {
+	network := genNetwork4.Filter(func(network xnetip.Network4) bool {
 		return network.Mask() != netipAddrFrom4Bits(0)
 	}).Draw(t, "network")
 	addrBits, maskBits := ipv4NetworkBits(network)
-	buddy, err := xnetip.IPv4NetworkFrom(
+	buddy, err := xnetip.Network4From(
 		netipAddrFrom4Bits(addrBits^(maskBits&-maskBits)),
 		netipAddrFrom4Bits(maskBits),
 	)
 	require.NoError(t, err)
-	return [2]xnetip.IPv4Network{network, buddy}
+	return [2]xnetip.Network4{network, buddy}
 })
 
 // genIPv4ContiguousSiblingPair draws a CIDR network of prefix length
@@ -268,20 +268,20 @@ var genIPv4LowestBitSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv4Ne
 //
 // Both halves are contiguous, so the pair pins the class closure of
 // the lowest-mask-bit merge: the parent must be contiguous too.
-var genIPv4ContiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv4Network {
+var genIPv4ContiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.Network4 {
 	bits := rapid.IntRange(1, 32).Draw(t, "bits")
-	network, err := xnetip.IPv4NetworkFromCIDR(genNetipAddr4.Draw(t, "addr"), bits)
+	network, err := xnetip.Network4FromCIDR(genNetipAddr4.Draw(t, "addr"), bits)
 	require.NoError(t, err)
 	addrBits, maskBits := ipv4NetworkBits(network)
-	buddy, err := xnetip.IPv4NetworkFrom(
+	buddy, err := xnetip.Network4From(
 		netipAddrFrom4Bits(addrBits^(maskBits&-maskBits)),
 		netipAddrFrom4Bits(maskBits),
 	)
 	require.NoError(t, err)
-	return [2]xnetip.IPv4Network{network, buddy}
+	return [2]xnetip.Network4{network, buddy}
 })
 
-// genIPv6Network draws an IPv6 network through the checked
+// genNetwork6 draws an IPv6 network through the checked
 // constructor, asserting every draw normalized.
 //
 // The address is uniform and the mask comes from fixed-weight shapes:
@@ -292,7 +292,7 @@ var genIPv4ContiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv4N
 // explicitly because shrinking rarely lands on it. The normalization
 // assertion makes every property test that draws a network inherit the
 // invariant check of the type's birth session.
-var genIPv6Network = rapid.Custom(func(t *rapid.T) xnetip.IPv6Network {
+var genNetwork6 = rapid.Custom(func(t *rapid.T) xnetip.Network6 {
 	addrHi := rapid.Uint64().Draw(t, "addr hi")
 	addrLo := rapid.Uint64().Draw(t, "addr lo")
 	var maskHi, maskLo uint64
@@ -327,7 +327,7 @@ var genIPv6Network = rapid.Custom(func(t *rapid.T) xnetip.IPv6Network {
 		maskHi = 0xFF00000000000000 | ^uint64(0)>>(64-straddleHigh)
 		maskLo = ^uint64(0) << (64 - straddleLow)
 	}
-	network, err := xnetip.IPv6NetworkFrom(
+	network, err := xnetip.Network6From(
 		netipAddrFrom6Bits(addrHi, addrLo),
 		netipAddrFrom6Bits(maskHi, maskLo),
 	)
@@ -356,10 +356,10 @@ var genIPv6Prefix = rapid.Custom(func(t *rapid.T) netip.Prefix {
 // Both per-half lengths are uniform over 0 through 64 and the address
 // is uniform, so the draws cover the degenerate shapes — a contiguous
 // mask, an empty half, a host route — alongside the two-run ones.
-var genIPv6BicontiguousNetwork = rapid.Custom(func(t *rapid.T) xnetip.IPv6Network {
+var genIPv6BicontiguousNetwork = rapid.Custom(func(t *rapid.T) xnetip.Network6 {
 	hiPrefix := rapid.IntRange(0, 64).Draw(t, "hi prefix")
 	loPrefix := rapid.IntRange(0, 64).Draw(t, "lo prefix")
-	network, err := xnetip.IPv6NetworkFrom(
+	network, err := xnetip.Network6From(
 		netipAddrFrom6Bits(rapid.Uint64().Draw(t, "addr hi"), rapid.Uint64().Draw(t, "addr lo")),
 		netipAddrFrom6Bits(^uint64(0)<<(64-hiPrefix), ^uint64(0)<<(64-loPrefix)),
 	)
@@ -374,8 +374,8 @@ var genIPv6BicontiguousNetwork = rapid.Custom(func(t *rapid.T) xnetip.IPv6Networ
 // it exercises the merging case that random pairs almost never hit,
 // over every mask shape the network generator draws, the half-word
 // and straddle masks included.
-var genIPv6LowestBitSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv6Network {
-	network := genIPv6Network.Filter(func(network xnetip.IPv6Network) bool {
+var genIPv6LowestBitSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.Network6 {
+	network := genNetwork6.Filter(func(network xnetip.Network6) bool {
 		return network.Mask() != netipAddrFrom6Bits(0, 0)
 	}).Draw(t, "network")
 	return ipv6SiblingPairAtLowestMaskBit(t, network)
@@ -386,9 +386,9 @@ var genIPv6LowestBitSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv6Ne
 //
 // Both halves are contiguous, so the pair pins the class closure of
 // the lowest-mask-bit merge: the parent must be contiguous too.
-var genIPv6ContiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv6Network {
+var genIPv6ContiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.Network6 {
 	bits := rapid.IntRange(1, 128).Draw(t, "bits")
-	network, err := xnetip.IPv6NetworkFromCIDR(genNetipAddr6.Draw(t, "addr"), bits)
+	network, err := xnetip.Network6FromCIDR(genNetipAddr6.Draw(t, "addr"), bits)
 	require.NoError(t, err)
 	return ipv6SiblingPairAtLowestMaskBit(t, network)
 })
@@ -400,10 +400,10 @@ var genIPv6ContiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv6N
 // mask bit sits in the low half and the pair pins the bi-contiguous
 // class closure of the merge, the degenerate one-bit low run
 // included.
-var genIPv6BicontiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv6Network {
+var genIPv6BicontiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.Network6 {
 	hiPrefix := rapid.IntRange(0, 64).Draw(t, "hi prefix")
 	loPrefix := rapid.IntRange(1, 64).Draw(t, "lo prefix")
-	network, err := xnetip.IPv6NetworkFrom(
+	network, err := xnetip.Network6From(
 		netipAddrFrom6Bits(rapid.Uint64().Draw(t, "addr hi"), rapid.Uint64().Draw(t, "addr lo")),
 		netipAddrFrom6Bits(^uint64(0)<<(64-hiPrefix), ^uint64(0)<<(64-loPrefix)),
 	)
@@ -413,7 +413,7 @@ var genIPv6BicontiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv
 
 // ipv6SiblingPairAtLowestMaskBit pairs a network, whose mask must be
 // non-empty, with its buddy at the mask's lowest set bit.
-func ipv6SiblingPairAtLowestMaskBit(t require.TestingT, network xnetip.IPv6Network) [2]xnetip.IPv6Network {
+func ipv6SiblingPairAtLowestMaskBit(t require.TestingT, network xnetip.Network6) [2]xnetip.Network6 {
 	addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(network)
 	var lowestHi, lowestLo uint64
 	if maskLo != 0 {
@@ -421,25 +421,25 @@ func ipv6SiblingPairAtLowestMaskBit(t require.TestingT, network xnetip.IPv6Netwo
 	} else {
 		lowestHi = maskHi & -maskHi
 	}
-	buddy, err := xnetip.IPv6NetworkFrom(
+	buddy, err := xnetip.Network6From(
 		netipAddrFrom6Bits(addrHi^lowestHi, addrLo^lowestLo),
 		netipAddrFrom6Bits(maskHi, maskLo),
 	)
 	require.NoError(t, err)
-	return [2]xnetip.IPv6Network{network, buddy}
+	return [2]xnetip.Network6{network, buddy}
 }
 
-// genIPNetwork draws a family-agnostic network, wrapping an IPv4 or an
+// genNetwork draws a family-agnostic network, wrapping an IPv4 or an
 // IPv6 draw with equal probability.
 //
 // Both branches reuse the concrete network generators, so every mask
 // shape and boundary pattern they draw flows through, and each drawn
 // value has already passed their normalization assertions.
-var genIPNetwork = rapid.Custom(func(t *rapid.T) xnetip.IPNetwork {
+var genNetwork = rapid.Custom(func(t *rapid.T) xnetip.Network {
 	if rapid.Bool().Draw(t, "is4") {
-		return xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
+		return xnetip.NetworkFrom4(genNetwork4.Draw(t, "network4"))
 	}
-	return xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+	return xnetip.NetworkFrom6(genNetwork6.Draw(t, "network6"))
 })
 
 // digitsOnly reports whether text is non-empty and all ASCII digits.
@@ -465,9 +465,9 @@ var (
 	stringSink    string
 	intSink       int
 	bytesSink     []byte
-	networkSink   xnetip.IPv4Network
-	network6Sink  xnetip.IPv6Network
-	ipNetworkSink xnetip.IPNetwork
+	networkSink   xnetip.Network4
+	network6Sink  xnetip.Network6
+	ipNetworkSink xnetip.Network
 	addrSink      netip.Addr
 	prefixSink    netip.Prefix
 	okSink        bool

@@ -18,7 +18,7 @@ import (
 
 // verifies that the constructor clears every address bit outside the
 // mask and keeps the mask unchanged, whatever the mask's shape.
-func Test_IPv4NetworkFrom_NormalizesAddressByMask(t *testing.T) {
+func Test_Network4From_NormalizesAddressByMask(t *testing.T) {
 	cases := []struct {
 		name     string
 		addr     string
@@ -35,7 +35,7 @@ func Test_IPv4NetworkFrom_NormalizesAddressByMask(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPv4NetworkFrom(
+			network, err := xnetip.Network4From(
 				netip.MustParseAddr(testCase.addr),
 				netip.MustParseAddr(testCase.mask),
 			)
@@ -48,7 +48,7 @@ func Test_IPv4NetworkFrom_NormalizesAddressByMask(t *testing.T) {
 
 // verifies that a non-Is4 argument in either position, IPv4-mapped
 // included, yields the family-mismatch sentinel and the zero network.
-func Test_IPv4NetworkFrom_RejectsForeignFamily(t *testing.T) {
+func Test_Network4From_RejectsForeignFamily(t *testing.T) {
 	cases := []struct {
 		name string
 		addr netip.Addr
@@ -62,16 +62,16 @@ func Test_IPv4NetworkFrom_RejectsForeignFamily(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPv4NetworkFrom(testCase.addr, testCase.mask)
+			network, err := xnetip.Network4From(testCase.addr, testCase.mask)
 			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
-			require.Equal(t, xnetip.IPv4Network{}, network)
+			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}
 }
 
 // verifies that the accessors return Is4, zone-free netip values.
-func Test_IPv4Network_Accessors_ReturnIs4Views(t *testing.T) {
-	network, err := xnetip.IPv4NetworkFrom(
+func Test_Network4_Accessors_ReturnIs4Views(t *testing.T) {
+	network, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.1.1"),
 		netip.MustParseAddr("255.255.0.255"),
 	)
@@ -84,31 +84,31 @@ func Test_IPv4Network_Accessors_ReturnIs4Views(t *testing.T) {
 
 // verifies that the all-zero mask produces the unspecified network,
 // which is the zero value of the type.
-func Test_IPv4NetworkFrom_UniverseEqualsZeroValue(t *testing.T) {
-	network, err := xnetip.IPv4NetworkFrom(
+func Test_Network4From_UniverseEqualsZeroValue(t *testing.T) {
+	network, err := xnetip.Network4From(
 		netip.MustParseAddr("10.1.2.3"),
 		netip.MustParseAddr("0.0.0.0"),
 	)
 	require.NoError(t, err)
-	require.Equal(t, xnetip.IPv4Network{}, network)
+	require.Equal(t, xnetip.Network4{}, network)
 }
 
 // verifies that the zero value is the unspecified network 0.0.0.0/0.
-func Test_IPv4Network_ZeroValue_IsUnspecifiedNetwork(t *testing.T) {
-	var network xnetip.IPv4Network
+func Test_Network4_ZeroValue_IsUnspecifiedNetwork(t *testing.T) {
+	var network xnetip.Network4
 	require.Equal(t, netip.MustParseAddr("0.0.0.0"), network.Addr())
 	require.Equal(t, netip.MustParseAddr("0.0.0.0"), network.Mask())
 }
 
 // verifies that two constructions from different hosts of one subnet
 // compare equal with ==, which only normalization makes sound.
-func Test_IPv4Network_Equality_AfterNormalization(t *testing.T) {
-	left, err := xnetip.IPv4NetworkFrom(
+func Test_Network4_Equality_AfterNormalization(t *testing.T) {
+	left, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.1.1"),
 		netip.MustParseAddr("255.255.255.0"),
 	)
 	require.NoError(t, err)
-	right, err := xnetip.IPv4NetworkFrom(
+	right, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.1.200"),
 		netip.MustParseAddr("255.255.255.0"),
 	)
@@ -119,11 +119,11 @@ func Test_IPv4Network_Equality_AfterNormalization(t *testing.T) {
 
 // verifies that the checked constructor accepts every Is4 pair and
 // always produces a normalized result with the mask preserved.
-func Test_IPv4NetworkFrom_NormalizationProperty(t *testing.T) {
+func Test_Network4From_NormalizationProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		mask := genNetipAddr4.Draw(t, "mask")
-		network, err := xnetip.IPv4NetworkFrom(addr, mask)
+		network, err := xnetip.Network4From(addr, mask)
 		require.NoError(t, err)
 		addrBytes := addr.As4()
 		maskBytes := mask.As4()
@@ -138,10 +138,10 @@ func Test_IPv4NetworkFrom_NormalizationProperty(t *testing.T) {
 
 // verifies that reconstructing a network from its own accessors
 // reproduces it exactly and without error.
-func Test_IPv4NetworkFrom_Idempotent(t *testing.T) {
+func Test_Network4From_Idempotent(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		rebuilt, err := xnetip.IPv4NetworkFrom(network.Addr(), network.Mask())
+		network := genNetwork4.Draw(t, "network")
+		rebuilt, err := xnetip.Network4From(network.Addr(), network.Mask())
 		require.NoError(t, err)
 		require.Equal(t, network, rebuilt)
 	})
@@ -149,24 +149,24 @@ func Test_IPv4NetworkFrom_Idempotent(t *testing.T) {
 
 // verifies that an Is6 value in either argument position always yields
 // the family-mismatch sentinel, whatever the other argument is.
-func Test_IPv4NetworkFrom_RejectsIs6EitherPosition(t *testing.T) {
+func Test_Network4From_RejectsIs6EitherPosition(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		foreign := genNetipAddr6.Draw(t, "foreign")
 		valid := genNetipAddr4.Draw(t, "valid")
-		_, err := xnetip.IPv4NetworkFrom(foreign, valid)
+		_, err := xnetip.Network4From(foreign, valid)
 		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
-		_, err = xnetip.IPv4NetworkFrom(valid, foreign)
+		_, err = xnetip.Network4From(valid, foreign)
 		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
 	})
 }
 
 // verifies that normalization by a contiguous mask agrees with the
 // net/netip oracle for masking a prefix.
-func Test_IPv4NetworkFrom_MatchesNetipMasked(t *testing.T) {
+func Test_Network4From_MatchesNetipMasked(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		prefix := genIPv4Prefix.Draw(t, "prefix")
 		maskBits := ^uint32(0) << (32 - prefix.Bits())
-		network, err := xnetip.IPv4NetworkFrom(prefix.Addr(), netipAddrFrom4Bits(maskBits))
+		network, err := xnetip.Network4From(prefix.Addr(), netipAddrFrom4Bits(maskBits))
 		require.NoError(t, err)
 		require.Equal(t, prefix.Masked().Addr(), network.Addr())
 	})
@@ -174,13 +174,13 @@ func Test_IPv4NetworkFrom_MatchesNetipMasked(t *testing.T) {
 
 // verifies that construction and the accessors allocate nothing on the
 // success path, per the allocation-free runtime contract.
-func Test_IPv4Network_Constructors_AllocationFree(t *testing.T) {
+func Test_Network4_Constructors_AllocationFree(t *testing.T) {
 	addr := netip.MustParseAddr("192.168.1.1")
 	mask := netip.MustParseAddr("255.255.0.255")
 	var err error
-	requireNoAllocs(t, func() { networkSink, err = xnetip.IPv4NetworkFrom(addr, mask) })
+	requireNoAllocs(t, func() { networkSink, err = xnetip.Network4From(addr, mask) })
 	require.NoError(t, err)
-	network, err := xnetip.IPv4NetworkFrom(addr, mask)
+	network, err := xnetip.Network4From(addr, mask)
 	require.NoError(t, err)
 	requireNoAllocs(t, func() { addrSink = network.Addr() })
 	requireNoAllocs(t, func() { addrSink = network.Mask() })
@@ -191,7 +191,7 @@ func Test_IPv4Network_Constructors_AllocationFree(t *testing.T) {
 //
 // The IPv4 mask travels verbatim in the low 32 bits of the result,
 // contiguous or not, so the mapped form encodes the same address set.
-func Test_IPv4Network_ToIPv6Mapped_MapsAddressAndMask(t *testing.T) {
+func Test_Network4_ToIPv6Mapped_MapsAddressAndMask(t *testing.T) {
 	cases := []struct {
 		name     string
 		addr     string
@@ -209,12 +209,12 @@ func Test_IPv4Network_ToIPv6Mapped_MapsAddressAndMask(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPv4NetworkFrom(
+			network, err := xnetip.Network4From(
 				netip.MustParseAddr(testCase.addr),
 				netip.MustParseAddr(testCase.mask),
 			)
 			require.NoError(t, err)
-			expected, err := xnetip.IPv6NetworkFrom(
+			expected, err := xnetip.Network6From(
 				netip.MustParseAddr(testCase.wantAddr),
 				netip.MustParseAddr(testCase.wantMask),
 			)
@@ -230,9 +230,9 @@ func Test_IPv4Network_ToIPv6Mapped_MapsAddressAndMask(t *testing.T) {
 // The mapped address unmaps back to the original and the low four mask
 // bytes carry the IPv4 mask verbatim, which is what makes the mapping
 // invertible.
-func Test_IPv4Network_ToIPv6Mapped_UpperBitsProperty(t *testing.T) {
+func Test_Network4_ToIPv6Mapped_UpperBitsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		mapped := network.ToIPv6Mapped()
 		require.True(t, mapped.Addr().Is4In6())
 		require.Equal(t, network.Addr(), mapped.Addr().Unmap())
@@ -244,8 +244,8 @@ func Test_IPv4Network_ToIPv6Mapped_UpperBitsProperty(t *testing.T) {
 
 // verifies that the mapping allocates nothing, per the allocation-free
 // runtime contract.
-func Test_IPv4Network_ToIPv6Mapped_AllocationFree(t *testing.T) {
-	network, err := xnetip.IPv4NetworkFrom(
+func Test_Network4_ToIPv6Mapped_AllocationFree(t *testing.T) {
+	network, err := xnetip.Network4From(
 		netip.MustParseAddr("192.168.0.1"),
 		netip.MustParseAddr("255.255.0.255"),
 	)
@@ -255,7 +255,7 @@ func Test_IPv4Network_ToIPv6Mapped_AllocationFree(t *testing.T) {
 
 // verifies that the CIDR constructor clears the host bits of the
 // address and produces the contiguous mask of the given length.
-func Test_IPv4NetworkFromCIDR_MasksHostBits(t *testing.T) {
+func Test_Network4FromCIDR_MasksHostBits(t *testing.T) {
 	cases := []struct {
 		name     string
 		addr     string
@@ -272,7 +272,7 @@ func Test_IPv4NetworkFromCIDR_MasksHostBits(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPv4NetworkFromCIDR(netip.MustParseAddr(testCase.addr), testCase.bits)
+			network, err := xnetip.Network4FromCIDR(netip.MustParseAddr(testCase.addr), testCase.bits)
 			require.NoError(t, err)
 			require.Equal(t, netip.MustParseAddr(testCase.wantAddr), network.Addr())
 			require.Equal(t, netip.MustParseAddr(testCase.wantMask), network.Mask())
@@ -282,15 +282,15 @@ func Test_IPv4NetworkFromCIDR_MasksHostBits(t *testing.T) {
 
 // verifies that the universe network built from a zero length equals
 // the type's zero value.
-func Test_IPv4NetworkFromCIDR_UniverseEqualsZeroValue(t *testing.T) {
-	network, err := xnetip.IPv4NetworkFromCIDR(netip.MustParseAddr("192.168.1.5"), 0)
+func Test_Network4FromCIDR_UniverseEqualsZeroValue(t *testing.T) {
+	network, err := xnetip.Network4FromCIDR(netip.MustParseAddr("192.168.1.5"), 0)
 	require.NoError(t, err)
-	require.Equal(t, xnetip.IPv4Network{}, network)
+	require.Equal(t, xnetip.Network4{}, network)
 }
 
 // verifies that a prefix length outside 0 through 32 yields the
 // overflow sentinel and the zero network.
-func Test_IPv4NetworkFromCIDR_RejectsOutOfRangeBits(t *testing.T) {
+func Test_Network4FromCIDR_RejectsOutOfRangeBits(t *testing.T) {
 	cases := []struct {
 		name string
 		bits int
@@ -300,16 +300,16 @@ func Test_IPv4NetworkFromCIDR_RejectsOutOfRangeBits(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPv4NetworkFromCIDR(netip.MustParseAddr("192.168.1.5"), testCase.bits)
+			network, err := xnetip.Network4FromCIDR(netip.MustParseAddr("192.168.1.5"), testCase.bits)
 			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
-			require.Equal(t, xnetip.IPv4Network{}, network)
+			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}
 }
 
 // verifies that a non-Is4 address, IPv4-mapped included, yields the
 // family-mismatch sentinel and the zero network for a valid length.
-func Test_IPv4NetworkFromCIDR_RejectsForeignFamily(t *testing.T) {
+func Test_Network4FromCIDR_RejectsForeignFamily(t *testing.T) {
 	cases := []struct {
 		name string
 		addr netip.Addr
@@ -320,9 +320,9 @@ func Test_IPv4NetworkFromCIDR_RejectsForeignFamily(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPv4NetworkFromCIDR(testCase.addr, 24)
+			network, err := xnetip.Network4FromCIDR(testCase.addr, 24)
 			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
-			require.Equal(t, xnetip.IPv4Network{}, network)
+			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}
 }
@@ -334,11 +334,11 @@ func Test_IPv4NetworkFromCIDR_RejectsForeignFamily(t *testing.T) {
 // is a leading run of ones by construction — so the contiguity of
 // every drawn result is asserted in place of a non-contiguous case
 // table.
-func Test_IPv4NetworkFromCIDR_MatchesNetipMasked(t *testing.T) {
+func Test_Network4FromCIDR_MatchesNetipMasked(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		bits := rapid.IntRange(0, 32).Draw(t, "bits")
-		network, err := xnetip.IPv4NetworkFromCIDR(addr, bits)
+		network, err := xnetip.Network4FromCIDR(addr, bits)
 		require.NoError(t, err)
 		require.Equal(t, netip.PrefixFrom(addr, bits).Masked().Addr(), network.Addr())
 		require.Equal(t, netipAddrFrom4Bits(^uint32(0)<<(32-bits)), network.Mask())
@@ -353,22 +353,22 @@ func Test_IPv4NetworkFromCIDR_MatchesNetipMasked(t *testing.T) {
 
 // verifies that every length outside 0 through 32, far past the width
 // or negative, yields the overflow sentinel.
-func Test_IPv4NetworkFromCIDR_OverflowProperty(t *testing.T) {
+func Test_Network4FromCIDR_OverflowProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		bits := rapid.OneOf(rapid.IntRange(33, 300), rapid.IntRange(-300, -1)).Draw(t, "bits")
-		network, err := xnetip.IPv4NetworkFromCIDR(addr, bits)
+		network, err := xnetip.Network4FromCIDR(addr, bits)
 		require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
-		require.Equal(t, xnetip.IPv4Network{}, network)
+		require.Equal(t, xnetip.Network4{}, network)
 	})
 }
 
 // verifies that the CIDR constructor allocates nothing on the success
 // path, per the allocation-free runtime contract.
-func Test_IPv4NetworkFromCIDR_AllocationFree(t *testing.T) {
+func Test_Network4FromCIDR_AllocationFree(t *testing.T) {
 	addr := netip.MustParseAddr("192.168.1.5")
 	var err error
-	requireNoAllocs(t, func() { networkSink, err = xnetip.IPv4NetworkFromCIDR(addr, 24) })
+	requireNoAllocs(t, func() { networkSink, err = xnetip.Network4FromCIDR(addr, 24) })
 	require.NoError(t, err)
 }
 
@@ -378,7 +378,7 @@ func Test_IPv4NetworkFromCIDR_AllocationFree(t *testing.T) {
 // A non-contiguous mask table is not applicable to this constructor:
 // the mask is fixed to all ones, the universe of bits, so the
 // alternating-pattern address below pins bit preservation instead.
-func Test_IPv4NetworkFromAddr_BuildsHostRoute(t *testing.T) {
+func Test_Network4FromAddr_BuildsHostRoute(t *testing.T) {
 	cases := []struct {
 		name string
 		addr string
@@ -391,7 +391,7 @@ func Test_IPv4NetworkFromAddr_BuildsHostRoute(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPv4NetworkFromAddr(netip.MustParseAddr(testCase.addr))
+			network, err := xnetip.Network4FromAddr(netip.MustParseAddr(testCase.addr))
 			require.NoError(t, err)
 			require.Equal(t, netip.MustParseAddr(testCase.addr), network.Addr())
 			require.Equal(t, netip.MustParseAddr("255.255.255.255"), network.Mask())
@@ -401,8 +401,8 @@ func Test_IPv4NetworkFromAddr_BuildsHostRoute(t *testing.T) {
 
 // verifies that the host route carries the exact bit pattern of its
 // address and the all-ones mask pattern.
-func Test_IPv4NetworkFromAddr_PreservesBitPattern(t *testing.T) {
-	network, err := xnetip.IPv4NetworkFromAddr(netipAddrFrom4Bits(0x0A000001))
+func Test_Network4FromAddr_PreservesBitPattern(t *testing.T) {
+	network, err := xnetip.Network4FromAddr(netipAddrFrom4Bits(0x0A000001))
 	require.NoError(t, err)
 	require.Equal(t, netipAddrFrom4Bits(0x0A000001), network.Addr())
 	require.Equal(t, netipAddrFrom4Bits(0xFFFFFFFF), network.Mask())
@@ -410,10 +410,10 @@ func Test_IPv4NetworkFromAddr_PreservesBitPattern(t *testing.T) {
 
 // verifies that the host route equals the same network built through
 // the checked normalizing constructor.
-func Test_IPv4NetworkFromAddr_EqualsCheckedConstructor(t *testing.T) {
-	fromAddr, err := xnetip.IPv4NetworkFromAddr(netip.MustParseAddr("10.0.0.1"))
+func Test_Network4FromAddr_EqualsCheckedConstructor(t *testing.T) {
+	fromAddr, err := xnetip.Network4FromAddr(netip.MustParseAddr("10.0.0.1"))
 	require.NoError(t, err)
-	fromPair, err := xnetip.IPv4NetworkFrom(
+	fromPair, err := xnetip.Network4From(
 		netip.MustParseAddr("10.0.0.1"),
 		netip.MustParseAddr("255.255.255.255"),
 	)
@@ -423,7 +423,7 @@ func Test_IPv4NetworkFromAddr_EqualsCheckedConstructor(t *testing.T) {
 
 // verifies that a non-Is4 address, IPv4-mapped included, yields the
 // family-mismatch sentinel and the zero network.
-func Test_IPv4NetworkFromAddr_RejectsForeignFamily(t *testing.T) {
+func Test_Network4FromAddr_RejectsForeignFamily(t *testing.T) {
 	cases := []struct {
 		name string
 		addr netip.Addr
@@ -434,9 +434,9 @@ func Test_IPv4NetworkFromAddr_RejectsForeignFamily(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.IPv4NetworkFromAddr(testCase.addr)
+			network, err := xnetip.Network4FromAddr(testCase.addr)
 			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
-			require.Equal(t, xnetip.IPv4Network{}, network)
+			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}
 }
@@ -446,14 +446,14 @@ func Test_IPv4NetworkFromAddr_RejectsForeignFamily(t *testing.T) {
 //
 // The result must also equal the same network built through the
 // checked normalizing constructor, so the two entry points agree.
-func Test_IPv4NetworkFromAddr_HostRouteProperty(t *testing.T) {
+func Test_Network4FromAddr_HostRouteProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
-		network, err := xnetip.IPv4NetworkFromAddr(addr)
+		network, err := xnetip.Network4FromAddr(addr)
 		require.NoError(t, err)
 		require.Equal(t, addr, network.Addr())
 		require.Equal(t, netipAddrFrom4Bits(^uint32(0)), network.Mask())
-		fromPair, err := xnetip.IPv4NetworkFrom(addr, netipAddrFrom4Bits(^uint32(0)))
+		fromPair, err := xnetip.Network4From(addr, netipAddrFrom4Bits(^uint32(0)))
 		require.NoError(t, err)
 		require.Equal(t, fromPair, network)
 	})
@@ -461,21 +461,21 @@ func Test_IPv4NetworkFromAddr_HostRouteProperty(t *testing.T) {
 
 // verifies that every Is6 address, whatever its shape, is rejected
 // with the family-mismatch sentinel.
-func Test_IPv4NetworkFromAddr_RejectsIs6Property(t *testing.T) {
+func Test_Network4FromAddr_RejectsIs6Property(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr6.Draw(t, "addr")
-		network, err := xnetip.IPv4NetworkFromAddr(addr)
+		network, err := xnetip.Network4FromAddr(addr)
 		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
-		require.Equal(t, xnetip.IPv4Network{}, network)
+		require.Equal(t, xnetip.Network4{}, network)
 	})
 }
 
 // verifies that the host route agrees with the net/netip oracle for a
 // full-length masked prefix.
-func Test_IPv4NetworkFromAddr_MatchesNetipHostPrefix(t *testing.T) {
+func Test_Network4FromAddr_MatchesNetipHostPrefix(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
-		network, err := xnetip.IPv4NetworkFromAddr(addr)
+		network, err := xnetip.Network4FromAddr(addr)
 		require.NoError(t, err)
 		require.Equal(t, netip.PrefixFrom(addr, 32).Masked().Addr(), network.Addr())
 	})
@@ -483,33 +483,33 @@ func Test_IPv4NetworkFromAddr_MatchesNetipHostPrefix(t *testing.T) {
 
 // verifies that the host-route constructor allocates nothing on the
 // success path, per the allocation-free runtime contract.
-func Test_IPv4NetworkFromAddr_AllocationFree(t *testing.T) {
+func Test_Network4FromAddr_AllocationFree(t *testing.T) {
 	addr := netip.MustParseAddr("192.168.1.5")
 	var err error
-	requireNoAllocs(t, func() { networkSink, err = xnetip.IPv4NetworkFromAddr(addr) })
+	requireNoAllocs(t, func() { networkSink, err = xnetip.Network4FromAddr(addr) })
 	require.NoError(t, err)
 }
 
 // verifies that the order is lexicographic on the address first and
 // the mask second, both as unsigned 32-bit integers.
-func Test_IPv4Network_Compare_AddressFirstMaskSecond(t *testing.T) {
+func Test_Network4_Compare_AddressFirstMaskSecond(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
 		want  int
 	}{
-		{name: "address dominates mask", left: mustIPv4Network(t, "10.0.0.0", "255.255.255.255"), right: mustIPv4Network(t, "11.0.0.0", "255.0.0.0"), want: -1},
-		{name: "equal address, mask decides", left: mustIPv4Network(t, "10.0.0.0", "255.255.0.0"), right: mustIPv4Network(t, "10.0.0.0", "255.255.255.0"), want: -1},
-		{name: "equal address, larger mask after", left: mustIPv4Network(t, "10.0.0.0", "255.255.255.0"), right: mustIPv4Network(t, "10.0.0.0", "255.255.0.0"), want: 1},
-		{name: "zero before middle", left: mustIPv4Network(t, "0.0.0.0", "0.0.0.0"), right: mustIPv4Network(t, "10.0.0.0", "255.0.0.0"), want: -1},
-		{name: "middle before max", left: mustIPv4Network(t, "10.0.0.0", "255.0.0.0"), right: mustIPv4Network(t, "255.255.255.255", "255.255.255.255"), want: -1},
-		{name: "zero before max", left: mustIPv4Network(t, "0.0.0.0", "0.0.0.0"), right: mustIPv4Network(t, "255.255.255.255", "255.255.255.255"), want: -1},
-		{name: "antisymmetry on the dominance pair", left: mustIPv4Network(t, "11.0.0.0", "255.0.0.0"), right: mustIPv4Network(t, "10.0.0.0", "255.255.255.255"), want: 1},
-		{name: "top address bit compares unsigned", left: mustIPv4Network(t, "128.0.0.0", "128.0.0.0"), right: mustIPv4Network(t, "127.255.255.255", "255.255.255.255"), want: 1},
-		{name: "same address, non-contiguous mask decides", left: mustIPv4Network(t, "10.0.0.5", "255.0.0.255"), right: mustIPv4Network(t, "10.0.0.5", "255.255.0.255"), want: -1},
-		{name: "alternating masks under one address", left: mustIPv4Network(t, "0.0.0.0", "170.85.170.85"), right: mustIPv4Network(t, "0.0.0.0", "85.170.85.170"), want: 1},
-		{name: "address bit beats any mask", left: mustIPv4Network(t, "10.0.0.4", "255.0.0.255"), right: mustIPv4Network(t, "10.0.0.5", "255.255.255.255"), want: -1},
+		{name: "address dominates mask", left: mustNetwork4(t, "10.0.0.0", "255.255.255.255"), right: mustNetwork4(t, "11.0.0.0", "255.0.0.0"), want: -1},
+		{name: "equal address, mask decides", left: mustNetwork4(t, "10.0.0.0", "255.255.0.0"), right: mustNetwork4(t, "10.0.0.0", "255.255.255.0"), want: -1},
+		{name: "equal address, larger mask after", left: mustNetwork4(t, "10.0.0.0", "255.255.255.0"), right: mustNetwork4(t, "10.0.0.0", "255.255.0.0"), want: 1},
+		{name: "zero before middle", left: mustNetwork4(t, "0.0.0.0", "0.0.0.0"), right: mustNetwork4(t, "10.0.0.0", "255.0.0.0"), want: -1},
+		{name: "middle before max", left: mustNetwork4(t, "10.0.0.0", "255.0.0.0"), right: mustNetwork4(t, "255.255.255.255", "255.255.255.255"), want: -1},
+		{name: "zero before max", left: mustNetwork4(t, "0.0.0.0", "0.0.0.0"), right: mustNetwork4(t, "255.255.255.255", "255.255.255.255"), want: -1},
+		{name: "antisymmetry on the dominance pair", left: mustNetwork4(t, "11.0.0.0", "255.0.0.0"), right: mustNetwork4(t, "10.0.0.0", "255.255.255.255"), want: 1},
+		{name: "top address bit compares unsigned", left: mustNetwork4(t, "128.0.0.0", "128.0.0.0"), right: mustNetwork4(t, "127.255.255.255", "255.255.255.255"), want: 1},
+		{name: "same address, non-contiguous mask decides", left: mustNetwork4(t, "10.0.0.5", "255.0.0.255"), right: mustNetwork4(t, "10.0.0.5", "255.255.0.255"), want: -1},
+		{name: "alternating masks under one address", left: mustNetwork4(t, "0.0.0.0", "170.85.170.85"), right: mustNetwork4(t, "0.0.0.0", "85.170.85.170"), want: 1},
+		{name: "address bit beats any mask", left: mustNetwork4(t, "10.0.0.4", "255.0.0.255"), right: mustNetwork4(t, "10.0.0.5", "255.255.255.255"), want: -1},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -519,46 +519,46 @@ func Test_IPv4Network_Compare_AddressFirstMaskSecond(t *testing.T) {
 }
 
 // verifies that equal networks compare as zero and only they do.
-func Test_IPv4Network_Compare_EqualityIsZero(t *testing.T) {
-	left := mustIPv4Network(t, "192.168.1.0", "255.255.255.0")
-	right := mustIPv4Network(t, "192.168.1.0", "255.255.255.0")
+func Test_Network4_Compare_EqualityIsZero(t *testing.T) {
+	left := mustNetwork4(t, "192.168.1.0", "255.255.255.0")
+	right := mustNetwork4(t, "192.168.1.0", "255.255.255.0")
 	require.Equal(t, 0, left.Compare(right))
 	require.Equal(t, left, right)
 }
 
 // verifies that sorting a shuffled fixture yields the exact documented
 // order, the contract the aggregation and split inputs rely on.
-func Test_IPv4Network_Compare_SortPinsDocumentedOrder(t *testing.T) {
-	shuffled := []xnetip.IPv4Network{
-		mustIPv4Network(t, "192.168.1.1", "255.255.255.255"),
-		mustIPv4Network(t, "10.1.0.0", "255.255.0.0"),
-		mustIPv4Network(t, "255.255.255.255", "255.255.255.255"),
-		mustIPv4Network(t, "10.0.0.5", "255.255.0.255"),
-		mustIPv4Network(t, "0.0.0.0", "0.0.0.0"),
-		mustIPv4Network(t, "10.0.0.0", "255.255.255.0"),
-		mustIPv4Network(t, "10.0.0.5", "255.0.0.255"),
-		mustIPv4Network(t, "10.0.0.0", "255.0.0.0"),
+func Test_Network4_Compare_SortPinsDocumentedOrder(t *testing.T) {
+	shuffled := []xnetip.Network4{
+		mustNetwork4(t, "192.168.1.1", "255.255.255.255"),
+		mustNetwork4(t, "10.1.0.0", "255.255.0.0"),
+		mustNetwork4(t, "255.255.255.255", "255.255.255.255"),
+		mustNetwork4(t, "10.0.0.5", "255.255.0.255"),
+		mustNetwork4(t, "0.0.0.0", "0.0.0.0"),
+		mustNetwork4(t, "10.0.0.0", "255.255.255.0"),
+		mustNetwork4(t, "10.0.0.5", "255.0.0.255"),
+		mustNetwork4(t, "10.0.0.0", "255.0.0.0"),
 	}
-	want := []xnetip.IPv4Network{
-		mustIPv4Network(t, "0.0.0.0", "0.0.0.0"),
-		mustIPv4Network(t, "10.0.0.0", "255.0.0.0"),
-		mustIPv4Network(t, "10.0.0.0", "255.255.255.0"),
-		mustIPv4Network(t, "10.0.0.5", "255.0.0.255"),
-		mustIPv4Network(t, "10.0.0.5", "255.255.0.255"),
-		mustIPv4Network(t, "10.1.0.0", "255.255.0.0"),
-		mustIPv4Network(t, "192.168.1.1", "255.255.255.255"),
-		mustIPv4Network(t, "255.255.255.255", "255.255.255.255"),
+	want := []xnetip.Network4{
+		mustNetwork4(t, "0.0.0.0", "0.0.0.0"),
+		mustNetwork4(t, "10.0.0.0", "255.0.0.0"),
+		mustNetwork4(t, "10.0.0.0", "255.255.255.0"),
+		mustNetwork4(t, "10.0.0.5", "255.0.0.255"),
+		mustNetwork4(t, "10.0.0.5", "255.255.0.255"),
+		mustNetwork4(t, "10.1.0.0", "255.255.0.0"),
+		mustNetwork4(t, "192.168.1.1", "255.255.255.255"),
+		mustNetwork4(t, "255.255.255.255", "255.255.255.255"),
 	}
-	slices.SortFunc(shuffled, xnetip.IPv4Network.Compare)
+	slices.SortFunc(shuffled, xnetip.Network4.Compare)
 	require.Equal(t, want, shuffled)
 }
 
 // verifies that the order equals the tuple order of the netip address
 // views, is antisymmetric and is zero exactly on equal values.
-func Test_IPv4Network_Compare_MatchesTupleOrderProperty(t *testing.T) {
+func Test_Network4_Compare_MatchesTupleOrderProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		want := left.Addr().Compare(right.Addr())
 		if want == 0 {
 			want = left.Mask().Compare(right.Mask())
@@ -570,11 +570,11 @@ func Test_IPv4Network_Compare_MatchesTupleOrderProperty(t *testing.T) {
 }
 
 // verifies that the order is transitive on random triples.
-func Test_IPv4Network_Compare_TransitivityProperty(t *testing.T) {
+func Test_Network4_Compare_TransitivityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		first := genIPv4Network.Draw(t, "first")
-		second := genIPv4Network.Draw(t, "second")
-		third := genIPv4Network.Draw(t, "third")
+		first := genNetwork4.Draw(t, "first")
+		second := genNetwork4.Draw(t, "second")
+		third := genNetwork4.Draw(t, "third")
 		if first.Compare(second) <= 0 && second.Compare(third) <= 0 {
 			require.LessOrEqual(t, first.Compare(third), 0)
 		}
@@ -583,22 +583,22 @@ func Test_IPv4Network_Compare_TransitivityProperty(t *testing.T) {
 
 // verifies that sorting a random slice by the order yields a sorted
 // permutation of the input.
-func Test_IPv4Network_Compare_SortFuncProperty(t *testing.T) {
+func Test_Network4_Compare_SortFuncProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		networks := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "networks")
+		networks := rapid.SliceOfN(genNetwork4, 0, 32).Draw(t, "networks")
 		sorted := slices.Clone(networks)
-		slices.SortFunc(sorted, xnetip.IPv4Network.Compare)
-		require.True(t, slices.IsSortedFunc(sorted, xnetip.IPv4Network.Compare))
+		slices.SortFunc(sorted, xnetip.Network4.Compare)
+		require.True(t, slices.IsSortedFunc(sorted, xnetip.Network4.Compare))
 		require.ElementsMatch(t, networks, sorted)
 	})
 }
 
 // verifies that the address-first component agrees with the
 // netip.Addr order whenever the addresses differ.
-func Test_IPv4Network_Compare_MatchesNetipAddrOrder(t *testing.T) {
+func Test_Network4_Compare_MatchesNetipAddrOrder(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		if left.Addr() != right.Addr() {
 			require.Equal(t, left.Addr().Compare(right.Addr()), left.Compare(right))
 		}
@@ -606,49 +606,49 @@ func Test_IPv4Network_Compare_MatchesNetipAddrOrder(t *testing.T) {
 }
 
 // verifies that comparing allocates nothing.
-func Test_IPv4Network_Compare_AllocationFree(t *testing.T) {
-	left := mustIPv4Network(t, "10.0.0.0", "255.0.0.0")
-	right := mustIPv4Network(t, "10.0.0.0", "255.255.255.0")
+func Test_Network4_Compare_AllocationFree(t *testing.T) {
+	left := mustNetwork4(t, "10.0.0.0", "255.0.0.0")
+	right := mustNetwork4(t, "10.0.0.0", "255.255.255.0")
 	requireNoAllocs(t, func() { intSink = left.Compare(right) })
 }
 
-func BenchmarkIPv4Network_Compare_MaskDecides(b *testing.B) {
-	left := mustIPv4Network(b, "10.0.0.0", "255.0.0.0")
-	right := mustIPv4Network(b, "10.0.0.0", "255.255.255.0")
+func BenchmarkNetwork4_Compare_MaskDecides(b *testing.B) {
+	left := mustNetwork4(b, "10.0.0.0", "255.0.0.0")
+	right := mustNetwork4(b, "10.0.0.0", "255.255.255.0")
 	b.ReportAllocs()
 	for b.Loop() {
 		intSink = left.Compare(right)
 	}
 }
 
-func BenchmarkIPv4Network_Compare_AddressDecides(b *testing.B) {
-	left := mustIPv4Network(b, "10.0.0.0", "255.0.0.0")
-	right := mustIPv4Network(b, "11.0.0.0", "255.255.255.0")
+func BenchmarkNetwork4_Compare_AddressDecides(b *testing.B) {
+	left := mustNetwork4(b, "10.0.0.0", "255.0.0.0")
+	right := mustNetwork4(b, "11.0.0.0", "255.255.255.0")
 	b.ReportAllocs()
 	for b.Loop() {
 		intSink = left.Compare(right)
 	}
 }
 
-func BenchmarkIPv4Network_SortFunc_1024(b *testing.B) {
+func BenchmarkNetwork4_SortFunc_1024(b *testing.B) {
 	// The fixture mirrors the Rust bench recipe: index times Knuth's
 	// multiplicative constant, prefixes spread over /8../32.
-	template := make([]xnetip.IPv4Network, 1024)
+	template := make([]xnetip.Network4, 1024)
 	for idx := range template {
 		bits := uint32(idx) * 2_654_435_761
-		network, err := xnetip.IPv4NetworkFromCIDR(netipAddrFrom4Bits(bits), 8+int(bits%25))
+		network, err := xnetip.Network4FromCIDR(netipAddrFrom4Bits(bits), 8+int(bits%25))
 		if err != nil {
 			b.Fatal(err)
 		}
 		template[idx] = network
 	}
-	networks := make([]xnetip.IPv4Network, len(template))
+	networks := make([]xnetip.Network4, len(template))
 	b.ReportAllocs()
 	for b.Loop() {
 		// The 4 KiB fixture refresh stays inside the timed region: a
 		// paused timer would keep the loop from ever finishing.
 		copy(networks, template)
-		slices.SortFunc(networks, xnetip.IPv4Network.Compare)
+		slices.SortFunc(networks, xnetip.Network4.Compare)
 	}
 }
 
@@ -658,26 +658,26 @@ func BenchmarkIPv4Network_SortFunc_1024(b *testing.B) {
 // The universe contains everything, a shorter prefix contains its
 // refinements and not the reverse, and a host route contains only
 // itself.
-func Test_IPv4Network_Contains_ContiguousAndBoundary(t *testing.T) {
+func Test_Network4_Contains_ContiguousAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		outer xnetip.IPv4Network
-		inner xnetip.IPv4Network
+		outer xnetip.Network4
+		inner xnetip.Network4
 		want  bool
 	}{
-		{name: "universe contains host route", outer: xnetip.MustParseIPv4Network("0.0.0.0/0"), inner: xnetip.MustParseIPv4Network("127.0.0.1"), want: true},
-		{name: "shorter prefix contains longer", outer: xnetip.MustParseIPv4Network("0.0.0.0/8"), inner: xnetip.MustParseIPv4Network("0.0.0.0/9"), want: true},
-		{name: "longer prefix does not contain shorter", outer: xnetip.MustParseIPv4Network("0.0.0.0/9"), inner: xnetip.MustParseIPv4Network("0.0.0.0/8"), want: false},
-		{name: "host route contains itself", outer: xnetip.MustParseIPv4Network("127.0.0.1"), inner: xnetip.MustParseIPv4Network("127.0.0.1"), want: true},
-		{name: "host route does not contain neighbour", outer: xnetip.MustParseIPv4Network("10.0.0.1/32"), inner: xnetip.MustParseIPv4Network("10.0.0.2/32"), want: false},
-		{name: "nested contiguous", outer: xnetip.MustParseIPv4Network("192.168.0.0/16"), inner: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: true},
-		{name: "nested contiguous reversed", outer: xnetip.MustParseIPv4Network("192.168.1.0/24"), inner: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
-		{name: "disjoint contiguous", outer: xnetip.MustParseIPv4Network("10.0.0.0/8"), inner: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
-		{name: "disjoint contiguous reversed", outer: xnetip.MustParseIPv4Network("192.168.0.0/16"), inner: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: false},
-		{name: "universe contains universe", outer: xnetip.MustParseIPv4Network("0.0.0.0/0"), inner: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: true},
-		{name: "all-ones host contains itself", outer: xnetip.MustParseIPv4Network("255.255.255.255/32"), inner: xnetip.MustParseIPv4Network("255.255.255.255/32"), want: true},
-		{name: "top /31 contains the all-ones host", outer: xnetip.MustParseIPv4Network("255.255.255.254/31"), inner: xnetip.MustParseIPv4Network("255.255.255.255/32"), want: true},
-		{name: "all-ones host does not contain its /31", outer: xnetip.MustParseIPv4Network("255.255.255.255/32"), inner: xnetip.MustParseIPv4Network("255.255.255.254/31"), want: false},
+		{name: "universe contains host route", outer: xnetip.MustParseNetwork4("0.0.0.0/0"), inner: xnetip.MustParseNetwork4("127.0.0.1"), want: true},
+		{name: "shorter prefix contains longer", outer: xnetip.MustParseNetwork4("0.0.0.0/8"), inner: xnetip.MustParseNetwork4("0.0.0.0/9"), want: true},
+		{name: "longer prefix does not contain shorter", outer: xnetip.MustParseNetwork4("0.0.0.0/9"), inner: xnetip.MustParseNetwork4("0.0.0.0/8"), want: false},
+		{name: "host route contains itself", outer: xnetip.MustParseNetwork4("127.0.0.1"), inner: xnetip.MustParseNetwork4("127.0.0.1"), want: true},
+		{name: "host route does not contain neighbour", outer: xnetip.MustParseNetwork4("10.0.0.1/32"), inner: xnetip.MustParseNetwork4("10.0.0.2/32"), want: false},
+		{name: "nested contiguous", outer: xnetip.MustParseNetwork4("192.168.0.0/16"), inner: xnetip.MustParseNetwork4("192.168.1.0/24"), want: true},
+		{name: "nested contiguous reversed", outer: xnetip.MustParseNetwork4("192.168.1.0/24"), inner: xnetip.MustParseNetwork4("192.168.0.0/16"), want: false},
+		{name: "disjoint contiguous", outer: xnetip.MustParseNetwork4("10.0.0.0/8"), inner: xnetip.MustParseNetwork4("192.168.0.0/16"), want: false},
+		{name: "disjoint contiguous reversed", outer: xnetip.MustParseNetwork4("192.168.0.0/16"), inner: xnetip.MustParseNetwork4("10.0.0.0/8"), want: false},
+		{name: "universe contains universe", outer: xnetip.MustParseNetwork4("0.0.0.0/0"), inner: xnetip.MustParseNetwork4("0.0.0.0/0"), want: true},
+		{name: "all-ones host contains itself", outer: xnetip.MustParseNetwork4("255.255.255.255/32"), inner: xnetip.MustParseNetwork4("255.255.255.255/32"), want: true},
+		{name: "top /31 contains the all-ones host", outer: xnetip.MustParseNetwork4("255.255.255.254/31"), inner: xnetip.MustParseNetwork4("255.255.255.255/32"), want: true},
+		{name: "all-ones host does not contain its /31", outer: xnetip.MustParseNetwork4("255.255.255.255/32"), inner: xnetip.MustParseNetwork4("255.255.255.254/31"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -692,26 +692,26 @@ func Test_IPv4Network_Contains_ContiguousAndBoundary(t *testing.T) {
 // The subset relation is bitwise, so a numerically smaller mask is
 // not thereby a subset and the shortcut valid for contiguous masks
 // must not leak in.
-func Test_IPv4Network_Contains_NonContiguousMasks(t *testing.T) {
+func Test_Network4_Contains_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		outer xnetip.IPv4Network
-		inner xnetip.IPv4Network
+		outer xnetip.Network4
+		inner xnetip.Network4
 		want  bool
 	}{
-		{name: "pattern 10.*.0.* contains matching host", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseIPv4Network("10.42.0.99/32"), want: true},
-		{name: "pattern mismatch on a constrained octet", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseIPv4Network("10.42.1.99/32"), want: false},
-		{name: "pattern contains narrower pattern", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.0"), inner: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), want: true},
-		{name: "narrower pattern does not contain wider", outer: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), inner: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.0"), want: false},
-		{name: "mask subset fails on disjoint mask bits", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), want: false},
-		{name: "mask subset fails on disjoint mask bits reversed", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), inner: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), want: false},
-		{name: "hole in the middle octets contains refinement", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), inner: xnetip.MustParseIPv4Network("10.5.9.0/255.255.0.255"), want: true},
-		{name: "alternating mask contains its host refinement", outer: xnetip.MustParseIPv4Network("170.85.170.85/170.85.170.85"), inner: xnetip.MustParseIPv4Network("170.85.170.85/32"), want: true},
-		{name: "host does not contain the alternating pattern", outer: xnetip.MustParseIPv4Network("170.85.170.85/32"), inner: xnetip.MustParseIPv4Network("170.85.170.85/170.85.170.85"), want: false},
-		{name: "complementary alternating patterns", outer: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), inner: xnetip.MustParseIPv4Network("0.170.0.170/85.170.85.170"), want: false},
-		{name: "complementary alternating patterns reversed", outer: xnetip.MustParseIPv4Network("0.170.0.170/85.170.85.170"), inner: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), want: false},
-		{name: "numerically smaller mask is not a subset", outer: xnetip.MustParseIPv4Network("0.0.0.0/0.0.255.255"), inner: xnetip.MustParseIPv4Network("0.0.0.0/0.255.0.0"), want: false},
-		{name: "numerically larger mask is not a subset either", outer: xnetip.MustParseIPv4Network("0.0.0.0/0.255.0.0"), inner: xnetip.MustParseIPv4Network("0.0.0.0/0.0.255.255"), want: false},
+		{name: "pattern 10.*.0.* contains matching host", outer: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseNetwork4("10.42.0.99/32"), want: true},
+		{name: "pattern mismatch on a constrained octet", outer: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseNetwork4("10.42.1.99/32"), want: false},
+		{name: "pattern contains narrower pattern", outer: xnetip.MustParseNetwork4("10.0.0.0/255.0.0.0"), inner: xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255"), want: true},
+		{name: "narrower pattern does not contain wider", outer: xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255"), inner: xnetip.MustParseNetwork4("10.0.0.0/255.0.0.0"), want: false},
+		{name: "mask subset fails on disjoint mask bits", outer: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseNetwork4("10.0.0.0/255.0.0.255"), want: false},
+		{name: "mask subset fails on disjoint mask bits reversed", outer: xnetip.MustParseNetwork4("10.0.0.0/255.0.0.255"), inner: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), want: false},
+		{name: "hole in the middle octets contains refinement", outer: xnetip.MustParseNetwork4("10.0.0.0/255.0.0.255"), inner: xnetip.MustParseNetwork4("10.5.9.0/255.255.0.255"), want: true},
+		{name: "alternating mask contains its host refinement", outer: xnetip.MustParseNetwork4("170.85.170.85/170.85.170.85"), inner: xnetip.MustParseNetwork4("170.85.170.85/32"), want: true},
+		{name: "host does not contain the alternating pattern", outer: xnetip.MustParseNetwork4("170.85.170.85/32"), inner: xnetip.MustParseNetwork4("170.85.170.85/170.85.170.85"), want: false},
+		{name: "complementary alternating patterns", outer: xnetip.MustParseNetwork4("170.0.170.0/170.85.170.85"), inner: xnetip.MustParseNetwork4("0.170.0.170/85.170.85.170"), want: false},
+		{name: "complementary alternating patterns reversed", outer: xnetip.MustParseNetwork4("0.170.0.170/85.170.85.170"), inner: xnetip.MustParseNetwork4("170.0.170.0/170.85.170.85"), want: false},
+		{name: "numerically smaller mask is not a subset", outer: xnetip.MustParseNetwork4("0.0.0.0/0.0.255.255"), inner: xnetip.MustParseNetwork4("0.0.0.0/0.255.0.0"), want: false},
+		{name: "numerically larger mask is not a subset either", outer: xnetip.MustParseNetwork4("0.0.0.0/0.255.0.0"), inner: xnetip.MustParseNetwork4("0.0.0.0/0.0.255.255"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -721,29 +721,29 @@ func Test_IPv4Network_Contains_NonContiguousMasks(t *testing.T) {
 }
 
 // verifies that every network contains itself, whatever the mask shape.
-func Test_IPv4Network_Contains_ReflexiveProperty(t *testing.T) {
+func Test_Network4_Contains_ReflexiveProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		require.True(t, network.Contains(network))
 	})
 }
 
 // verifies that mutual containment holds exactly for equal networks.
-func Test_IPv4Network_Contains_AntisymmetryProperty(t *testing.T) {
+func Test_Network4_Contains_AntisymmetryProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		mutual := left.Contains(right) && right.Contains(left)
 		require.Equal(t, left == right, mutual)
 	})
 }
 
 // verifies that containment is transitive on random triples.
-func Test_IPv4Network_Contains_TransitivityProperty(t *testing.T) {
+func Test_Network4_Contains_TransitivityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		first := genIPv4Network.Draw(t, "first")
-		second := genIPv4Network.Draw(t, "second")
-		third := genIPv4Network.Draw(t, "third")
+		first := genNetwork4.Draw(t, "first")
+		second := genNetwork4.Draw(t, "second")
+		third := genNetwork4.Draw(t, "third")
 		if first.Contains(second) && second.Contains(third) {
 			require.True(t, first.Contains(third))
 		}
@@ -752,11 +752,11 @@ func Test_IPv4Network_Contains_TransitivityProperty(t *testing.T) {
 
 // verifies that the universe contains every network and is contained
 // only in itself.
-func Test_IPv4Network_Contains_UniverseProperty(t *testing.T) {
+func Test_Network4_Contains_UniverseProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		require.True(t, xnetip.IPv4Network{}.Contains(network))
-		require.Equal(t, network == xnetip.IPv4Network{}, network.Contains(xnetip.IPv4Network{}))
+		network := genNetwork4.Draw(t, "network")
+		require.True(t, xnetip.Network4{}.Contains(network))
+		require.Equal(t, network == xnetip.Network4{}, network.Contains(xnetip.Network4{}))
 	})
 }
 
@@ -766,18 +766,18 @@ func Test_IPv4Network_Contains_UniverseProperty(t *testing.T) {
 // Both masks live in the top eight bits, so enumerating the 256
 // patterns there is exhaustive: the outer network contains the inner
 // one exactly when every member of the inner is a member of the outer.
-func Test_IPv4Network_Contains_BruteForceMembershipProperty(t *testing.T) {
+func Test_Network4_Contains_BruteForceMembershipProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		outerAddr := uint32(rapid.IntRange(0, 255).Draw(t, "outer addr"))
 		outerMask := uint32(rapid.IntRange(0, 255).Draw(t, "outer mask"))
 		innerAddr := uint32(rapid.IntRange(0, 255).Draw(t, "inner addr"))
 		innerMask := uint32(rapid.IntRange(0, 255).Draw(t, "inner mask"))
-		outer, err := xnetip.IPv4NetworkFrom(
+		outer, err := xnetip.Network4From(
 			netipAddrFrom4Bits(outerAddr<<24),
 			netipAddrFrom4Bits(outerMask<<24),
 		)
 		require.NoError(t, err)
-		inner, err := xnetip.IPv4NetworkFrom(
+		inner, err := xnetip.Network4From(
 			netipAddrFrom4Bits(innerAddr<<24),
 			netipAddrFrom4Bits(innerMask<<24),
 		)
@@ -800,13 +800,13 @@ func Test_IPv4Network_Contains_BruteForceMembershipProperty(t *testing.T) {
 //
 // The oracle is the prefix pair: the outer prefix covers the inner
 // address and its length does not exceed the inner one.
-func Test_IPv4Network_Contains_MatchesNetipPrefixProperty(t *testing.T) {
+func Test_Network4_Contains_MatchesNetipPrefixProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		outerPrefix := genIPv4Prefix.Draw(t, "outer").Masked()
 		innerPrefix := genIPv4Prefix.Draw(t, "inner").Masked()
-		outer, ok := xnetip.IPv4NetworkFromPrefix(outerPrefix)
+		outer, ok := xnetip.Network4FromPrefix(outerPrefix)
 		require.True(t, ok)
-		inner, ok := xnetip.IPv4NetworkFromPrefix(innerPrefix)
+		inner, ok := xnetip.Network4FromPrefix(innerPrefix)
 		require.True(t, ok)
 		want := outerPrefix.Contains(innerPrefix.Addr()) && outerPrefix.Bits() <= innerPrefix.Bits()
 		require.Equal(t, want, outer.Contains(inner))
@@ -815,46 +815,46 @@ func Test_IPv4Network_Contains_MatchesNetipPrefixProperty(t *testing.T) {
 
 // verifies that containing a host route agrees with the net/netip
 // address containment of the same prefix.
-func Test_IPv4Network_Contains_HostRouteMatchesNetipProperty(t *testing.T) {
+func Test_Network4_Contains_HostRouteMatchesNetipProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		outerPrefix := genIPv4Prefix.Draw(t, "outer").Masked()
-		outer, ok := xnetip.IPv4NetworkFromPrefix(outerPrefix)
+		outer, ok := xnetip.Network4FromPrefix(outerPrefix)
 		require.True(t, ok)
 		address := genNetipAddr4.Draw(t, "address")
-		host, err := xnetip.IPv4NetworkFromAddr(address)
+		host, err := xnetip.Network4FromAddr(address)
 		require.NoError(t, err)
 		require.Equal(t, outerPrefix.Contains(address), outer.Contains(host))
 	})
 }
 
 // verifies that the containment check allocates nothing.
-func Test_IPv4Network_Contains_AllocationFree(t *testing.T) {
-	outer := xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255")
-	inner := xnetip.MustParseIPv4Network("10.5.9.0/255.255.0.255")
+func Test_Network4_Contains_AllocationFree(t *testing.T) {
+	outer := xnetip.MustParseNetwork4("10.0.0.0/255.0.0.255")
+	inner := xnetip.MustParseNetwork4("10.5.9.0/255.255.0.255")
 	requireNoAllocs(t, func() { okSink = outer.Contains(inner) })
 }
 
-func BenchmarkIPv4Network_Contains_ContiguousTrue(b *testing.B) {
-	outer := xnetip.MustParseIPv4Network("10.0.0.0/8")
-	inner := xnetip.MustParseIPv4Network("10.1.0.0/16")
+func BenchmarkNetwork4_Contains_ContiguousTrue(b *testing.B) {
+	outer := xnetip.MustParseNetwork4("10.0.0.0/8")
+	inner := xnetip.MustParseNetwork4("10.1.0.0/16")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = outer.Contains(inner)
 	}
 }
 
-func BenchmarkIPv4Network_Contains_ContiguousFalse(b *testing.B) {
-	outer := xnetip.MustParseIPv4Network("10.0.0.0/8")
-	inner := xnetip.MustParseIPv4Network("192.168.0.0/16")
+func BenchmarkNetwork4_Contains_ContiguousFalse(b *testing.B) {
+	outer := xnetip.MustParseNetwork4("10.0.0.0/8")
+	inner := xnetip.MustParseNetwork4("192.168.0.0/16")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = outer.Contains(inner)
 	}
 }
 
-func BenchmarkIPv4Network_Contains_NonContiguous(b *testing.B) {
-	outer := xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255")
-	inner := xnetip.MustParseIPv4Network("10.5.9.0/255.255.0.255")
+func BenchmarkNetwork4_Contains_NonContiguous(b *testing.B) {
+	outer := xnetip.MustParseNetwork4("10.0.0.0/255.0.0.255")
+	inner := xnetip.MustParseNetwork4("10.5.9.0/255.255.0.255")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = outer.Contains(inner)
@@ -868,25 +868,25 @@ func BenchmarkIPv4Network_Contains_NonContiguous(b *testing.B) {
 // networks and host routes intersect as themselves, the universe is
 // neutral, and a disjoint pair answers the zero network so a caller
 // ignoring the flag cannot pick up plausible garbage.
-func Test_IPv4Network_Intersection_ContiguousAndBoundary(t *testing.T) {
+func Test_Network4_Intersection_ContiguousAndBoundary(t *testing.T) {
 	cases := []struct {
 		name   string
-		left   xnetip.IPv4Network
-		right  xnetip.IPv4Network
-		want   xnetip.IPv4Network
+		left   xnetip.Network4
+		right  xnetip.Network4
+		want   xnetip.Network4
 		wantOK bool
 	}{
-		{name: "containment yields the inner network", left: xnetip.MustParseIPv4Network("192.168.0.0/16"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: xnetip.MustParseIPv4Network("192.168.1.0/24"), wantOK: true},
-		{name: "containment reversed yields the inner network", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: xnetip.MustParseIPv4Network("192.168.1.0/24"), wantOK: true},
-		{name: "identical networks intersect as themselves", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: xnetip.MustParseIPv4Network("10.0.0.0/8"), wantOK: true},
-		{name: "disjoint contiguous networks answer the zero network", left: xnetip.MustParseIPv4Network("192.168.0.0/16"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: xnetip.IPv4Network{}, wantOK: false},
-		{name: "universe is neutral", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: xnetip.MustParseIPv4Network("192.168.1.0/24"), wantOK: true},
-		{name: "universe is neutral reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: xnetip.MustParseIPv4Network("192.168.1.0/24"), wantOK: true},
-		{name: "same host route intersects as itself", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: xnetip.MustParseIPv4Network("10.0.0.1/32"), wantOK: true},
-		{name: "different host routes are disjoint", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.2/32"), want: xnetip.IPv4Network{}, wantOK: false},
-		{name: "universe with universe", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: xnetip.MustParseIPv4Network("0.0.0.0/0"), wantOK: true},
-		{name: "adjacent /24 siblings are disjoint", left: xnetip.MustParseIPv4Network("10.0.0.0/24"), right: xnetip.MustParseIPv4Network("10.0.1.0/24"), want: xnetip.IPv4Network{}, wantOK: false},
-		{name: "host route inside /31", left: xnetip.MustParseIPv4Network("10.0.0.0/31"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: xnetip.MustParseIPv4Network("10.0.0.1/32"), wantOK: true},
+		{name: "containment yields the inner network", left: xnetip.MustParseNetwork4("192.168.0.0/16"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: xnetip.MustParseNetwork4("192.168.1.0/24"), wantOK: true},
+		{name: "containment reversed yields the inner network", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/16"), want: xnetip.MustParseNetwork4("192.168.1.0/24"), wantOK: true},
+		{name: "identical networks intersect as themselves", left: xnetip.MustParseNetwork4("10.0.0.0/8"), right: xnetip.MustParseNetwork4("10.0.0.0/8"), want: xnetip.MustParseNetwork4("10.0.0.0/8"), wantOK: true},
+		{name: "disjoint contiguous networks answer the zero network", left: xnetip.MustParseNetwork4("192.168.0.0/16"), right: xnetip.MustParseNetwork4("10.0.0.0/8"), want: xnetip.Network4{}, wantOK: false},
+		{name: "universe is neutral", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: xnetip.MustParseNetwork4("192.168.1.0/24"), wantOK: true},
+		{name: "universe is neutral reversed", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("0.0.0.0/0"), want: xnetip.MustParseNetwork4("192.168.1.0/24"), wantOK: true},
+		{name: "same host route intersects as itself", left: xnetip.MustParseNetwork4("10.0.0.1/32"), right: xnetip.MustParseNetwork4("10.0.0.1/32"), want: xnetip.MustParseNetwork4("10.0.0.1/32"), wantOK: true},
+		{name: "different host routes are disjoint", left: xnetip.MustParseNetwork4("10.0.0.1/32"), right: xnetip.MustParseNetwork4("10.0.0.2/32"), want: xnetip.Network4{}, wantOK: false},
+		{name: "universe with universe", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("0.0.0.0/0"), want: xnetip.MustParseNetwork4("0.0.0.0/0"), wantOK: true},
+		{name: "adjacent /24 siblings are disjoint", left: xnetip.MustParseNetwork4("10.0.0.0/24"), right: xnetip.MustParseNetwork4("10.0.1.0/24"), want: xnetip.Network4{}, wantOK: false},
+		{name: "host route inside /31", left: xnetip.MustParseNetwork4("10.0.0.0/31"), right: xnetip.MustParseNetwork4("10.0.0.1/32"), want: xnetip.MustParseNetwork4("10.0.0.1/32"), wantOK: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -905,23 +905,23 @@ func Test_IPv4Network_Intersection_ContiguousAndBoundary(t *testing.T) {
 // two complementary alternating patterns collapsing to a single host
 // route, while one shared constrained bit that differs makes the
 // pair disjoint.
-func Test_IPv4Network_Intersection_NonContiguousMasks(t *testing.T) {
+func Test_Network4_Intersection_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name   string
-		left   xnetip.IPv4Network
-		right  xnetip.IPv4Network
-		want   xnetip.IPv4Network
+		left   xnetip.Network4
+		right  xnetip.Network4
+		want   xnetip.Network4
 		wantOK bool
 	}{
-		{name: "one non-contiguous", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0"), want: xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255"), wantOK: true},
-		{name: "one non-contiguous reversed", left: xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), want: xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255"), wantOK: true},
-		{name: "both non-contiguous", left: xnetip.MustParseIPv4Network("10.0.10.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.0.0.5/255.0.0.255"), want: xnetip.MustParseIPv4Network("10.0.10.5/255.0.255.255"), wantOK: true},
-		{name: "both non-contiguous reversed", left: xnetip.MustParseIPv4Network("10.0.0.5/255.0.0.255"), right: xnetip.MustParseIPv4Network("10.0.10.0/255.0.255.0"), want: xnetip.MustParseIPv4Network("10.0.10.5/255.0.255.255"), wantOK: true},
-		{name: "single common address", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.5.0.0/255.255.0.255"), want: xnetip.MustParseIPv4Network("10.5.0.0/32"), wantOK: true},
-		{name: "alternating masks always intersect", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("0.170.0.170/85.170.85.170"), want: xnetip.MustParseIPv4Network("170.170.170.170/32"), wantOK: true},
-		{name: "disjoint on a shared top octet", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("11.0.0.0/255.0.255.0"), want: xnetip.IPv4Network{}, wantOK: false},
-		{name: "disjoint on a shared low bit", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.5.1.0/255.255.255.0"), want: xnetip.IPv4Network{}, wantOK: false},
-		{name: "pattern with host route inside", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.42.0.99/32"), want: xnetip.MustParseIPv4Network("10.42.0.99/32"), wantOK: true},
+		{name: "one non-contiguous", left: xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255"), right: xnetip.MustParseNetwork4("10.1.0.0/255.255.0.0"), want: xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255"), wantOK: true},
+		{name: "one non-contiguous reversed", left: xnetip.MustParseNetwork4("10.1.0.0/255.255.0.0"), right: xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255"), want: xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255"), wantOK: true},
+		{name: "both non-contiguous", left: xnetip.MustParseNetwork4("10.0.10.0/255.0.255.0"), right: xnetip.MustParseNetwork4("10.0.0.5/255.0.0.255"), want: xnetip.MustParseNetwork4("10.0.10.5/255.0.255.255"), wantOK: true},
+		{name: "both non-contiguous reversed", left: xnetip.MustParseNetwork4("10.0.0.5/255.0.0.255"), right: xnetip.MustParseNetwork4("10.0.10.0/255.0.255.0"), want: xnetip.MustParseNetwork4("10.0.10.5/255.0.255.255"), wantOK: true},
+		{name: "single common address", left: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork4("10.5.0.0/255.255.0.255"), want: xnetip.MustParseNetwork4("10.5.0.0/32"), wantOK: true},
+		{name: "alternating masks always intersect", left: xnetip.MustParseNetwork4("170.0.170.0/170.85.170.85"), right: xnetip.MustParseNetwork4("0.170.0.170/85.170.85.170"), want: xnetip.MustParseNetwork4("170.170.170.170/32"), wantOK: true},
+		{name: "disjoint on a shared top octet", left: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork4("11.0.0.0/255.0.255.0"), want: xnetip.Network4{}, wantOK: false},
+		{name: "disjoint on a shared low bit", left: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork4("10.5.1.0/255.255.255.0"), want: xnetip.Network4{}, wantOK: false},
+		{name: "pattern with host route inside", left: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork4("10.42.0.99/32"), want: xnetip.MustParseNetwork4("10.42.0.99/32"), wantOK: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -934,10 +934,10 @@ func Test_IPv4Network_Intersection_NonContiguousMasks(t *testing.T) {
 
 // verifies that intersection is commutative in both the value and the
 // flag.
-func Test_IPv4Network_Intersection_CommutativityProperty(t *testing.T) {
+func Test_Network4_Intersection_CommutativityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		leftValue, leftOK := left.Intersection(right)
 		rightValue, rightOK := right.Intersection(left)
 		require.Equal(t, leftOK, rightOK)
@@ -946,9 +946,9 @@ func Test_IPv4Network_Intersection_CommutativityProperty(t *testing.T) {
 }
 
 // verifies that every network intersected with itself is itself.
-func Test_IPv4Network_Intersection_SelfIntersectionProperty(t *testing.T) {
+func Test_Network4_Intersection_SelfIntersectionProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		got, ok := network.Intersection(network)
 		require.True(t, ok)
 		require.Equal(t, network, got)
@@ -957,10 +957,10 @@ func Test_IPv4Network_Intersection_SelfIntersectionProperty(t *testing.T) {
 
 // verifies that when one network contains the other the intersection
 // is the contained one.
-func Test_IPv4Network_Intersection_ContainmentYieldsInnerProperty(t *testing.T) {
+func Test_Network4_Intersection_ContainmentYieldsInnerProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		outer := genIPv4Network.Draw(t, "outer")
-		inner := genIPv4Network.Draw(t, "inner")
+		outer := genNetwork4.Draw(t, "outer")
+		inner := genNetwork4.Draw(t, "inner")
 		if outer.Contains(inner) {
 			got, ok := outer.Intersection(inner)
 			require.True(t, ok)
@@ -970,10 +970,10 @@ func Test_IPv4Network_Intersection_ContainmentYieldsInnerProperty(t *testing.T) 
 }
 
 // verifies that an existing intersection is contained in both inputs.
-func Test_IPv4Network_Intersection_SubsetOfBothProperty(t *testing.T) {
+func Test_Network4_Intersection_SubsetOfBothProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		if got, ok := left.Intersection(right); ok {
 			require.True(t, left.Contains(got))
 			require.True(t, right.Contains(got))
@@ -987,10 +987,10 @@ func Test_IPv4Network_Intersection_SubsetOfBothProperty(t *testing.T) {
 // The mask union constrains every bit either input constrains and the
 // address union stays inside it, so the shape check subsumes the
 // normalization one.
-func Test_IPv4Network_Intersection_ShapeAndNormalizedProperty(t *testing.T) {
+func Test_Network4_Intersection_ShapeAndNormalizedProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		got, ok := left.Intersection(right)
 		if !ok {
 			return
@@ -1013,18 +1013,18 @@ func Test_IPv4Network_Intersection_ShapeAndNormalizedProperty(t *testing.T) {
 // Both masks live in the top eight bits, so enumerating the 256
 // patterns there is exhaustive: an address belongs to both inputs
 // exactly when the intersection exists and the address belongs to it.
-func Test_IPv4Network_Intersection_BruteForceMembershipProperty(t *testing.T) {
+func Test_Network4_Intersection_BruteForceMembershipProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		leftAddr := uint32(rapid.IntRange(0, 255).Draw(t, "left addr"))
 		leftMask := uint32(rapid.IntRange(0, 255).Draw(t, "left mask"))
 		rightAddr := uint32(rapid.IntRange(0, 255).Draw(t, "right addr"))
 		rightMask := uint32(rapid.IntRange(0, 255).Draw(t, "right mask"))
-		left, err := xnetip.IPv4NetworkFrom(
+		left, err := xnetip.Network4From(
 			netipAddrFrom4Bits(leftAddr<<24),
 			netipAddrFrom4Bits(leftMask<<24),
 		)
 		require.NoError(t, err)
-		right, err := xnetip.IPv4NetworkFrom(
+		right, err := xnetip.Network4From(
 			netipAddrFrom4Bits(rightAddr<<24),
 			netipAddrFrom4Bits(rightMask<<24),
 		)
@@ -1048,13 +1048,13 @@ func Test_IPv4Network_Intersection_BruteForceMembershipProperty(t *testing.T) {
 //
 // Two prefixes overlap exactly when the networks intersect, and the
 // intersection of two overlapping prefixes is the more specific one.
-func Test_IPv4Network_Intersection_MatchesNetipOverlapsProperty(t *testing.T) {
+func Test_Network4_Intersection_MatchesNetipOverlapsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		leftPrefix := genIPv4Prefix.Draw(t, "left").Masked()
 		rightPrefix := genIPv4Prefix.Draw(t, "right").Masked()
-		left, ok := xnetip.IPv4NetworkFromPrefix(leftPrefix)
+		left, ok := xnetip.Network4FromPrefix(leftPrefix)
 		require.True(t, ok)
-		right, ok := xnetip.IPv4NetworkFromPrefix(rightPrefix)
+		right, ok := xnetip.Network4FromPrefix(rightPrefix)
 		require.True(t, ok)
 		got, ok := left.Intersection(right)
 		require.Equal(t, leftPrefix.Overlaps(rightPrefix), ok)
@@ -1070,33 +1070,33 @@ func Test_IPv4Network_Intersection_MatchesNetipOverlapsProperty(t *testing.T) {
 }
 
 // verifies that the intersection allocates nothing.
-func Test_IPv4Network_Intersection_AllocationFree(t *testing.T) {
-	left := xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255")
-	right := xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0")
+func Test_Network4_Intersection_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255")
+	right := xnetip.MustParseNetwork4("10.1.0.0/255.255.0.0")
 	requireNoAllocs(t, func() { networkSink, okSink = left.Intersection(right) })
 }
 
-func BenchmarkIPv4Network_Intersection_ContiguousOverlapping(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("192.168.0.0/16")
-	right := xnetip.MustParseIPv4Network("192.168.1.0/24")
+func BenchmarkNetwork4_Intersection_ContiguousOverlapping(b *testing.B) {
+	left := xnetip.MustParseNetwork4("192.168.0.0/16")
+	right := xnetip.MustParseNetwork4("192.168.1.0/24")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.Intersection(right)
 	}
 }
 
-func BenchmarkIPv4Network_Intersection_ContiguousDisjoint(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("192.168.0.0/16")
-	right := xnetip.MustParseIPv4Network("10.0.0.0/8")
+func BenchmarkNetwork4_Intersection_ContiguousDisjoint(b *testing.B) {
+	left := xnetip.MustParseNetwork4("192.168.0.0/16")
+	right := xnetip.MustParseNetwork4("10.0.0.0/8")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.Intersection(right)
 	}
 }
 
-func BenchmarkIPv4Network_Intersection_NonContiguous(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255")
-	right := xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0")
+func BenchmarkNetwork4_Intersection_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255")
+	right := xnetip.MustParseNetwork4("10.1.0.0/255.255.0.0")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.Intersection(right)
@@ -1108,26 +1108,26 @@ func BenchmarkIPv4Network_Intersection_NonContiguous(b *testing.B) {
 //
 // A network always intersects itself, the universe intersects
 // everything, and two host routes intersect only when equal.
-func Test_IPv4Network_Intersects_ContiguousAndBoundary(t *testing.T) {
+func Test_Network4_Intersects_ContiguousAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
 		want  bool
 	}{
-		{name: "overlapping contiguous", left: xnetip.MustParseIPv4Network("192.168.0.0/16"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: true},
-		{name: "overlapping contiguous reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: true},
-		{name: "disjoint contiguous", left: xnetip.MustParseIPv4Network("192.168.0.0/16"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: false},
-		{name: "disjoint contiguous reversed", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
-		{name: "self", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: true},
-		{name: "unspecified with anything", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: true},
-		{name: "anything with unspecified", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: true},
-		{name: "unspecified with itself", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: true},
-		{name: "equal host routes", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: true},
-		{name: "different host routes", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.2/32"), want: false},
-		{name: "host route inside a block", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: true},
-		{name: "block around a host route", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: true},
-		{name: "all-ones host route vs the universe", left: xnetip.MustParseIPv4Network("255.255.255.255/32"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: true},
+		{name: "overlapping contiguous", left: xnetip.MustParseNetwork4("192.168.0.0/16"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: true},
+		{name: "overlapping contiguous reversed", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/16"), want: true},
+		{name: "disjoint contiguous", left: xnetip.MustParseNetwork4("192.168.0.0/16"), right: xnetip.MustParseNetwork4("10.0.0.0/8"), want: false},
+		{name: "disjoint contiguous reversed", left: xnetip.MustParseNetwork4("10.0.0.0/8"), right: xnetip.MustParseNetwork4("192.168.0.0/16"), want: false},
+		{name: "self", left: xnetip.MustParseNetwork4("10.0.0.0/8"), right: xnetip.MustParseNetwork4("10.0.0.0/8"), want: true},
+		{name: "unspecified with anything", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: true},
+		{name: "anything with unspecified", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("0.0.0.0/0"), want: true},
+		{name: "unspecified with itself", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("0.0.0.0/0"), want: true},
+		{name: "equal host routes", left: xnetip.MustParseNetwork4("10.0.0.1/32"), right: xnetip.MustParseNetwork4("10.0.0.1/32"), want: true},
+		{name: "different host routes", left: xnetip.MustParseNetwork4("10.0.0.1/32"), right: xnetip.MustParseNetwork4("10.0.0.2/32"), want: false},
+		{name: "host route inside a block", left: xnetip.MustParseNetwork4("10.0.0.1/32"), right: xnetip.MustParseNetwork4("10.0.0.0/8"), want: true},
+		{name: "block around a host route", left: xnetip.MustParseNetwork4("10.0.0.0/8"), right: xnetip.MustParseNetwork4("10.0.0.1/32"), want: true},
+		{name: "all-ones host route vs the universe", left: xnetip.MustParseNetwork4("255.255.255.255/32"), right: xnetip.MustParseNetwork4("0.0.0.0/0"), want: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1142,20 +1142,20 @@ func Test_IPv4Network_Intersects_ContiguousAndBoundary(t *testing.T) {
 // Masks sharing no set bit always intersect whatever the addresses,
 // while a single shared constrained bit that differs keeps the
 // networks apart.
-func Test_IPv4Network_Intersects_NonContiguousMasks(t *testing.T) {
+func Test_Network4_Intersects_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
 		want  bool
 	}{
-		{name: "pattern overlaps block", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0"), want: true},
-		{name: "pattern overlaps block reversed", left: xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), want: true},
-		{name: "pattern disjoint from block", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("11.0.0.0/255.0.0.0"), want: false},
-		{name: "two patterns meeting in one address", left: xnetip.MustParseIPv4Network("10.0.10.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.0.0.5/255.0.0.255"), want: true},
-		{name: "alternating masks always intersect", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("0.170.0.170/85.170.85.170"), want: true},
-		{name: "same pattern mask, different fixed octet", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.2/255.0.0.255"), want: false},
-		{name: "pattern vs host route matching it", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.42.0.99/32"), want: true},
+		{name: "pattern overlaps block", left: xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255"), right: xnetip.MustParseNetwork4("10.1.0.0/255.255.0.0"), want: true},
+		{name: "pattern overlaps block reversed", left: xnetip.MustParseNetwork4("10.1.0.0/255.255.0.0"), right: xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255"), want: true},
+		{name: "pattern disjoint from block", left: xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255"), right: xnetip.MustParseNetwork4("11.0.0.0/255.0.0.0"), want: false},
+		{name: "two patterns meeting in one address", left: xnetip.MustParseNetwork4("10.0.10.0/255.0.255.0"), right: xnetip.MustParseNetwork4("10.0.0.5/255.0.0.255"), want: true},
+		{name: "alternating masks always intersect", left: xnetip.MustParseNetwork4("170.0.170.0/170.85.170.85"), right: xnetip.MustParseNetwork4("0.170.0.170/85.170.85.170"), want: true},
+		{name: "same pattern mask, different fixed octet", left: xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255"), right: xnetip.MustParseNetwork4("10.0.0.2/255.0.0.255"), want: false},
+		{name: "pattern vs host route matching it", left: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork4("10.42.0.99/32"), want: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1165,20 +1165,20 @@ func Test_IPv4Network_Intersects_NonContiguousMasks(t *testing.T) {
 }
 
 // verifies that the predicate is symmetric.
-func Test_IPv4Network_Intersects_SymmetryProperty(t *testing.T) {
+func Test_Network4_Intersects_SymmetryProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		require.Equal(t, left.Intersects(right), right.Intersects(left))
 	})
 }
 
 // verifies that the predicate answers exactly whether the
 // intersection exists.
-func Test_IPv4Network_Intersects_EquivalentToIntersectionProperty(t *testing.T) {
+func Test_Network4_Intersects_EquivalentToIntersectionProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		_, ok := left.Intersection(right)
 		require.Equal(t, ok, left.Intersects(right))
 	})
@@ -1186,19 +1186,19 @@ func Test_IPv4Network_Intersects_EquivalentToIntersectionProperty(t *testing.T) 
 
 // verifies that every network intersects itself and the universe
 // intersects every network.
-func Test_IPv4Network_Intersects_ReflexiveAndUniverseProperty(t *testing.T) {
+func Test_Network4_Intersects_ReflexiveAndUniverseProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		require.True(t, network.Intersects(network))
-		require.True(t, xnetip.IPv4Network{}.Intersects(network))
+		require.True(t, xnetip.Network4{}.Intersects(network))
 	})
 }
 
 // verifies that containment implies intersection.
-func Test_IPv4Network_Intersects_ContainmentImpliesIntersectionProperty(t *testing.T) {
+func Test_Network4_Intersects_ContainmentImpliesIntersectionProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		outer := genIPv4Network.Draw(t, "outer")
-		inner := genIPv4Network.Draw(t, "inner")
+		outer := genNetwork4.Draw(t, "outer")
+		inner := genNetwork4.Draw(t, "inner")
 		if outer.Contains(inner) {
 			require.True(t, outer.Intersects(inner))
 		}
@@ -1211,18 +1211,18 @@ func Test_IPv4Network_Intersects_ContainmentImpliesIntersectionProperty(t *testi
 // Both masks live in the top eight bits, so enumerating the 256
 // patterns there is exhaustive: the networks intersect exactly when
 // some address belongs to both.
-func Test_IPv4Network_Intersects_BruteForceMembershipProperty(t *testing.T) {
+func Test_Network4_Intersects_BruteForceMembershipProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		leftAddr := uint32(rapid.IntRange(0, 255).Draw(t, "left addr"))
 		leftMask := uint32(rapid.IntRange(0, 255).Draw(t, "left mask"))
 		rightAddr := uint32(rapid.IntRange(0, 255).Draw(t, "right addr"))
 		rightMask := uint32(rapid.IntRange(0, 255).Draw(t, "right mask"))
-		left, err := xnetip.IPv4NetworkFrom(
+		left, err := xnetip.Network4From(
 			netipAddrFrom4Bits(leftAddr<<24),
 			netipAddrFrom4Bits(leftMask<<24),
 		)
 		require.NoError(t, err)
-		right, err := xnetip.IPv4NetworkFrom(
+		right, err := xnetip.Network4From(
 			netipAddrFrom4Bits(rightAddr<<24),
 			netipAddrFrom4Bits(rightMask<<24),
 		)
@@ -1240,46 +1240,46 @@ func Test_IPv4Network_Intersects_BruteForceMembershipProperty(t *testing.T) {
 
 // verifies that on contiguous networks the predicate agrees with the
 // net/netip overlap rule.
-func Test_IPv4Network_Intersects_MatchesNetipOverlapsProperty(t *testing.T) {
+func Test_Network4_Intersects_MatchesNetipOverlapsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		leftPrefix := genIPv4Prefix.Draw(t, "left").Masked()
 		rightPrefix := genIPv4Prefix.Draw(t, "right").Masked()
-		left, ok := xnetip.IPv4NetworkFromPrefix(leftPrefix)
+		left, ok := xnetip.Network4FromPrefix(leftPrefix)
 		require.True(t, ok)
-		right, ok := xnetip.IPv4NetworkFromPrefix(rightPrefix)
+		right, ok := xnetip.Network4FromPrefix(rightPrefix)
 		require.True(t, ok)
 		require.Equal(t, leftPrefix.Overlaps(rightPrefix), left.Intersects(right))
 	})
 }
 
 // verifies that the predicate allocates nothing.
-func Test_IPv4Network_Intersects_AllocationFree(t *testing.T) {
-	left := xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255")
-	right := xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0")
+func Test_Network4_Intersects_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255")
+	right := xnetip.MustParseNetwork4("10.1.0.0/255.255.0.0")
 	requireNoAllocs(t, func() { okSink = left.Intersects(right) })
 }
 
-func BenchmarkIPv4Network_Intersects_Contiguous(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("192.168.0.0/16")
-	right := xnetip.MustParseIPv4Network("192.168.1.0/24")
+func BenchmarkNetwork4_Intersects_Contiguous(b *testing.B) {
+	left := xnetip.MustParseNetwork4("192.168.0.0/16")
+	right := xnetip.MustParseNetwork4("192.168.1.0/24")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = left.Intersects(right)
 	}
 }
 
-func BenchmarkIPv4Network_Intersects_Disjoint(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("192.168.0.0/16")
-	right := xnetip.MustParseIPv4Network("10.0.0.0/8")
+func BenchmarkNetwork4_Intersects_Disjoint(b *testing.B) {
+	left := xnetip.MustParseNetwork4("192.168.0.0/16")
+	right := xnetip.MustParseNetwork4("10.0.0.0/8")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = left.Intersects(right)
 	}
 }
 
-func BenchmarkIPv4Network_Intersects_NonContiguous(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255")
-	right := xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0")
+func BenchmarkNetwork4_Intersects_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255")
+	right := xnetip.MustParseNetwork4("10.1.0.0/255.255.0.0")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = left.Intersects(right)
@@ -1291,20 +1291,20 @@ func BenchmarkIPv4Network_Intersects_NonContiguous(b *testing.B) {
 //
 // No network is disjoint from itself or from the universe, and two
 // host routes are disjoint exactly when they differ.
-func Test_IPv4Network_IsDisjoint_ContiguousAndBoundary(t *testing.T) {
+func Test_Network4_IsDisjoint_ContiguousAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
 		want  bool
 	}{
-		{name: "overlapping contiguous", left: xnetip.MustParseIPv4Network("192.168.0.0/16"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: false},
-		{name: "overlapping contiguous reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
-		{name: "disjoint contiguous", left: xnetip.MustParseIPv4Network("192.168.0.0/16"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: true},
-		{name: "self", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: false},
-		{name: "unspecified with anything", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("203.0.113.0/24"), want: false},
-		{name: "different host routes", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.2/32"), want: true},
-		{name: "equal host routes", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: false},
+		{name: "overlapping contiguous", left: xnetip.MustParseNetwork4("192.168.0.0/16"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: false},
+		{name: "overlapping contiguous reversed", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/16"), want: false},
+		{name: "disjoint contiguous", left: xnetip.MustParseNetwork4("192.168.0.0/16"), right: xnetip.MustParseNetwork4("10.0.0.0/8"), want: true},
+		{name: "self", left: xnetip.MustParseNetwork4("10.0.0.0/8"), right: xnetip.MustParseNetwork4("10.0.0.0/8"), want: false},
+		{name: "unspecified with anything", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("203.0.113.0/24"), want: false},
+		{name: "different host routes", left: xnetip.MustParseNetwork4("10.0.0.1/32"), right: xnetip.MustParseNetwork4("10.0.0.2/32"), want: true},
+		{name: "equal host routes", left: xnetip.MustParseNetwork4("10.0.0.1/32"), right: xnetip.MustParseNetwork4("10.0.0.1/32"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1318,16 +1318,16 @@ func Test_IPv4Network_IsDisjoint_ContiguousAndBoundary(t *testing.T) {
 //
 // Masks sharing no set bit are never disjoint, whatever the
 // addresses.
-func Test_IPv4Network_IsDisjoint_NonContiguousMasks(t *testing.T) {
+func Test_Network4_IsDisjoint_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
 		want  bool
 	}{
-		{name: "pattern disjoint from block", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("11.0.0.0/255.0.0.0"), want: true},
-		{name: "pattern overlapping block", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0"), want: false},
-		{name: "alternating masks", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("0.170.0.170/85.170.85.170"), want: false},
+		{name: "pattern disjoint from block", left: xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255"), right: xnetip.MustParseNetwork4("11.0.0.0/255.0.0.0"), want: true},
+		{name: "pattern overlapping block", left: xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255"), right: xnetip.MustParseNetwork4("10.1.0.0/255.255.0.0"), want: false},
+		{name: "alternating masks", left: xnetip.MustParseNetwork4("170.0.170.0/170.85.170.85"), right: xnetip.MustParseNetwork4("0.170.0.170/85.170.85.170"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1338,10 +1338,10 @@ func Test_IPv4Network_IsDisjoint_NonContiguousMasks(t *testing.T) {
 
 // verifies that disjointness is the exact complement of intersection,
 // symmetric, and never holds for a network against itself.
-func Test_IPv4Network_IsDisjoint_ComplementOfIntersectsProperty(t *testing.T) {
+func Test_Network4_IsDisjoint_ComplementOfIntersectsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		require.Equal(t, !left.Intersects(right), left.IsDisjoint(right))
 		require.Equal(t, left.IsDisjoint(right), right.IsDisjoint(left))
 		require.False(t, left.IsDisjoint(left))
@@ -1349,9 +1349,9 @@ func Test_IPv4Network_IsDisjoint_ComplementOfIntersectsProperty(t *testing.T) {
 }
 
 // verifies that the predicate allocates nothing.
-func Test_IPv4Network_IsDisjoint_AllocationFree(t *testing.T) {
-	left := xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255")
-	right := xnetip.MustParseIPv4Network("11.0.0.0/255.0.0.0")
+func Test_Network4_IsDisjoint_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseNetwork4("10.0.0.1/255.0.0.255")
+	right := xnetip.MustParseNetwork4("11.0.0.0/255.0.0.0")
 	requireNoAllocs(t, func() { okSink = left.IsDisjoint(right) })
 }
 
@@ -1361,25 +1361,25 @@ func Test_IPv4Network_IsDisjoint_AllocationFree(t *testing.T) {
 // Identical networks are not adjacent, different masks never are, and
 // the differing bit may sit above the contiguous boundary — those
 // siblings merge into a non-contiguous mask.
-func Test_IPv4Network_IsAdjacent_ContiguousAndBoundary(t *testing.T) {
+func Test_Network4_IsAdjacent_ContiguousAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
 		want  bool
 	}{
-		{name: "contiguous siblings", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: true},
-		{name: "contiguous siblings reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: true},
-		{name: "identical", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: false},
-		{name: "different masks", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
-		{name: "same mask, two differing bits", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.3.0/24"), want: false},
-		{name: "one differing bit above the boundary", left: xnetip.MustParseIPv4Network("10.0.0.0/24"), right: xnetip.MustParseIPv4Network("10.0.2.0/24"), want: true},
-		{name: "adjacent at the top mask bit", left: xnetip.MustParseIPv4Network("0.0.0.0/2"), right: xnetip.MustParseIPv4Network("128.0.0.0/2"), want: true},
-		{name: "host routes differing in bit 0", left: xnetip.MustParseIPv4Network("192.168.0.0/32"), right: xnetip.MustParseIPv4Network("192.168.0.1/32"), want: true},
-		{name: "host routes differing in bit 31", left: xnetip.MustParseIPv4Network("0.0.0.1/32"), right: xnetip.MustParseIPv4Network("128.0.0.1/32"), want: true},
-		{name: "host routes differing in two bits", left: xnetip.MustParseIPv4Network("10.0.0.0/32"), right: xnetip.MustParseIPv4Network("10.0.0.3/32"), want: false},
-		{name: "default route with itself", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: false},
-		{name: "all-ones host and its bit-31 neighbour", left: xnetip.MustParseIPv4Network("255.255.255.255/32"), right: xnetip.MustParseIPv4Network("127.255.255.255/32"), want: true},
+		{name: "contiguous siblings", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: true},
+		{name: "contiguous siblings reversed", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/24"), want: true},
+		{name: "identical", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/24"), want: false},
+		{name: "different masks", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/16"), want: false},
+		{name: "same mask, two differing bits", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.3.0/24"), want: false},
+		{name: "one differing bit above the boundary", left: xnetip.MustParseNetwork4("10.0.0.0/24"), right: xnetip.MustParseNetwork4("10.0.2.0/24"), want: true},
+		{name: "adjacent at the top mask bit", left: xnetip.MustParseNetwork4("0.0.0.0/2"), right: xnetip.MustParseNetwork4("128.0.0.0/2"), want: true},
+		{name: "host routes differing in bit 0", left: xnetip.MustParseNetwork4("192.168.0.0/32"), right: xnetip.MustParseNetwork4("192.168.0.1/32"), want: true},
+		{name: "host routes differing in bit 31", left: xnetip.MustParseNetwork4("0.0.0.1/32"), right: xnetip.MustParseNetwork4("128.0.0.1/32"), want: true},
+		{name: "host routes differing in two bits", left: xnetip.MustParseNetwork4("10.0.0.0/32"), right: xnetip.MustParseNetwork4("10.0.0.3/32"), want: false},
+		{name: "default route with itself", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("0.0.0.0/0"), want: false},
+		{name: "all-ones host and its bit-31 neighbour", left: xnetip.MustParseNetwork4("255.255.255.255/32"), right: xnetip.MustParseNetwork4("127.255.255.255/32"), want: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1390,19 +1390,19 @@ func Test_IPv4Network_IsAdjacent_ContiguousAndBoundary(t *testing.T) {
 
 // verifies that adjacency of non-contiguous networks counts only
 // masked bits, wherever the differing bit sits in the pattern.
-func Test_IPv4Network_IsAdjacent_NonContiguousMasks(t *testing.T) {
+func Test_Network4_IsAdjacent_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
 		want  bool
 	}{
-		{name: "differing in a masked middle bit", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255"), want: true},
-		{name: "differing in a masked middle bit reversed", left: xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), want: true},
-		{name: "differing in the lowest masked bit", left: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), want: true},
-		{name: "same pattern mask, two differing bits", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.3.0.1/255.255.0.255"), want: false},
-		{name: "pattern vs contiguous of equal popcount", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.0/255.255.255.0"), want: false},
-		{name: "alternating mask, one differing bit", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("170.0.170.1/170.85.170.85"), want: true},
+		{name: "differing in a masked middle bit", left: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), right: xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255"), want: true},
+		{name: "differing in a masked middle bit reversed", left: xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255"), right: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), want: true},
+		{name: "differing in the lowest masked bit", left: xnetip.MustParseNetwork4("10.0.0.0/255.255.0.255"), right: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), want: true},
+		{name: "same pattern mask, two differing bits", left: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), right: xnetip.MustParseNetwork4("10.3.0.1/255.255.0.255"), want: false},
+		{name: "pattern vs contiguous of equal popcount", left: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), right: xnetip.MustParseNetwork4("10.0.0.0/255.255.255.0"), want: false},
+		{name: "alternating mask, one differing bit", left: xnetip.MustParseNetwork4("170.0.170.0/170.85.170.85"), right: xnetip.MustParseNetwork4("170.0.170.1/170.85.170.85"), want: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1413,10 +1413,10 @@ func Test_IPv4Network_IsAdjacent_NonContiguousMasks(t *testing.T) {
 
 // verifies that adjacency is symmetric, irreflexive and impossible
 // across different masks.
-func Test_IPv4Network_IsAdjacent_SymmetryAndMaskProperty(t *testing.T) {
+func Test_Network4_IsAdjacent_SymmetryAndMaskProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		require.Equal(t, left.IsAdjacent(right), right.IsAdjacent(left))
 		require.False(t, left.IsAdjacent(left))
 		if left.Mask() != right.Mask() {
@@ -1431,9 +1431,9 @@ func Test_IPv4Network_IsAdjacent_SymmetryAndMaskProperty(t *testing.T) {
 // Random pairs are almost never adjacent, so the positive case is
 // constructed: any network with a non-empty mask is adjacent to its
 // image under a single masked-bit flip.
-func Test_IPv4Network_IsAdjacent_ConstructedSiblingProperty(t *testing.T) {
+func Test_Network4_IsAdjacent_ConstructedSiblingProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		maskBytes := network.Mask().As4()
 		maskBits := binary.BigEndian.Uint32(maskBytes[:])
 		if maskBits == 0 {
@@ -1448,7 +1448,7 @@ func Test_IPv4Network_IsAdjacent_ConstructedSiblingProperty(t *testing.T) {
 		bit := rapid.SampledFrom(setBits).Draw(t, "bit")
 		addrBytes := network.Addr().As4()
 		addrBits := binary.BigEndian.Uint32(addrBytes[:])
-		sibling, err := xnetip.IPv4NetworkFrom(
+		sibling, err := xnetip.Network4From(
 			netipAddrFrom4Bits(addrBits^uint32(1)<<bit),
 			netipAddrFrom4Bits(maskBits),
 		)
@@ -1459,33 +1459,33 @@ func Test_IPv4Network_IsAdjacent_ConstructedSiblingProperty(t *testing.T) {
 }
 
 // verifies that the predicate allocates nothing.
-func Test_IPv4Network_IsAdjacent_AllocationFree(t *testing.T) {
-	left := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
-	right := xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255")
+func Test_Network4_IsAdjacent_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255")
+	right := xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255")
 	requireNoAllocs(t, func() { okSink = left.IsAdjacent(right) })
 }
 
-func BenchmarkIPv4Network_IsAdjacent_Contiguous(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("192.168.0.0/24")
-	right := xnetip.MustParseIPv4Network("192.168.1.0/24")
+func BenchmarkNetwork4_IsAdjacent_Contiguous(b *testing.B) {
+	left := xnetip.MustParseNetwork4("192.168.0.0/24")
+	right := xnetip.MustParseNetwork4("192.168.1.0/24")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = left.IsAdjacent(right)
 	}
 }
 
-func BenchmarkIPv4Network_IsAdjacent_NonAdjacent(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("192.168.0.0/24")
-	right := xnetip.MustParseIPv4Network("192.168.3.0/24")
+func BenchmarkNetwork4_IsAdjacent_NonAdjacent(b *testing.B) {
+	left := xnetip.MustParseNetwork4("192.168.0.0/24")
+	right := xnetip.MustParseNetwork4("192.168.3.0/24")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = left.IsAdjacent(right)
 	}
 }
 
-func BenchmarkIPv4Network_IsAdjacent_NonContiguous(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
-	right := xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255")
+func BenchmarkNetwork4_IsAdjacent_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255")
+	right := xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = left.IsAdjacent(right)
@@ -1494,27 +1494,27 @@ func BenchmarkIPv4Network_IsAdjacent_NonContiguous(b *testing.B) {
 
 // verifies that exactly the masks made of leading ones followed by
 // zeros are contiguous, the all-zero and all-ones masks included.
-func Test_IPv4Network_IsContiguous_LeadingOnesRunOnly(t *testing.T) {
+func Test_Network4_IsContiguous_LeadingOnesRunOnly(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    bool
 	}{
-		{name: "universe /0", network: mustIPv4Network(t, "0.0.0.0", "0.0.0.0"), want: true},
-		{name: "/19", network: mustIPv4Network(t, "213.180.192.0", "255.255.224.0"), want: true},
-		{name: "/24", network: mustIPv4Network(t, "192.168.0.0", "255.255.255.0"), want: true},
-		{name: "single leading bit /1", network: mustIPv4Network(t, "128.0.0.0", "128.0.0.0"), want: true},
-		{name: "/31", network: mustIPv4Network(t, "10.0.0.2", "255.255.255.254"), want: true},
-		{name: "host route /32", network: mustIPv4Network(t, "10.0.0.1", "255.255.255.255"), want: true},
-		{name: "zero value is the universe", network: xnetip.IPv4Network{}, want: true},
-		{name: "top bit clear, rest set", network: mustIPv4Network(t, "0.0.0.0", "127.255.255.255"), want: false},
-		{name: "trailing-only bits", network: mustIPv4Network(t, "0.0.0.1", "0.0.0.255"), want: false},
-		{name: "hole in the third octet", network: mustIPv4Network(t, "213.180.0.192", "255.255.0.255"), want: false},
-		{name: "two runs", network: mustIPv4Network(t, "192.168.0.1", "255.0.255.0"), want: false},
-		{name: "leading zero octet", network: mustIPv4Network(t, "0.0.0.0", "0.255.255.255"), want: false},
-		{name: "alternating", network: mustIPv4Network(t, "170.85.170.85", "170.85.170.85"), want: false},
-		{name: "single isolated bit in the middle", network: mustIPv4Network(t, "0.0.0.0", "0.0.1.0"), want: false},
-		{name: "bench non-contiguous shape", network: mustIPv4Network(t, "192.168.0.1", "255.255.0.255"), want: false},
+		{name: "universe /0", network: mustNetwork4(t, "0.0.0.0", "0.0.0.0"), want: true},
+		{name: "/19", network: mustNetwork4(t, "213.180.192.0", "255.255.224.0"), want: true},
+		{name: "/24", network: mustNetwork4(t, "192.168.0.0", "255.255.255.0"), want: true},
+		{name: "single leading bit /1", network: mustNetwork4(t, "128.0.0.0", "128.0.0.0"), want: true},
+		{name: "/31", network: mustNetwork4(t, "10.0.0.2", "255.255.255.254"), want: true},
+		{name: "host route /32", network: mustNetwork4(t, "10.0.0.1", "255.255.255.255"), want: true},
+		{name: "zero value is the universe", network: xnetip.Network4{}, want: true},
+		{name: "top bit clear, rest set", network: mustNetwork4(t, "0.0.0.0", "127.255.255.255"), want: false},
+		{name: "trailing-only bits", network: mustNetwork4(t, "0.0.0.1", "0.0.0.255"), want: false},
+		{name: "hole in the third octet", network: mustNetwork4(t, "213.180.0.192", "255.255.0.255"), want: false},
+		{name: "two runs", network: mustNetwork4(t, "192.168.0.1", "255.0.255.0"), want: false},
+		{name: "leading zero octet", network: mustNetwork4(t, "0.0.0.0", "0.255.255.255"), want: false},
+		{name: "alternating", network: mustNetwork4(t, "170.85.170.85", "170.85.170.85"), want: false},
+		{name: "single isolated bit in the middle", network: mustNetwork4(t, "0.0.0.0", "0.0.1.0"), want: false},
+		{name: "bench non-contiguous shape", network: mustNetwork4(t, "192.168.0.1", "255.255.0.255"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1525,9 +1525,9 @@ func Test_IPv4Network_IsContiguous_LeadingOnesRunOnly(t *testing.T) {
 
 // verifies that the predicate agrees with the brute-force bit scan:
 // contiguous means no one bit after a zero bit, top to bottom.
-func Test_IPv4Network_IsContiguous_MatchesBitScanProperty(t *testing.T) {
+func Test_Network4_IsContiguous_MatchesBitScanProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		maskBytes := network.Mask().As4()
 		maskBits := binary.BigEndian.Uint32(maskBytes[:])
 		want := true
@@ -1547,11 +1547,11 @@ func Test_IPv4Network_IsContiguous_MatchesBitScanProperty(t *testing.T) {
 
 // verifies that every network built from a prefix length is
 // contiguous and round-trips its length through the netip oracle.
-func Test_IPv4Network_IsContiguous_PrefixMasksAreContiguousProperty(t *testing.T) {
+func Test_Network4_IsContiguous_PrefixMasksAreContiguousProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		bits := rapid.IntRange(0, 32).Draw(t, "bits")
-		network, err := xnetip.IPv4NetworkFromCIDR(addr, bits)
+		network, err := xnetip.Network4FromCIDR(addr, bits)
 		require.NoError(t, err)
 		require.True(t, network.IsContiguous())
 		require.Equal(t, bits, netip.PrefixFrom(network.Addr(), bits).Bits())
@@ -1560,12 +1560,12 @@ func Test_IPv4Network_IsContiguous_PrefixMasksAreContiguousProperty(t *testing.T
 
 // verifies that clearing a non-final bit of a leading run of two or
 // more ones breaks contiguity: some run bit stays below the hole.
-func Test_IPv4Network_IsContiguous_HolePunchedMaskProperty(t *testing.T) {
+func Test_Network4_IsContiguous_HolePunchedMaskProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		prefix := rapid.IntRange(2, 32).Draw(t, "prefix")
 		hole := rapid.IntRange(0, prefix-2).Draw(t, "hole")
 		maskBits := ^uint32(0) << (32 - prefix) &^ (uint32(1) << (31 - hole))
-		network, err := xnetip.IPv4NetworkFrom(
+		network, err := xnetip.Network4From(
 			genNetipAddr4.Draw(t, "addr"),
 			netipAddrFrom4Bits(maskBits),
 		)
@@ -1575,21 +1575,21 @@ func Test_IPv4Network_IsContiguous_HolePunchedMaskProperty(t *testing.T) {
 }
 
 // verifies that the predicate allocates nothing.
-func Test_IPv4Network_IsContiguous_AllocationFree(t *testing.T) {
-	network := mustIPv4Network(t, "192.168.0.0", "255.255.0.0")
+func Test_Network4_IsContiguous_AllocationFree(t *testing.T) {
+	network := mustNetwork4(t, "192.168.0.0", "255.255.0.0")
 	requireNoAllocs(t, func() { okSink = network.IsContiguous() })
 }
 
-func BenchmarkIPv4Network_IsContiguous_Contiguous(b *testing.B) {
-	network := mustIPv4Network(b, "192.168.0.0", "255.255.0.0")
+func BenchmarkNetwork4_IsContiguous_Contiguous(b *testing.B) {
+	network := mustNetwork4(b, "192.168.0.0", "255.255.0.0")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = network.IsContiguous()
 	}
 }
 
-func BenchmarkIPv4Network_IsContiguous_NonContiguous(b *testing.B) {
-	network := mustIPv4Network(b, "192.168.0.1", "255.255.0.255")
+func BenchmarkNetwork4_IsContiguous_NonContiguous(b *testing.B) {
+	network := mustNetwork4(b, "192.168.0.1", "255.255.0.255")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = network.IsContiguous()
@@ -1598,18 +1598,18 @@ func BenchmarkIPv4Network_IsContiguous_NonContiguous(b *testing.B) {
 
 // verifies that a contiguous mask reports its leading-ones run length,
 // from the universe through the host route.
-func Test_IPv4Network_PrefixLen_LeadingOnesRunLength(t *testing.T) {
+func Test_Network4_PrefixLen_LeadingOnesRunLength(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    int
 	}{
-		{name: "/24", network: mustIPv4Network(t, "192.168.1.0", "255.255.255.0"), want: 24},
-		{name: "host route /32", network: mustIPv4Network(t, "192.168.1.1", "255.255.255.255"), want: 32},
-		{name: "universe /0", network: mustIPv4Network(t, "0.0.0.0", "0.0.0.0"), want: 0},
-		{name: "single leading bit /1", network: mustIPv4Network(t, "128.0.0.0", "128.0.0.0"), want: 1},
-		{name: "/31", network: mustIPv4Network(t, "10.0.0.2", "255.255.255.254"), want: 31},
-		{name: "zero value is the universe", network: xnetip.IPv4Network{}, want: 0},
+		{name: "/24", network: mustNetwork4(t, "192.168.1.0", "255.255.255.0"), want: 24},
+		{name: "host route /32", network: mustNetwork4(t, "192.168.1.1", "255.255.255.255"), want: 32},
+		{name: "universe /0", network: mustNetwork4(t, "0.0.0.0", "0.0.0.0"), want: 0},
+		{name: "single leading bit /1", network: mustNetwork4(t, "128.0.0.0", "128.0.0.0"), want: 1},
+		{name: "/31", network: mustNetwork4(t, "10.0.0.2", "255.255.255.254"), want: 31},
+		{name: "zero value is the universe", network: xnetip.Network4{}, want: 0},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1622,18 +1622,18 @@ func Test_IPv4Network_PrefixLen_LeadingOnesRunLength(t *testing.T) {
 
 // verifies that a non-contiguous mask has no prefix length and reports
 // zero, whether the leading run is broken, empty or trailing-only.
-func Test_IPv4Network_PrefixLen_NonContiguousHasNone(t *testing.T) {
+func Test_Network4_PrefixLen_NonContiguousHasNone(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 	}{
-		{name: "hole in the middle", network: mustIPv4Network(t, "10.0.0.1", "255.0.0.255")},
-		{name: "no leading run", network: mustIPv4Network(t, "0.0.0.1", "0.0.0.255")},
-		{name: "leading zero then ones", network: mustIPv4Network(t, "0.0.0.0", "127.255.255.255")},
-		{name: "mask 255.0.255.0 ignores the second octet", network: mustIPv4Network(t, "192.0.1.0", "255.0.255.0")},
-		{name: "alternating", network: mustIPv4Network(t, "170.85.170.85", "170.85.170.85")},
-		{name: "two runs", network: mustIPv4Network(t, "10.0.0.0", "255.255.0.255")},
-		{name: "trailing ones only", network: mustIPv4Network(t, "0.0.0.1", "0.0.0.1")},
+		{name: "hole in the middle", network: mustNetwork4(t, "10.0.0.1", "255.0.0.255")},
+		{name: "no leading run", network: mustNetwork4(t, "0.0.0.1", "0.0.0.255")},
+		{name: "leading zero then ones", network: mustNetwork4(t, "0.0.0.0", "127.255.255.255")},
+		{name: "mask 255.0.255.0 ignores the second octet", network: mustNetwork4(t, "192.0.1.0", "255.0.255.0")},
+		{name: "alternating", network: mustNetwork4(t, "170.85.170.85", "170.85.170.85")},
+		{name: "two runs", network: mustNetwork4(t, "10.0.0.0", "255.255.0.255")},
+		{name: "trailing ones only", network: mustNetwork4(t, "0.0.0.1", "0.0.0.1")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1646,9 +1646,9 @@ func Test_IPv4Network_PrefixLen_NonContiguousHasNone(t *testing.T) {
 
 // verifies that a prefix length exists exactly for contiguous masks
 // and that the length rebuilds the mask through the netip oracle.
-func Test_IPv4Network_PrefixLen_SomeIffContiguousProperty(t *testing.T) {
+func Test_Network4_PrefixLen_SomeIffContiguousProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		prefix, ok := network.PrefixLen()
 		require.Equal(t, network.IsContiguous(), ok)
 		if !ok {
@@ -1663,11 +1663,11 @@ func Test_IPv4Network_PrefixLen_SomeIffContiguousProperty(t *testing.T) {
 
 // verifies that a network built from any address and prefix length
 // reports that same length back.
-func Test_IPv4Network_PrefixLen_RoundTripsCIDRProperty(t *testing.T) {
+func Test_Network4_PrefixLen_RoundTripsCIDRProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		cidr := rapid.IntRange(0, 32).Draw(t, "cidr")
-		network, err := xnetip.IPv4NetworkFromCIDR(addr, cidr)
+		network, err := xnetip.Network4FromCIDR(addr, cidr)
 		require.NoError(t, err)
 		prefix, ok := network.PrefixLen()
 		require.True(t, ok)
@@ -1677,9 +1677,9 @@ func Test_IPv4Network_PrefixLen_RoundTripsCIDRProperty(t *testing.T) {
 
 // verifies that for a contiguous mask the reported length is the one
 // net/netip accepts and reports back for the same address.
-func Test_IPv4Network_PrefixLen_MatchesNetipBitsProperty(t *testing.T) {
+func Test_Network4_PrefixLen_MatchesNetipBitsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		if !network.IsContiguous() {
 			return
 		}
@@ -1693,37 +1693,37 @@ func Test_IPv4Network_PrefixLen_MatchesNetipBitsProperty(t *testing.T) {
 
 // verifies that computing the prefix allocates nothing on either
 // outcome.
-func Test_IPv4Network_PrefixLen_AllocationFree(t *testing.T) {
-	contiguous := mustIPv4Network(t, "192.168.0.0", "255.255.0.0")
-	nonContiguous := mustIPv4Network(t, "192.168.0.1", "255.255.0.255")
+func Test_Network4_PrefixLen_AllocationFree(t *testing.T) {
+	contiguous := mustNetwork4(t, "192.168.0.0", "255.255.0.0")
+	nonContiguous := mustNetwork4(t, "192.168.0.1", "255.255.0.255")
 	requireNoAllocs(t, func() { intSink, okSink = contiguous.PrefixLen() })
 	requireNoAllocs(t, func() { intSink, okSink = nonContiguous.PrefixLen() })
 }
 
-func BenchmarkIPv4Network_PrefixLen_Contiguous(b *testing.B) {
-	network := mustIPv4Network(b, "192.168.0.0", "255.255.0.0")
+func BenchmarkNetwork4_PrefixLen_Contiguous(b *testing.B) {
+	network := mustNetwork4(b, "192.168.0.0", "255.255.0.0")
 	b.ReportAllocs()
 	for b.Loop() {
 		intSink, okSink = network.PrefixLen()
 	}
 }
 
-func BenchmarkIPv4Network_PrefixLen_NonContiguous(b *testing.B) {
-	network := mustIPv4Network(b, "192.168.0.1", "255.255.0.255")
+func BenchmarkNetwork4_PrefixLen_NonContiguous(b *testing.B) {
+	network := mustNetwork4(b, "192.168.0.1", "255.255.0.255")
 	b.ReportAllocs()
 	for b.Loop() {
 		intSink, okSink = network.PrefixLen()
 	}
 }
 
-func BenchmarkIPv4Network_PrefixLen_Mixed(b *testing.B) {
+func BenchmarkNetwork4_PrefixLen_Mixed(b *testing.B) {
 	// A 50/50 contiguous/non-contiguous rotation exercises both
 	// outcomes of the contiguity check within one measurement.
-	networks := []xnetip.IPv4Network{
-		mustIPv4Network(b, "192.168.0.0", "255.255.0.0"),
-		mustIPv4Network(b, "192.168.0.1", "255.255.0.255"),
-		mustIPv4Network(b, "10.0.0.0", "255.0.0.0"),
-		mustIPv4Network(b, "10.0.0.1", "255.0.0.255"),
+	networks := []xnetip.Network4{
+		mustNetwork4(b, "192.168.0.0", "255.255.0.0"),
+		mustNetwork4(b, "192.168.0.1", "255.255.0.255"),
+		mustNetwork4(b, "10.0.0.0", "255.0.0.0"),
+		mustNetwork4(b, "10.0.0.1", "255.0.0.255"),
 	}
 	b.ReportAllocs()
 	for b.Loop() {
@@ -1735,18 +1735,18 @@ func BenchmarkIPv4Network_PrefixLen_Mixed(b *testing.B) {
 
 // verifies that a contiguous network prints as address/prefix with the
 // suffix always present: a host route keeps /32 and the universe /0.
-func Test_IPv4Network_String_ContiguousUsesPrefixForm(t *testing.T) {
+func Test_Network4_String_ContiguousUsesPrefixForm(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    string
 	}{
-		{name: "host route keeps /32", network: mustIPv4Network(t, "127.0.0.1", "255.255.255.255"), want: "127.0.0.1/32"},
-		{name: "CIDR", network: mustIPv4Network(t, "10.0.0.0", "255.255.255.0"), want: "10.0.0.0/24"},
-		{name: "universe", network: mustIPv4Network(t, "0.0.0.0", "0.0.0.0"), want: "0.0.0.0/0"},
-		{name: "zero value", network: xnetip.IPv4Network{}, want: "0.0.0.0/0"},
-		{name: "all ones", network: mustIPv4Network(t, "255.255.255.255", "255.255.255.255"), want: "255.255.255.255/32"},
-		{name: "normalized before print", network: mustIPv4Network(t, "10.0.0.1", "255.0.0.0"), want: "10.0.0.0/8"},
+		{name: "host route keeps /32", network: mustNetwork4(t, "127.0.0.1", "255.255.255.255"), want: "127.0.0.1/32"},
+		{name: "CIDR", network: mustNetwork4(t, "10.0.0.0", "255.255.255.0"), want: "10.0.0.0/24"},
+		{name: "universe", network: mustNetwork4(t, "0.0.0.0", "0.0.0.0"), want: "0.0.0.0/0"},
+		{name: "zero value", network: xnetip.Network4{}, want: "0.0.0.0/0"},
+		{name: "all ones", network: mustNetwork4(t, "255.255.255.255", "255.255.255.255"), want: "255.255.255.255/32"},
+		{name: "normalized before print", network: mustNetwork4(t, "10.0.0.1", "255.0.0.0"), want: "10.0.0.0/8"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1757,16 +1757,16 @@ func Test_IPv4Network_String_ContiguousUsesPrefixForm(t *testing.T) {
 
 // verifies that a non-contiguous network prints its mask in dotted
 // decimal, because no prefix length can describe it.
-func Test_IPv4Network_String_NonContiguousUsesDottedMask(t *testing.T) {
+func Test_Network4_String_NonContiguousUsesDottedMask(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    string
 	}{
-		{name: "geo-style", network: mustIPv4Network(t, "10.0.1.0", "255.0.255.0"), want: "10.0.1.0/255.0.255.0"},
-		{name: "two-run", network: mustIPv4Network(t, "192.168.0.1", "255.255.0.255"), want: "192.168.0.1/255.255.0.255"},
-		{name: "alternating", network: mustIPv4Network(t, "170.85.170.85", "170.85.170.85"), want: "170.85.170.85/170.85.170.85"},
-		{name: "trailing ones only", network: mustIPv4Network(t, "0.0.0.1", "0.0.0.255"), want: "0.0.0.1/0.0.0.255"},
+		{name: "geo-style", network: mustNetwork4(t, "10.0.1.0", "255.0.255.0"), want: "10.0.1.0/255.0.255.0"},
+		{name: "two-run", network: mustNetwork4(t, "192.168.0.1", "255.255.0.255"), want: "192.168.0.1/255.255.0.255"},
+		{name: "alternating", network: mustNetwork4(t, "170.85.170.85", "170.85.170.85"), want: "170.85.170.85/170.85.170.85"},
+		{name: "trailing ones only", network: mustNetwork4(t, "0.0.0.1", "0.0.0.255"), want: "0.0.0.1/0.0.0.255"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1777,15 +1777,15 @@ func Test_IPv4Network_String_NonContiguousUsesDottedMask(t *testing.T) {
 
 // verifies that appending writes after the caller's bytes and leaves
 // them intact.
-func Test_IPv4Network_AppendTo_KeepsExistingBytes(t *testing.T) {
-	network := mustIPv4Network(t, "10.0.0.0", "255.255.255.0")
+func Test_Network4_AppendTo_KeepsExistingBytes(t *testing.T) {
+	network := mustNetwork4(t, "10.0.0.0", "255.255.255.0")
 	require.Equal(t, "net=10.0.0.0/24", string(network.AppendTo([]byte("net="))))
 }
 
 // verifies that a buffer with enough capacity is extended in place,
 // without growing to a new backing array.
-func Test_IPv4Network_AppendTo_ReusesSizedBuffer(t *testing.T) {
-	network := mustIPv4Network(t, "10.0.0.0", "255.255.255.0")
+func Test_Network4_AppendTo_ReusesSizedBuffer(t *testing.T) {
+	network := mustNetwork4(t, "10.0.0.0", "255.255.255.0")
 	buffer := make([]byte, 0, 32)
 	extended := network.AppendTo(buffer)
 	require.Equal(t, "10.0.0.0/24", string(extended))
@@ -1794,9 +1794,9 @@ func Test_IPv4Network_AppendTo_ReusesSizedBuffer(t *testing.T) {
 
 // verifies that the text splits at a single slash into the network
 // address and the decimal prefix length or the dotted mask.
-func Test_IPv4Network_String_ShapeProperty(t *testing.T) {
+func Test_Network4_String_ShapeProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		text := network.String()
 		require.Equal(t, 1, strings.Count(text, "/"))
 		slash := strings.IndexByte(text, '/')
@@ -1814,9 +1814,9 @@ func Test_IPv4Network_String_ShapeProperty(t *testing.T) {
 
 // verifies that appending to an empty buffer yields the same bytes the
 // string form has, and that drawn buffer content survives untouched.
-func Test_IPv4Network_AppendTo_MatchesStringProperty(t *testing.T) {
+func Test_Network4_AppendTo_MatchesStringProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		prefix := rapid.SliceOf(rapid.Byte()).Draw(t, "buffer")
 		require.Equal(t, network.String(), string(network.AppendTo(nil)))
 		extended := network.AppendTo(slices.Clone(prefix))
@@ -1827,9 +1827,9 @@ func Test_IPv4Network_AppendTo_MatchesStringProperty(t *testing.T) {
 
 // verifies that the contiguous form is byte-identical to the netip
 // prefix rendering of the same network.
-func Test_IPv4Network_String_MatchesNetipPrefixProperty(t *testing.T) {
+func Test_Network4_String_MatchesNetipPrefixProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		prefix, ok := network.PrefixLen()
 		if !ok {
 			return
@@ -1840,9 +1840,9 @@ func Test_IPv4Network_String_MatchesNetipPrefixProperty(t *testing.T) {
 
 // verifies that appending into a buffer with enough capacity allocates
 // nothing, whatever the mask's shape.
-func Test_IPv4Network_AppendTo_AllocationFree(t *testing.T) {
-	contiguous := mustIPv4Network(t, "10.0.0.0", "255.255.255.0")
-	nonContiguous := mustIPv4Network(t, "192.168.0.1", "255.255.0.255")
+func Test_Network4_AppendTo_AllocationFree(t *testing.T) {
+	contiguous := mustNetwork4(t, "10.0.0.0", "255.255.255.0")
+	nonContiguous := mustNetwork4(t, "192.168.0.1", "255.255.0.255")
 	buffer := make([]byte, 0, 64)
 	requireNoAllocs(t, func() { bytesSink = contiguous.AppendTo(buffer[:0]) })
 	requireNoAllocs(t, func() { bytesSink = nonContiguous.AppendTo(buffer[:0]) })
@@ -1850,31 +1850,31 @@ func Test_IPv4Network_AppendTo_AllocationFree(t *testing.T) {
 
 // verifies that rendering to a string costs exactly the one string
 // conversion, pinning any formatting regression that adds more.
-func Test_IPv4Network_String_SingleAllocation(t *testing.T) {
-	contiguous := mustIPv4Network(t, "10.0.0.0", "255.255.255.0")
-	nonContiguous := mustIPv4Network(t, "192.168.0.1", "255.255.0.255")
+func Test_Network4_String_SingleAllocation(t *testing.T) {
+	contiguous := mustNetwork4(t, "10.0.0.0", "255.255.255.0")
+	nonContiguous := mustNetwork4(t, "192.168.0.1", "255.255.0.255")
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = contiguous.String() })))
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = nonContiguous.String() })))
 }
 
-func BenchmarkIPv4Network_String_CIDR(b *testing.B) {
-	network := mustIPv4Network(b, "10.0.0.0", "255.0.0.0")
+func BenchmarkNetwork4_String_CIDR(b *testing.B) {
+	network := mustNetwork4(b, "10.0.0.0", "255.0.0.0")
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = network.String()
 	}
 }
 
-func BenchmarkIPv4Network_String_NonContiguous(b *testing.B) {
-	network := mustIPv4Network(b, "192.168.0.1", "255.255.0.255")
+func BenchmarkNetwork4_String_NonContiguous(b *testing.B) {
+	network := mustNetwork4(b, "192.168.0.1", "255.255.0.255")
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = network.String()
 	}
 }
 
-func BenchmarkIPv4Network_AppendTo_CIDR(b *testing.B) {
-	network := mustIPv4Network(b, "10.0.0.0", "255.0.0.0")
+func BenchmarkNetwork4_AppendTo_CIDR(b *testing.B) {
+	network := mustNetwork4(b, "10.0.0.0", "255.0.0.0")
 	buffer := make([]byte, 0, 32)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -1884,7 +1884,7 @@ func BenchmarkIPv4Network_AppendTo_CIDR(b *testing.B) {
 
 // verifies that the parser accepts the bare, CIDR and dotted-mask forms
 // and normalizes the address under the mask in every one of them.
-func Test_ParseIPv4Network_AcceptsAllForms(t *testing.T) {
+func Test_ParseNetwork4_AcceptsAllForms(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
@@ -1902,29 +1902,29 @@ func Test_ParseIPv4Network_AcceptsAllForms(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPv4Network(testCase.input)
+			network, err := xnetip.ParseNetwork4(testCase.input)
 			require.NoError(t, err)
-			require.Equal(t, mustIPv4Network(t, testCase.wantAddr, testCase.wantMask), network)
+			require.Equal(t, mustNetwork4(t, testCase.wantAddr, testCase.wantMask), network)
 		})
 	}
 }
 
 // verifies that the universe text parses to the zero value, so the two
 // spellings of "every IPv4 address" are one value.
-func Test_ParseIPv4Network_UniverseIsZeroValue(t *testing.T) {
-	network, err := xnetip.ParseIPv4Network("0.0.0.0/0")
+func Test_ParseNetwork4_UniverseIsZeroValue(t *testing.T) {
+	network, err := xnetip.ParseNetwork4("0.0.0.0/0")
 	require.NoError(t, err)
-	require.Equal(t, xnetip.IPv4Network{}, network)
+	require.Equal(t, xnetip.Network4{}, network)
 }
 
 // verifies that the bare, CIDR and all-ones dotted-mask spellings of a
 // host route parse to the same network.
-func Test_ParseIPv4Network_AllFormsAgreeOnHostRoute(t *testing.T) {
-	bare, err := xnetip.ParseIPv4Network("192.168.1.1")
+func Test_ParseNetwork4_AllFormsAgreeOnHostRoute(t *testing.T) {
+	bare, err := xnetip.ParseNetwork4("192.168.1.1")
 	require.NoError(t, err)
-	cidr, err := xnetip.ParseIPv4Network("192.168.1.1/32")
+	cidr, err := xnetip.ParseNetwork4("192.168.1.1/32")
 	require.NoError(t, err)
-	dotted, err := xnetip.ParseIPv4Network("192.168.1.1/255.255.255.255")
+	dotted, err := xnetip.ParseNetwork4("192.168.1.1/255.255.255.255")
 	require.NoError(t, err)
 	require.Equal(t, bare, cidr)
 	require.Equal(t, bare, dotted)
@@ -1932,7 +1932,7 @@ func Test_ParseIPv4Network_AllFormsAgreeOnHostRoute(t *testing.T) {
 
 // verifies that a digits-only suffix beyond the family limit is a
 // prefix-length overflow, never a dotted-mask attempt.
-func Test_ParseIPv4Network_RejectsPrefixOverflow(t *testing.T) {
+func Test_ParseNetwork4_RejectsPrefixOverflow(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -1943,9 +1943,9 @@ func Test_ParseIPv4Network_RejectsPrefixOverflow(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPv4Network(testCase.input)
+			network, err := xnetip.ParseNetwork4(testCase.input)
 			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
-			require.Equal(t, xnetip.IPv4Network{}, network)
+			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}
 }
@@ -1956,7 +1956,7 @@ func Test_ParseIPv4Network_RejectsPrefixOverflow(t *testing.T) {
 // The strict prefix grammar takes no sign, no leading zero and no
 // trailing bytes, so each of those falls through to the mask parse
 // and fails there.
-func Test_ParseIPv4Network_RejectsBadSuffix(t *testing.T) {
+func Test_ParseNetwork4_RejectsBadSuffix(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -1971,24 +1971,24 @@ func Test_ParseIPv4Network_RejectsBadSuffix(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPv4Network(testCase.input)
+			network, err := xnetip.ParseNetwork4(testCase.input)
 			require.ErrorIs(t, err, xnetip.ErrInvalidMask)
-			require.Equal(t, xnetip.IPv4Network{}, network)
+			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}
 }
 
 // verifies that an IPv6 mask under an IPv4 address carries both the
 // mask sentinel and the family sentinel in its chain.
-func Test_ParseIPv4Network_ForeignFamilyMaskKeepsBothSentinels(t *testing.T) {
-	_, err := xnetip.ParseIPv4Network("10.0.0.1/2001:db8::1")
+func Test_ParseNetwork4_ForeignFamilyMaskKeepsBothSentinels(t *testing.T) {
+	_, err := xnetip.ParseNetwork4("10.0.0.1/2001:db8::1")
 	require.ErrorIs(t, err, xnetip.ErrInvalidMask)
 	require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
 }
 
 // verifies that text whose address part is not an IPv4 address is
 // rejected with the parse sentinel and the net/netip cause in the chain.
-func Test_ParseIPv4Network_RejectsBadAddress(t *testing.T) {
+func Test_ParseNetwork4_RejectsBadAddress(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -2007,16 +2007,16 @@ func Test_ParseIPv4Network_RejectsBadAddress(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPv4Network(testCase.input)
+			network, err := xnetip.ParseNetwork4(testCase.input)
 			require.ErrorIs(t, err, xnetip.ErrParse)
-			require.Equal(t, xnetip.IPv4Network{}, network)
+			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}
 }
 
 // verifies that an IPv6 address, the IPv4-mapped form included, is
 // rejected with the family sentinel, not treated as an IPv4 network.
-func Test_ParseIPv4Network_RejectsIPv6Literal(t *testing.T) {
+func Test_ParseNetwork4_RejectsIPv6Literal(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -2026,16 +2026,16 @@ func Test_ParseIPv4Network_RejectsIPv6Literal(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPv4Network(testCase.input)
+			network, err := xnetip.ParseNetwork4(testCase.input)
 			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
-			require.Equal(t, xnetip.IPv4Network{}, network)
+			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}
 }
 
 // verifies that a dotted mask of any shape is accepted verbatim and the
 // address bits outside it are cleared.
-func Test_ParseIPv4Network_NonContiguousMasks(t *testing.T) {
+func Test_ParseNetwork4_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
@@ -2051,40 +2051,40 @@ func Test_ParseIPv4Network_NonContiguousMasks(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, err := xnetip.ParseIPv4Network(testCase.input)
+			network, err := xnetip.ParseNetwork4(testCase.input)
 			require.NoError(t, err)
-			require.Equal(t, mustIPv4Network(t, testCase.wantAddr, testCase.wantMask), network)
+			require.Equal(t, mustNetwork4(t, testCase.wantAddr, testCase.wantMask), network)
 		})
 	}
 }
 
 // verifies that the must variant panics on invalid input instead of
 // returning an error.
-func Test_MustParseIPv4Network_PanicsOnInvalidInput(t *testing.T) {
-	require.Panics(t, func() { xnetip.MustParseIPv4Network("10.0.0.0/33") })
+func Test_MustParseNetwork4_PanicsOnInvalidInput(t *testing.T) {
+	require.Panics(t, func() { xnetip.MustParseNetwork4("10.0.0.0/33") })
 }
 
 // verifies that the must variant passes a valid parse through.
-func Test_MustParseIPv4Network_ReturnsParsedNetwork(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("10.0.0.0/8")
-	require.Equal(t, mustIPv4Network(t, "10.0.0.0", "255.0.0.0"), network)
+func Test_MustParseNetwork4_ReturnsParsedNetwork(t *testing.T) {
+	network := xnetip.MustParseNetwork4("10.0.0.0/8")
+	require.Equal(t, mustNetwork4(t, "10.0.0.0", "255.0.0.0"), network)
 }
 
 // verifies that every parse error names this parser and echoes the
 // rejected input in quotes.
-func Test_ParseIPv4Network_ErrorEchoesInput(t *testing.T) {
-	_, err := xnetip.ParseIPv4Network("10.0.0.0/33")
+func Test_ParseNetwork4_ErrorEchoesInput(t *testing.T) {
+	_, err := xnetip.ParseNetwork4("10.0.0.0/33")
 	require.Error(t, err)
-	require.True(t, strings.HasPrefix(err.Error(), "xnetip.ParseIPv4Network("))
+	require.True(t, strings.HasPrefix(err.Error(), "xnetip.ParseNetwork4("))
 	require.Contains(t, err.Error(), `"10.0.0.0/33"`)
 }
 
 // verifies that parsing the string form recovers the network exactly,
 // whatever the mask's shape.
-func Test_ParseIPv4Network_StringRoundTripProperty(t *testing.T) {
+func Test_ParseNetwork4_StringRoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		parsed, err := xnetip.ParseIPv4Network(network.String())
+		network := genNetwork4.Draw(t, "network")
+		parsed, err := xnetip.ParseNetwork4(network.String())
 		require.NoError(t, err)
 		require.Equal(t, network, parsed)
 	})
@@ -2092,13 +2092,13 @@ func Test_ParseIPv4Network_StringRoundTripProperty(t *testing.T) {
 
 // verifies that the CIDR text form parses to the same network the CIDR
 // constructor builds from the same address and length.
-func Test_ParseIPv4Network_CIDRFormAgreesWithConstructorProperty(t *testing.T) {
+func Test_ParseNetwork4_CIDRFormAgreesWithConstructorProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		bits := rapid.IntRange(0, 32).Draw(t, "bits")
-		constructed, err := xnetip.IPv4NetworkFromCIDR(addr, bits)
+		constructed, err := xnetip.Network4FromCIDR(addr, bits)
 		require.NoError(t, err)
-		parsed, err := xnetip.ParseIPv4Network(addr.String() + "/" + strconv.Itoa(bits))
+		parsed, err := xnetip.ParseNetwork4(addr.String() + "/" + strconv.Itoa(bits))
 		require.NoError(t, err)
 		require.Equal(t, constructed, parsed)
 	})
@@ -2106,13 +2106,13 @@ func Test_ParseIPv4Network_CIDRFormAgreesWithConstructorProperty(t *testing.T) {
 
 // verifies that the dotted-mask text form, non-contiguous masks
 // included, parses like the checked constructor on the same pair.
-func Test_ParseIPv4Network_DottedMaskAgreesWithConstructorProperty(t *testing.T) {
+func Test_ParseNetwork4_DottedMaskAgreesWithConstructorProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		mask := genNetipAddr4.Draw(t, "mask")
-		constructed, err := xnetip.IPv4NetworkFrom(addr, mask)
+		constructed, err := xnetip.Network4From(addr, mask)
 		require.NoError(t, err)
-		parsed, err := xnetip.ParseIPv4Network(addr.String() + "/" + mask.String())
+		parsed, err := xnetip.ParseNetwork4(addr.String() + "/" + mask.String())
 		require.NoError(t, err)
 		require.Equal(t, constructed, parsed)
 	})
@@ -2120,7 +2120,7 @@ func Test_ParseIPv4Network_DottedMaskAgreesWithConstructorProperty(t *testing.T)
 
 // verifies that every accepted input yields a normalized network: no
 // address bit survives outside the mask, in any of the three forms.
-func Test_ParseIPv4Network_ResultNormalizedProperty(t *testing.T) {
+func Test_ParseNetwork4_ResultNormalizedProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		var input string
@@ -2132,7 +2132,7 @@ func Test_ParseIPv4Network_ResultNormalizedProperty(t *testing.T) {
 		default:
 			input = addr.String() + "/" + genNetipAddr4.Draw(t, "mask").String()
 		}
-		network, err := xnetip.ParseIPv4Network(input)
+		network, err := xnetip.ParseNetwork4(input)
 		require.NoError(t, err)
 		addrBytes := network.Addr().As4()
 		maskBytes := network.Mask().As4()
@@ -2144,16 +2144,16 @@ func Test_ParseIPv4Network_ResultNormalizedProperty(t *testing.T) {
 
 // verifies that no byte string makes the parser panic, whatever it
 // holds.
-func Test_ParseIPv4Network_NeverPanicsProperty(t *testing.T) {
+func Test_ParseNetwork4_NeverPanicsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		input := string(rapid.SliceOfN(rapid.Byte(), 0, 40).Draw(t, "input"))
-		networkSink, errSink = xnetip.ParseIPv4Network(input)
+		networkSink, errSink = xnetip.ParseNetwork4(input)
 	})
 }
 
 // verifies that on CIDR-shaped text the accept set and the parsed
 // value are exactly those of the std prefix parser.
-func Test_ParseIPv4Network_MatchesNetipParsePrefixProperty(t *testing.T) {
+func Test_ParseNetwork4_MatchesNetipParsePrefixProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		var suffix string
@@ -2163,7 +2163,7 @@ func Test_ParseIPv4Network_MatchesNetipParsePrefixProperty(t *testing.T) {
 			suffix = rapid.SampledFrom([]string{"08", "+8", "-8", "", "33", "032"}).Draw(t, "malformed suffix")
 		}
 		input := addr.String() + "/" + suffix
-		parsed, err := xnetip.ParseIPv4Network(input)
+		parsed, err := xnetip.ParseNetwork4(input)
 		stdPrefix, stdErr := netip.ParsePrefix(input)
 		if stdErr != nil {
 			require.Error(t, err)
@@ -2179,13 +2179,13 @@ func Test_ParseIPv4Network_MatchesNetipParsePrefixProperty(t *testing.T) {
 
 // verifies that accepting a network allocates nothing in any of the
 // three forms: the input is only ever sliced, never copied.
-func Test_ParseIPv4Network_AllocationFree(t *testing.T) {
-	requireNoAllocs(t, func() { networkSink, errSink = xnetip.ParseIPv4Network("10.0.0.0/8") })
-	requireNoAllocs(t, func() { networkSink, errSink = xnetip.ParseIPv4Network("10.0.0.0/255.0.255.0") })
-	requireNoAllocs(t, func() { networkSink, errSink = xnetip.ParseIPv4Network("10.0.0.1") })
+func Test_ParseNetwork4_AllocationFree(t *testing.T) {
+	requireNoAllocs(t, func() { networkSink, errSink = xnetip.ParseNetwork4("10.0.0.0/8") })
+	requireNoAllocs(t, func() { networkSink, errSink = xnetip.ParseNetwork4("10.0.0.0/255.0.255.0") })
+	requireNoAllocs(t, func() { networkSink, errSink = xnetip.ParseNetwork4("10.0.0.1") })
 }
 
-func FuzzParseIPv4Network(f *testing.F) {
+func FuzzParseNetwork4(f *testing.F) {
 	seeds := []string{
 		"127.0.0.1", "192.168.0.1/24", "192.168.0.1/32", "192.168.0.1/255.255.255.0",
 		"0.0.0.0/0", "10.1.2.3/0", "128.0.0.0/1", "10.0.0.2/31",
@@ -2201,9 +2201,9 @@ func FuzzParseIPv4Network(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input string) {
-		network, err := xnetip.ParseIPv4Network(input)
+		network, err := xnetip.ParseNetwork4(input)
 		if err == nil {
-			back, err := xnetip.ParseIPv4Network(network.String())
+			back, err := xnetip.ParseNetwork4(network.String())
 			if err != nil {
 				t.Fatalf("round trip of %q rejected %q: %v", input, network.String(), err)
 			}
@@ -2231,44 +2231,44 @@ func FuzzParseIPv4Network(f *testing.F) {
 	})
 }
 
-func BenchmarkParseIPv4Network_CIDR(b *testing.B) {
+func BenchmarkParseNetwork4_CIDR(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		networkSink, errSink = xnetip.ParseIPv4Network("10.0.0.0/8")
+		networkSink, errSink = xnetip.ParseNetwork4("10.0.0.0/8")
 	}
 }
 
-func BenchmarkParseIPv4Network_DottedMask(b *testing.B) {
+func BenchmarkParseNetwork4_DottedMask(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		networkSink, errSink = xnetip.ParseIPv4Network("10.0.0.0/255.0.0.0")
+		networkSink, errSink = xnetip.ParseNetwork4("10.0.0.0/255.0.0.0")
 	}
 }
 
-func BenchmarkParseIPv4Network_NonContiguous(b *testing.B) {
+func BenchmarkParseNetwork4_NonContiguous(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		networkSink, errSink = xnetip.ParseIPv4Network("192.168.0.1/255.255.0.255")
+		networkSink, errSink = xnetip.ParseNetwork4("192.168.0.1/255.255.0.255")
 	}
 }
 
-func BenchmarkParseIPv4Network_Bare(b *testing.B) {
+func BenchmarkParseNetwork4_Bare(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		networkSink, errSink = xnetip.ParseIPv4Network("10.0.0.1")
+		networkSink, errSink = xnetip.ParseNetwork4("10.0.0.1")
 	}
 }
 
-func BenchmarkParseIPv4Network_Reject(b *testing.B) {
+func BenchmarkParseNetwork4_Reject(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		networkSink, errSink = xnetip.ParseIPv4Network("10.0.0.0/33")
+		networkSink, errSink = xnetip.ParseNetwork4("10.0.0.0/33")
 	}
 }
 
 // verifies that the marshaled text is the string form: prefix length
 // for a contiguous mask, dotted mask otherwise, suffix always present.
-func Test_IPv4Network_MarshalText_MatchesStringForm(t *testing.T) {
+func Test_Network4_MarshalText_MatchesStringForm(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -2283,7 +2283,7 @@ func Test_IPv4Network_MarshalText_MatchesStringForm(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			text, err := xnetip.MustParseIPv4Network(testCase.input).MarshalText()
+			text, err := xnetip.MustParseNetwork4(testCase.input).MarshalText()
 			require.NoError(t, err)
 			require.Equal(t, testCase.want, string(text))
 		})
@@ -2292,7 +2292,7 @@ func Test_IPv4Network_MarshalText_MatchesStringForm(t *testing.T) {
 
 // verifies that unmarshaling accepts every parser form, normalizes the
 // address under the mask and lands the value in the receiver.
-func Test_IPv4Network_UnmarshalText_AcceptsParserForms(t *testing.T) {
+func Test_Network4_UnmarshalText_AcceptsParserForms(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -2305,25 +2305,25 @@ func Test_IPv4Network_UnmarshalText_AcceptsParserForms(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			var network xnetip.IPv4Network
+			var network xnetip.Network4
 			require.NoError(t, network.UnmarshalText([]byte(testCase.input)))
-			require.Equal(t, xnetip.MustParseIPv4Network(testCase.want), network)
+			require.Equal(t, xnetip.MustParseNetwork4(testCase.want), network)
 		})
 	}
 }
 
 // verifies that empty text is an error, because the zero value is the
 // valid universe network and must not appear out of a missing field.
-func Test_IPv4Network_UnmarshalText_EmptyTextIsError(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("10.0.0.0/8")
+func Test_Network4_UnmarshalText_EmptyTextIsError(t *testing.T) {
+	network := xnetip.MustParseNetwork4("10.0.0.0/8")
 	err := network.UnmarshalText(nil)
 	require.ErrorIs(t, err, xnetip.ErrEmptyInput)
-	require.Equal(t, xnetip.MustParseIPv4Network("10.0.0.0/8"), network)
+	require.Equal(t, xnetip.MustParseNetwork4("10.0.0.0/8"), network)
 }
 
 // verifies that a failed unmarshal reports the parser's sentinel and
 // leaves the receiver untouched.
-func Test_IPv4Network_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
+func Test_Network4_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
@@ -2335,19 +2335,19 @@ func Test_IPv4Network_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network := xnetip.MustParseIPv4Network("192.168.0.0/24")
+			network := xnetip.MustParseNetwork4("192.168.0.0/24")
 			err := network.UnmarshalText([]byte(testCase.input))
 			require.ErrorIs(t, err, testCase.sentinel)
-			require.Equal(t, xnetip.MustParseIPv4Network("192.168.0.0/24"), network)
+			require.Equal(t, xnetip.MustParseNetwork4("192.168.0.0/24"), network)
 		})
 	}
 }
 
 // verifies that a struct field round-trips through JSON as its text
 // form, non-contiguous masks included.
-func Test_IPv4Network_MarshalText_JSONStructRoundTrip(t *testing.T) {
+func Test_Network4_MarshalText_JSONStructRoundTrip(t *testing.T) {
 	type wrapper struct {
-		N xnetip.IPv4Network
+		N xnetip.Network4
 	}
 	cases := []struct {
 		name     string
@@ -2359,7 +2359,7 @@ func Test_IPv4Network_MarshalText_JSONStructRoundTrip(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			value := wrapper{N: xnetip.MustParseIPv4Network(testCase.network)}
+			value := wrapper{N: xnetip.MustParseNetwork4(testCase.network)}
 			encoded, err := json.Marshal(value)
 			require.NoError(t, err)
 			require.Equal(t, testCase.wantJSON, string(encoded))
@@ -2372,25 +2372,25 @@ func Test_IPv4Network_MarshalText_JSONStructRoundTrip(t *testing.T) {
 
 // verifies that the type works as a JSON map key, which encoding/json
 // routes through the text marshaler pair.
-func Test_IPv4Network_MarshalText_JSONMapKeyRoundTrip(t *testing.T) {
-	value := map[xnetip.IPv4Network]int{xnetip.MustParseIPv4Network("10.0.0.0/8"): 1}
+func Test_Network4_MarshalText_JSONMapKeyRoundTrip(t *testing.T) {
+	value := map[xnetip.Network4]int{xnetip.MustParseNetwork4("10.0.0.0/8"): 1}
 	encoded, err := json.Marshal(value)
 	require.NoError(t, err)
 	require.Equal(t, `{"10.0.0.0/8":1}`, string(encoded))
-	var decoded map[xnetip.IPv4Network]int
+	var decoded map[xnetip.Network4]int
 	require.NoError(t, json.Unmarshal(encoded, &decoded))
 	require.Equal(t, value, decoded)
 }
 
 // verifies that unmarshaling the marshaled text recovers the network
 // exactly, and that the text is byte-identical to the string form.
-func Test_IPv4Network_MarshalText_RoundTripProperty(t *testing.T) {
+func Test_Network4_MarshalText_RoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		text, err := network.MarshalText()
 		require.NoError(t, err)
 		require.Equal(t, []byte(network.String()), text)
-		var back xnetip.IPv4Network
+		var back xnetip.Network4
 		require.NoError(t, back.UnmarshalText(text))
 		require.Equal(t, network, back)
 	})
@@ -2398,12 +2398,12 @@ func Test_IPv4Network_MarshalText_RoundTripProperty(t *testing.T) {
 
 // verifies that a JSON struct round trip preserves the network for
 // every mask shape.
-func Test_IPv4Network_MarshalText_JSONRoundTripProperty(t *testing.T) {
+func Test_Network4_MarshalText_JSONRoundTripProperty(t *testing.T) {
 	type wrapper struct {
-		N xnetip.IPv4Network
+		N xnetip.Network4
 	}
 	rapid.Check(t, func(t *rapid.T) {
-		value := wrapper{N: genIPv4Network.Draw(t, "network")}
+		value := wrapper{N: genNetwork4.Draw(t, "network")}
 		encoded, err := json.Marshal(value)
 		require.NoError(t, err)
 		var decoded wrapper
@@ -2414,9 +2414,9 @@ func Test_IPv4Network_MarshalText_JSONRoundTripProperty(t *testing.T) {
 
 // verifies that on contiguous networks the marshaled text is
 // byte-identical to the netip prefix marshaling of the same network.
-func Test_IPv4Network_MarshalText_MatchesNetipPrefixProperty(t *testing.T) {
+func Test_Network4_MarshalText_MatchesNetipPrefixProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		bits, ok := network.PrefixLen()
 		if !ok {
 			return
@@ -2434,59 +2434,59 @@ func Test_IPv4Network_MarshalText_MatchesNetipPrefixProperty(t *testing.T) {
 //
 // The zero netip prefix is invalid and safe to produce, while the zero
 // network here is the whole IPv4 universe.
-func Test_IPv4Network_UnmarshalText_EmptyTextDivergesFromNetip(t *testing.T) {
+func Test_Network4_UnmarshalText_EmptyTextDivergesFromNetip(t *testing.T) {
 	var stdPrefix netip.Prefix
 	require.NoError(t, stdPrefix.UnmarshalText(nil))
-	var network xnetip.IPv4Network
+	var network xnetip.Network4
 	require.Error(t, network.UnmarshalText(nil))
 }
 
 // verifies that marshaling allocates exactly the returned slice,
 // whatever the mask's shape.
-func Test_IPv4Network_MarshalText_SingleAllocation(t *testing.T) {
-	contiguous := xnetip.MustParseIPv4Network("10.0.0.0/8")
-	nonContiguous := xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")
+func Test_Network4_MarshalText_SingleAllocation(t *testing.T) {
+	contiguous := xnetip.MustParseNetwork4("10.0.0.0/8")
+	nonContiguous := xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = contiguous.MarshalText() })))
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = nonContiguous.MarshalText() })))
 }
 
 // verifies that a valid IPv4 netip.Prefix converts into the network
 // with the same address set, host bits cleared.
-func Test_IPv4NetworkFromPrefix_ConvertsValidPrefixes(t *testing.T) {
+func Test_Network4FromPrefix_ConvertsValidPrefixes(t *testing.T) {
 	cases := []struct {
 		name   string
 		prefix netip.Prefix
-		want   xnetip.IPv4Network
+		want   xnetip.Network4
 	}{
 		{
 			name:   "already masked /8",
 			prefix: netip.MustParsePrefix("10.0.0.0/8"),
-			want:   xnetip.MustParseIPv4Network("10.0.0.0/8"),
+			want:   xnetip.MustParseNetwork4("10.0.0.0/8"),
 		},
 		{
 			name:   "host bits cleared",
 			prefix: netip.MustParsePrefix("10.1.2.3/8"),
-			want:   xnetip.MustParseIPv4Network("10.0.0.0/8"),
+			want:   xnetip.MustParseNetwork4("10.0.0.0/8"),
 		},
 		{
 			name:   "/0 is the zero value",
 			prefix: netip.MustParsePrefix("0.0.0.0/0"),
-			want:   xnetip.IPv4Network{},
+			want:   xnetip.Network4{},
 		},
 		{
 			name:   "host route /32",
 			prefix: netip.MustParsePrefix("10.0.0.1/32"),
-			want:   xnetip.MustParseIPv4Network("10.0.0.1/32"),
+			want:   xnetip.MustParseNetwork4("10.0.0.1/32"),
 		},
 		{
 			name:   "unmasked PrefixFrom input",
 			prefix: netip.PrefixFrom(netip.MustParseAddr("192.168.1.7"), 24),
-			want:   xnetip.MustParseIPv4Network("192.168.1.0/24"),
+			want:   xnetip.MustParseNetwork4("192.168.1.0/24"),
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, ok := xnetip.IPv4NetworkFromPrefix(testCase.prefix)
+			network, ok := xnetip.Network4FromPrefix(testCase.prefix)
 			require.True(t, ok)
 			require.Equal(t, testCase.want, network)
 		})
@@ -2495,7 +2495,7 @@ func Test_IPv4NetworkFromPrefix_ConvertsValidPrefixes(t *testing.T) {
 
 // verifies that the invalid zero prefix and any prefix whose address
 // is not Is4, the IPv4-mapped form included, are rejected.
-func Test_IPv4NetworkFromPrefix_RejectsInvalidAndForeignFamily(t *testing.T) {
+func Test_Network4FromPrefix_RejectsInvalidAndForeignFamily(t *testing.T) {
 	cases := []struct {
 		name   string
 		prefix netip.Prefix
@@ -2506,34 +2506,34 @@ func Test_IPv4NetworkFromPrefix_RejectsInvalidAndForeignFamily(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			network, ok := xnetip.IPv4NetworkFromPrefix(testCase.prefix)
+			network, ok := xnetip.Network4FromPrefix(testCase.prefix)
 			require.False(t, ok)
-			require.Equal(t, xnetip.IPv4Network{}, network)
+			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}
 }
 
 // verifies that a contiguous network converts to the already-masked
 // netip.Prefix carrying the same address set.
-func Test_IPv4Network_Prefix_ContiguousForms(t *testing.T) {
+func Test_Network4_Prefix_ContiguousForms(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    netip.Prefix
 	}{
 		{
 			name:    "/24",
-			network: xnetip.MustParseIPv4Network("192.168.0.0/24"),
+			network: xnetip.MustParseNetwork4("192.168.0.0/24"),
 			want:    netip.MustParsePrefix("192.168.0.0/24"),
 		},
 		{
 			name:    "universe /0",
-			network: xnetip.MustParseIPv4Network("0.0.0.0/0"),
+			network: xnetip.MustParseNetwork4("0.0.0.0/0"),
 			want:    netip.MustParsePrefix("0.0.0.0/0"),
 		},
 		{
 			name:    "host route /32 is a single IP",
-			network: xnetip.MustParseIPv4Network("10.0.0.1/32"),
+			network: xnetip.MustParseNetwork4("10.0.0.1/32"),
 			want:    netip.MustParsePrefix("10.0.0.1/32"),
 		},
 	}
@@ -2545,21 +2545,21 @@ func Test_IPv4Network_Prefix_ContiguousForms(t *testing.T) {
 			require.Equal(t, prefix.Masked(), prefix)
 		})
 	}
-	singleIP, ok := xnetip.MustParseIPv4Network("10.0.0.1/32").Prefix()
+	singleIP, ok := xnetip.MustParseNetwork4("10.0.0.1/32").Prefix()
 	require.True(t, ok)
 	require.True(t, singleIP.IsSingleIP())
 }
 
 // verifies that a non-contiguous mask has no prefix form and answers
 // the invalid zero netip.Prefix.
-func Test_IPv4Network_Prefix_NonContiguousHasNone(t *testing.T) {
+func Test_Network4_Prefix_NonContiguousHasNone(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 	}{
-		{name: "two runs", network: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")},
-		{name: "alternating", network: xnetip.MustParseIPv4Network("170.85.170.85/170.85.170.85")},
-		{name: "single low bit", network: xnetip.MustParseIPv4Network("0.0.0.0/0.0.0.1")},
+		{name: "two runs", network: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")},
+		{name: "alternating", network: xnetip.MustParseNetwork4("170.85.170.85/170.85.170.85")},
+		{name: "single low bit", network: xnetip.MustParseNetwork4("0.0.0.0/0.0.0.1")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -2572,10 +2572,10 @@ func Test_IPv4Network_Prefix_NonContiguousHasNone(t *testing.T) {
 
 // verifies that any valid IPv4 prefix converts and converts back to
 // its masked self, with the result normalized and contiguous.
-func Test_IPv4NetworkFromPrefix_RoundTripProperty(t *testing.T) {
+func Test_Network4FromPrefix_RoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		stdPrefix := genIPv4Prefix.Draw(t, "prefix")
-		network, ok := xnetip.IPv4NetworkFromPrefix(stdPrefix)
+		network, ok := xnetip.Network4FromPrefix(stdPrefix)
 		require.True(t, ok)
 		require.True(t, network.IsContiguous())
 		require.Equal(t, stdPrefix.Masked().Addr(), network.Addr())
@@ -2587,9 +2587,9 @@ func Test_IPv4NetworkFromPrefix_RoundTripProperty(t *testing.T) {
 
 // verifies that a prefix form exists exactly for contiguous masks,
 // whatever the drawn mask shape.
-func Test_IPv4Network_Prefix_SomeIffContiguousProperty(t *testing.T) {
+func Test_Network4_Prefix_SomeIffContiguousProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		prefix, ok := network.Prefix()
 		require.Equal(t, network.IsContiguous(), ok)
 		if !ok {
@@ -2600,14 +2600,14 @@ func Test_IPv4Network_Prefix_SomeIffContiguousProperty(t *testing.T) {
 
 // verifies that a contiguous network survives the round trip through
 // netip.Prefix unchanged.
-func Test_IPv4Network_Prefix_RoundTripProperty(t *testing.T) {
+func Test_Network4_Prefix_RoundTripProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		stdPrefix, ok := network.Prefix()
 		if !ok {
 			return
 		}
-		back, ok := xnetip.IPv4NetworkFromPrefix(stdPrefix)
+		back, ok := xnetip.Network4FromPrefix(stdPrefix)
 		require.True(t, ok)
 		require.Equal(t, network, back)
 	})
@@ -2615,9 +2615,9 @@ func Test_IPv4Network_Prefix_RoundTripProperty(t *testing.T) {
 
 // verifies that the converted prefix length agrees with the network's
 // own prefix length, the net/netip view of the same mask.
-func Test_IPv4Network_Prefix_BitsMatchPrefixLenProperty(t *testing.T) {
+func Test_Network4_Prefix_BitsMatchPrefixLenProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		stdPrefix, ok := network.Prefix()
 		if !ok {
 			return
@@ -2630,38 +2630,38 @@ func Test_IPv4Network_Prefix_BitsMatchPrefixLenProperty(t *testing.T) {
 
 // verifies that both conversion directions allocate nothing on any
 // outcome.
-func Test_IPv4NetworkFromPrefix_AllocationFree(t *testing.T) {
+func Test_Network4FromPrefix_AllocationFree(t *testing.T) {
 	valid := netip.MustParsePrefix("10.0.0.0/8")
 	foreign := netip.MustParsePrefix("2001:db8::/32")
-	requireNoAllocs(t, func() { networkSink, okSink = xnetip.IPv4NetworkFromPrefix(valid) })
-	requireNoAllocs(t, func() { networkSink, okSink = xnetip.IPv4NetworkFromPrefix(foreign) })
+	requireNoAllocs(t, func() { networkSink, okSink = xnetip.Network4FromPrefix(valid) })
+	requireNoAllocs(t, func() { networkSink, okSink = xnetip.Network4FromPrefix(foreign) })
 }
 
 // verifies that converting out to a netip.Prefix allocates nothing,
 // whatever the mask's shape.
-func Test_IPv4Network_Prefix_AllocationFree(t *testing.T) {
-	contiguous := xnetip.MustParseIPv4Network("192.168.0.0/24")
-	nonContiguous := xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")
+func Test_Network4_Prefix_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseNetwork4("192.168.0.0/24")
+	nonContiguous := xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")
 	requireNoAllocs(t, func() { prefixSink, okSink = contiguous.Prefix() })
 	requireNoAllocs(t, func() { prefixSink, okSink = nonContiguous.Prefix() })
 }
 
 // verifies that the greatest member of a contiguous network is its
 // broadcast address, through the default-route and host-route extremes.
-func Test_IPv4Network_LastAddr_ContiguousBroadcast(t *testing.T) {
+func Test_Network4_LastAddr_ContiguousBroadcast(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    netip.Addr
 	}{
-		{name: "/24 broadcast", network: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: netip.MustParseAddr("192.168.1.255")},
-		{name: "/24 broadcast in 10/8 space", network: xnetip.MustParseIPv4Network("10.0.0.0/24"), want: netip.MustParseAddr("10.0.0.255")},
-		{name: "/16 broadcast", network: xnetip.MustParseIPv4Network("172.16.0.0/16"), want: netip.MustParseAddr("172.16.255.255")},
-		{name: "/8 broadcast", network: xnetip.MustParseIPv4Network("127.0.0.0/8"), want: netip.MustParseAddr("127.255.255.255")},
-		{name: "host route is its own last address", network: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: netip.MustParseAddr("10.0.0.1")},
-		{name: "all-ones host route", network: xnetip.MustParseIPv4Network("255.255.255.255/32"), want: netip.MustParseAddr("255.255.255.255")},
-		{name: "default route ends at all ones", network: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: netip.MustParseAddr("255.255.255.255")},
-		{name: "zero value is the default route", network: xnetip.IPv4Network{}, want: netip.MustParseAddr("255.255.255.255")},
+		{name: "/24 broadcast", network: xnetip.MustParseNetwork4("192.168.1.0/24"), want: netip.MustParseAddr("192.168.1.255")},
+		{name: "/24 broadcast in 10/8 space", network: xnetip.MustParseNetwork4("10.0.0.0/24"), want: netip.MustParseAddr("10.0.0.255")},
+		{name: "/16 broadcast", network: xnetip.MustParseNetwork4("172.16.0.0/16"), want: netip.MustParseAddr("172.16.255.255")},
+		{name: "/8 broadcast", network: xnetip.MustParseNetwork4("127.0.0.0/8"), want: netip.MustParseAddr("127.255.255.255")},
+		{name: "host route is its own last address", network: xnetip.MustParseNetwork4("10.0.0.1/32"), want: netip.MustParseAddr("10.0.0.1")},
+		{name: "all-ones host route", network: xnetip.MustParseNetwork4("255.255.255.255/32"), want: netip.MustParseAddr("255.255.255.255")},
+		{name: "default route ends at all ones", network: xnetip.MustParseNetwork4("0.0.0.0/0"), want: netip.MustParseAddr("255.255.255.255")},
+		{name: "zero value is the default route", network: xnetip.Network4{}, want: netip.MustParseAddr("255.255.255.255")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -2672,16 +2672,16 @@ func Test_IPv4Network_LastAddr_ContiguousBroadcast(t *testing.T) {
 
 // verifies that a non-contiguous mask sets every host bit wherever the
 // mask leaves a hole, not only in a trailing run.
-func Test_IPv4Network_LastAddr_NonContiguousMasks(t *testing.T) {
+func Test_Network4_LastAddr_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    netip.Addr
 	}{
-		{name: "hole in the third octet", network: xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255"), want: netip.MustParseAddr("192.168.255.1")},
-		{name: "hole in the second octet", network: xnetip.MustParseIPv4Network("10.0.0.42/255.0.255.255"), want: netip.MustParseAddr("10.255.0.42")},
-		{name: "alternating mask fills the odd bits", network: xnetip.MustParseIPv4Network("0.0.0.0/170.170.170.170"), want: netip.MustParseAddr("85.85.85.85")},
-		{name: "single host bit in the middle", network: xnetip.MustParseIPv4Network("10.0.0.0/255.255.255.254"), want: netip.MustParseAddr("10.0.0.1")},
+		{name: "hole in the third octet", network: xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255"), want: netip.MustParseAddr("192.168.255.1")},
+		{name: "hole in the second octet", network: xnetip.MustParseNetwork4("10.0.0.42/255.0.255.255"), want: netip.MustParseAddr("10.255.0.42")},
+		{name: "alternating mask fills the odd bits", network: xnetip.MustParseNetwork4("0.0.0.0/170.170.170.170"), want: netip.MustParseAddr("85.85.85.85")},
+		{name: "single host bit in the middle", network: xnetip.MustParseNetwork4("10.0.0.0/255.255.255.254"), want: netip.MustParseAddr("10.0.0.1")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -2692,9 +2692,9 @@ func Test_IPv4Network_LastAddr_NonContiguousMasks(t *testing.T) {
 
 // verifies that the result is a member of the network: masking it
 // yields the network address again.
-func Test_IPv4Network_LastAddr_MemberProperty(t *testing.T) {
+func Test_Network4_LastAddr_MemberProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		lastBytes := network.LastAddr().As4()
 		maskBytes := network.Mask().As4()
 		last := binary.BigEndian.Uint32(lastBytes[:])
@@ -2709,7 +2709,7 @@ func Test_IPv4Network_LastAddr_MemberProperty(t *testing.T) {
 // The mask is built by clearing at most 12 chosen positions, so every
 // host pattern can be deposited into those positions and the whole
 // membership enumerated.
-func Test_IPv4Network_LastAddr_MaximalByBruteForceProperty(t *testing.T) {
+func Test_Network4_LastAddr_MaximalByBruteForceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		hostBits := rapid.IntRange(0, 12).Draw(t, "host bits")
 		positions := rapid.SliceOfNDistinct(rapid.IntRange(0, 31), hostBits, hostBits, rapid.ID).Draw(t, "host positions")
@@ -2717,7 +2717,7 @@ func Test_IPv4Network_LastAddr_MaximalByBruteForceProperty(t *testing.T) {
 		for _, position := range positions {
 			mask &^= uint32(1) << position
 		}
-		network, err := xnetip.IPv4NetworkFrom(
+		network, err := xnetip.Network4From(
 			genNetipAddr4.Draw(t, "addr"),
 			netipAddrFrom4Bits(mask),
 		)
@@ -2744,9 +2744,9 @@ func Test_IPv4Network_LastAddr_MaximalByBruteForceProperty(t *testing.T) {
 
 // verifies that the last address never sorts below the network address
 // and coincides with it exactly on a host route.
-func Test_IPv4Network_LastAddr_AtLeastAddrProperty(t *testing.T) {
+func Test_Network4_LastAddr_AtLeastAddrProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		require.GreaterOrEqual(t, network.LastAddr().Compare(network.Addr()), 0)
 		fullMask := network.Mask() == netipAddrFrom4Bits(^uint32(0))
 		require.Equal(t, fullMask, network.LastAddr() == network.Addr())
@@ -2755,11 +2755,11 @@ func Test_IPv4Network_LastAddr_AtLeastAddrProperty(t *testing.T) {
 
 // verifies against prefix arithmetic that a contiguous network's last
 // address is the network address with the trailing host run filled.
-func Test_IPv4Network_LastAddr_MatchesPrefixArithmeticProperty(t *testing.T) {
+func Test_Network4_LastAddr_MatchesPrefixArithmeticProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		addr := genNetipAddr4.Draw(t, "addr")
 		bits := rapid.IntRange(0, 32).Draw(t, "bits")
-		network, err := xnetip.IPv4NetworkFromCIDR(addr, bits)
+		network, err := xnetip.Network4FromCIDR(addr, bits)
 		require.NoError(t, err)
 		baseBytes := network.Addr().As4()
 		base := binary.BigEndian.Uint32(baseBytes[:])
@@ -2770,27 +2770,27 @@ func Test_IPv4Network_LastAddr_MatchesPrefixArithmeticProperty(t *testing.T) {
 
 // verifies that the last address is computed without allocating,
 // whatever the mask's shape.
-func Test_IPv4Network_LastAddr_AllocationFree(t *testing.T) {
-	contiguous := xnetip.MustParseIPv4Network("192.168.1.0/24")
-	nonContiguous := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+func Test_Network4_LastAddr_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseNetwork4("192.168.1.0/24")
+	nonContiguous := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
 	requireNoAllocs(t, func() { addrSink = contiguous.LastAddr() })
 	requireNoAllocs(t, func() { addrSink = nonContiguous.LastAddr() })
 }
 
 // verifies that a contiguous network reports its mask's zero bits,
 // the complement of the prefix length.
-func Test_IPv4Network_NumHostBits_ContiguousComplementsPrefix(t *testing.T) {
+func Test_Network4_NumHostBits_ContiguousComplementsPrefix(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    int
 	}{
-		{name: "default route frees the whole word", network: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: 32},
-		{name: "/8", network: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: 24},
-		{name: "/24", network: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: 8},
-		{name: "/31", network: xnetip.MustParseIPv4Network("10.0.0.0/31"), want: 1},
-		{name: "host route holds one address", network: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: 0},
-		{name: "zero value is the default route", network: xnetip.IPv4Network{}, want: 32},
+		{name: "default route frees the whole word", network: xnetip.MustParseNetwork4("0.0.0.0/0"), want: 32},
+		{name: "/8", network: xnetip.MustParseNetwork4("10.0.0.0/8"), want: 24},
+		{name: "/24", network: xnetip.MustParseNetwork4("192.168.1.0/24"), want: 8},
+		{name: "/31", network: xnetip.MustParseNetwork4("10.0.0.0/31"), want: 1},
+		{name: "host route holds one address", network: xnetip.MustParseNetwork4("10.0.0.1/32"), want: 0},
+		{name: "zero value is the default route", network: xnetip.Network4{}, want: 32},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -2801,17 +2801,17 @@ func Test_IPv4Network_NumHostBits_ContiguousComplementsPrefix(t *testing.T) {
 
 // verifies that host bits are counted wherever the mask leaves them,
 // not only in a trailing run.
-func Test_IPv4Network_NumHostBits_NonContiguousMasks(t *testing.T) {
+func Test_Network4_NumHostBits_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    int
 	}{
-		{name: "hole in the second octet", network: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), want: 16},
-		{name: "hole in the third octet", network: xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255"), want: 8},
-		{name: "alternating mask frees every other bit", network: xnetip.MustParseIPv4Network("0.0.0.0/170.170.170.170"), want: 16},
-		{name: "single host bit in the middle", network: xnetip.MustParseIPv4Network("10.0.0.0/255.255.255.254"), want: 1},
-		{name: "mask with one set bit", network: xnetip.MustParseIPv4Network("0.0.0.0/128.0.0.0"), want: 31},
+		{name: "hole in the second octet", network: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), want: 16},
+		{name: "hole in the third octet", network: xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255"), want: 8},
+		{name: "alternating mask frees every other bit", network: xnetip.MustParseNetwork4("0.0.0.0/170.170.170.170"), want: 16},
+		{name: "single host bit in the middle", network: xnetip.MustParseNetwork4("10.0.0.0/255.255.255.254"), want: 1},
+		{name: "mask with one set bit", network: xnetip.MustParseNetwork4("0.0.0.0/128.0.0.0"), want: 31},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -2821,9 +2821,9 @@ func Test_IPv4Network_NumHostBits_NonContiguousMasks(t *testing.T) {
 }
 
 // verifies that the count agrees with a brute bit loop over the mask.
-func Test_IPv4Network_NumHostBits_MatchesBitLoopProperty(t *testing.T) {
+func Test_Network4_NumHostBits_MatchesBitLoopProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		maskBytes := network.Mask().As4()
 		mask := binary.BigEndian.Uint32(maskBytes[:])
 		want := 0
@@ -2838,9 +2838,9 @@ func Test_IPv4Network_NumHostBits_MatchesBitLoopProperty(t *testing.T) {
 
 // verifies that a contiguous network's host-bit count complements its
 // prefix length to the word width.
-func Test_IPv4Network_NumHostBits_ComplementsPrefixLenProperty(t *testing.T) {
+func Test_Network4_NumHostBits_ComplementsPrefixLenProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		prefix, ok := network.PrefixLen()
 		if !ok {
 			return
@@ -2851,9 +2851,9 @@ func Test_IPv4Network_NumHostBits_ComplementsPrefixLenProperty(t *testing.T) {
 
 // verifies that the count is zero exactly on the all-ones mask and
 // the full width exactly on the zero mask.
-func Test_IPv4Network_NumHostBits_ExtremesMatchMaskProperty(t *testing.T) {
+func Test_Network4_NumHostBits_ExtremesMatchMaskProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		require.Equal(t, network.Mask() == netipAddrFrom4Bits(^uint32(0)), network.NumHostBits() == 0)
 		require.Equal(t, network.Mask() == netipAddrFrom4Bits(0), network.NumHostBits() == 32)
 	})
@@ -2861,16 +2861,16 @@ func Test_IPv4Network_NumHostBits_ExtremesMatchMaskProperty(t *testing.T) {
 
 // verifies that the count is computed without allocating, whatever
 // the mask's shape.
-func Test_IPv4Network_NumHostBits_AllocationFree(t *testing.T) {
-	contiguous := xnetip.MustParseIPv4Network("192.168.1.0/24")
-	nonContiguous := xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")
+func Test_Network4_NumHostBits_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseNetwork4("192.168.1.0/24")
+	nonContiguous := xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")
 	requireNoAllocs(t, func() { intSink = contiguous.NumHostBits() })
 	requireNoAllocs(t, func() { intSink = nonContiguous.NumHostBits() })
 }
 
 // ipv4NetworkBits returns the network's address and mask as host-order
 // integers, the form the bit-level oracles compute in.
-func ipv4NetworkBits(network xnetip.IPv4Network) (addr, mask uint32) {
+func ipv4NetworkBits(network xnetip.Network4) (addr, mask uint32) {
 	addrBytes := network.Addr().As4()
 	maskBytes := network.Mask().As4()
 	return binary.BigEndian.Uint32(addrBytes[:]), binary.BigEndian.Uint32(maskBytes[:])
@@ -2883,8 +2883,8 @@ func ipv4NetworkBits(network xnetip.IPv4Network) (addr, mask uint32) {
 // front-and-back cases a double-ended cursor would pin have no
 // iter.Seq analogue, so none appear here — the backward walk is a
 // sequence of its own.
-func Test_IPv4Network_Addrs_Slash24AscendsByOne(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("192.168.1.0/24")
+func Test_Network4_Addrs_Slash24AscendsByOne(t *testing.T) {
+	network := xnetip.MustParseNetwork4("192.168.1.0/24")
 	expected := netip.MustParseAddr("192.168.1.0")
 	count := 0
 	for addr := range network.Addrs() {
@@ -2896,16 +2896,16 @@ func Test_IPv4Network_Addrs_Slash24AscendsByOne(t *testing.T) {
 }
 
 // verifies that a host route yields exactly its single address.
-func Test_IPv4Network_Addrs_HostRouteSingle(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("10.0.0.1/32")
+func Test_Network4_Addrs_HostRouteSingle(t *testing.T) {
+	network := xnetip.MustParseNetwork4("10.0.0.1/32")
 	collected := slices.Collect(network.Addrs())
 	require.Equal(t, []netip.Addr{netip.MustParseAddr("10.0.0.1")}, collected)
 }
 
 // verifies that the default route starts at the unspecified address
 // and steps to its successor: the head of the 2^32-item sequence.
-func Test_IPv4Network_Addrs_UniverseHead(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("0.0.0.0/0")
+func Test_Network4_Addrs_UniverseHead(t *testing.T) {
+	network := xnetip.MustParseNetwork4("0.0.0.0/0")
 	head := collectHead(network.Addrs(), 2)
 	require.Equal(t, []netip.Addr{
 		netip.MustParseAddr("0.0.0.0"),
@@ -2915,8 +2915,8 @@ func Test_IPv4Network_Addrs_UniverseHead(t *testing.T) {
 
 // verifies that a non-contiguous sequence starts at the network
 // address, ends at the last address and never repeats an item.
-func Test_IPv4Network_Addrs_NonContiguousFirstAndLast(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+func Test_Network4_Addrs_NonContiguousFirstAndLast(t *testing.T) {
+	network := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
 	collected := slices.Collect(network.Addrs())
 	require.Len(t, collected, 256)
 	require.Equal(t, network.Addr(), collected[0])
@@ -2931,8 +2931,8 @@ func Test_IPv4Network_Addrs_NonContiguousFirstAndLast(t *testing.T) {
 
 // verifies that breaking out of the loop stops the sequence after
 // exactly the consumed items.
-func Test_IPv4Network_Addrs_EarlyBreakStops(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("192.168.1.0/24")
+func Test_Network4_Addrs_EarlyBreakStops(t *testing.T) {
+	network := xnetip.MustParseNetwork4("192.168.1.0/24")
 	consumed := 0
 	for range network.Addrs() {
 		consumed++
@@ -2945,8 +2945,8 @@ func Test_IPv4Network_Addrs_EarlyBreakStops(t *testing.T) {
 
 // verifies that one sequence value can be ranged twice and yields the
 // same addresses on both passes.
-func Test_IPv4Network_Addrs_ReIterable(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+func Test_Network4_Addrs_ReIterable(t *testing.T) {
+	network := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
 	sequence := network.Addrs()
 	first := slices.Collect(sequence)
 	second := slices.Collect(sequence)
@@ -2955,8 +2955,8 @@ func Test_IPv4Network_Addrs_ReIterable(t *testing.T) {
 
 // verifies that a mask freeing the third octet yields, as a set, the
 // grid of addresses ranging over exactly that octet.
-func Test_IPv4Network_Addrs_NonContiguousGrid(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+func Test_Network4_Addrs_NonContiguousGrid(t *testing.T) {
+	network := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
 	expected := make([]netip.Addr, 0, 256)
 	for value := range 256 {
 		expected = append(expected, netip.AddrFrom4([4]byte{192, 168, byte(value), 1}))
@@ -2971,8 +2971,8 @@ func Test_IPv4Network_Addrs_NonContiguousGrid(t *testing.T) {
 //
 // Successive host indices fill the hole, so the third octet steps by
 // sixteen while every other octet stays pinned.
-func Test_IPv4Network_Addrs_NonContiguousPinnedForwardOrder(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("10.0.0.1/255.255.15.255")
+func Test_Network4_Addrs_NonContiguousPinnedForwardOrder(t *testing.T) {
+	network := xnetip.MustParseNetwork4("10.0.0.1/255.255.15.255")
 	expected := make([]netip.Addr, 0, 16)
 	for value := range 16 {
 		expected = append(expected, netip.AddrFrom4([4]byte{10, 0, byte(16 * value), 1}))
@@ -2982,8 +2982,8 @@ func Test_IPv4Network_Addrs_NonContiguousPinnedForwardOrder(t *testing.T) {
 
 // verifies on the alternating mask that the two lowest host bits fill
 // first: indices 0 through 3 map to host patterns 0, 1, 4, 5.
-func Test_IPv4Network_Addrs_AlternatingMask(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("0.0.0.0/170.170.170.170")
+func Test_Network4_Addrs_AlternatingMask(t *testing.T) {
+	network := xnetip.MustParseNetwork4("0.0.0.0/170.170.170.170")
 	head := collectHead(network.Addrs(), 4)
 	require.Equal(t, []netip.Addr{
 		netip.MustParseAddr("0.0.0.0"),
@@ -2998,13 +2998,13 @@ func Test_IPv4Network_Addrs_AlternatingMask(t *testing.T) {
 //
 // Its 30 host bits make a full drain infeasible, so only the first
 // three items are probed.
-func Test_IPv4Network_Addrs_WidestNonContiguousHead(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("128.0.0.1/128.0.0.1")
+func Test_Network4_Addrs_WidestNonContiguousHead(t *testing.T) {
+	network := xnetip.MustParseNetwork4("128.0.0.1/128.0.0.1")
 	head := collectHead(network.Addrs(), 3)
 	require.Equal(t, []netip.Addr{
-		ipv4AddrAtHostIndexReference(network, 0),
-		ipv4AddrAtHostIndexReference(network, 1),
-		ipv4AddrAtHostIndexReference(network, 2),
+		addr4AtHostIndexReference(network, 0),
+		addr4AtHostIndexReference(network, 1),
+		addr4AtHostIndexReference(network, 2),
 	}, head)
 	require.Equal(t, []netip.Addr{
 		netip.MustParseAddr("128.0.0.1"),
@@ -3018,13 +3018,13 @@ func Test_IPv4Network_Addrs_WidestNonContiguousHead(t *testing.T) {
 //
 // The address at index k is the network address with k deposited
 // into the mask's zero bits, least significant first.
-func Test_IPv4Network_Addrs_HeadMatchesHostIndexOracleProperty(t *testing.T) {
+func Test_Network4_Addrs_HeadMatchesHostIndexOracleProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		take := min(uint64(1)<<network.NumHostBits(), 32)
 		index := uint64(0)
 		for addr := range network.Addrs() {
-			require.Equal(t, ipv4AddrAtHostIndexReference(network, uint32(index)), addr)
+			require.Equal(t, addr4AtHostIndexReference(network, uint32(index)), addr)
 			index++
 			if index == take {
 				break
@@ -3052,21 +3052,21 @@ func pdepUint32Reference(source, mask uint32) uint32 {
 	return deposited
 }
 
-// ipv4AddrAtHostIndexReference returns the address the sequence must
+// addr4AtHostIndexReference returns the address the sequence must
 // yield at the given host index.
 //
 // That address is the network address with the index deposited into
 // the mask's zero bits.
-func ipv4AddrAtHostIndexReference(network xnetip.IPv4Network, index uint32) netip.Addr {
+func addr4AtHostIndexReference(network xnetip.Network4, index uint32) netip.Addr {
 	base, mask := ipv4NetworkBits(network)
 	return netipAddrFrom4Bits(base | pdepUint32Reference(index, ^mask))
 }
 
 // verifies on bounded spaces that the yielded count is exactly two to
 // the number of host bits.
-func Test_IPv4Network_Addrs_CountMatchesHostBitsProperty(t *testing.T) {
+func Test_Network4_Addrs_CountMatchesHostBitsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := drawBoundedIPv4Network(t, 16)
+		network := drawBoundedNetwork4(t, 16)
 		count := 0
 		for range network.Addrs() {
 			count++
@@ -3075,28 +3075,28 @@ func Test_IPv4Network_Addrs_CountMatchesHostBitsProperty(t *testing.T) {
 	})
 }
 
-// drawBoundedIPv4Network draws a network whose mask clears at most
+// drawBoundedNetwork4 draws a network whose mask clears at most
 // maxHostBits chosen positions.
 //
 // The bounded host space keeps a full drain of the membership cheap
 // enough for a property test.
-func drawBoundedIPv4Network(t *rapid.T, maxHostBits int) xnetip.IPv4Network {
+func drawBoundedNetwork4(t *rapid.T, maxHostBits int) xnetip.Network4 {
 	hostBits := rapid.IntRange(0, maxHostBits).Draw(t, "host bits")
 	positions := rapid.SliceOfNDistinct(rapid.IntRange(0, 31), hostBits, hostBits, rapid.ID).Draw(t, "host positions")
 	mask := ^uint32(0)
 	for _, position := range positions {
 		mask &^= uint32(1) << position
 	}
-	network, err := xnetip.IPv4NetworkFrom(genNetipAddr4.Draw(t, "addr"), netipAddrFrom4Bits(mask))
+	network, err := xnetip.Network4From(genNetipAddr4.Draw(t, "addr"), netipAddrFrom4Bits(mask))
 	require.NoError(t, err)
 	return network
 }
 
 // verifies on bounded spaces that every yielded address is a member
 // of the network by the bit test and that no address repeats.
-func Test_IPv4Network_Addrs_MembershipAndUniquenessProperty(t *testing.T) {
+func Test_Network4_Addrs_MembershipAndUniquenessProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := drawBoundedIPv4Network(t, 12)
+		network := drawBoundedNetwork4(t, 12)
 		base, mask := ipv4NetworkBits(network)
 		seen := map[netip.Addr]bool{}
 		for addr := range network.Addrs() {
@@ -3111,10 +3111,10 @@ func Test_IPv4Network_Addrs_MembershipAndUniquenessProperty(t *testing.T) {
 
 // verifies that a contiguous network's sequence ascends strictly from
 // the network address to the last address.
-func Test_IPv4Network_Addrs_ContiguousAscendsProperty(t *testing.T) {
+func Test_Network4_Addrs_ContiguousAscendsProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		prefixBits := rapid.IntRange(16, 32).Draw(t, "bits")
-		network, err := xnetip.IPv4NetworkFromCIDR(genNetipAddr4.Draw(t, "addr"), prefixBits)
+		network, err := xnetip.Network4FromCIDR(genNetipAddr4.Draw(t, "addr"), prefixBits)
 		require.NoError(t, err)
 		previous, started := netip.Addr{}, false
 		for addr := range network.Addrs() {
@@ -3133,10 +3133,10 @@ func Test_IPv4Network_Addrs_ContiguousAscendsProperty(t *testing.T) {
 
 // verifies against net/netip that a contiguous sequence equals
 // repeated successor steps from the network address onward.
-func Test_IPv4Network_Addrs_MatchesNetipNextDifferential(t *testing.T) {
+func Test_Network4_Addrs_MatchesNetipNextDifferential(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		prefixBits := rapid.IntRange(20, 32).Draw(t, "bits")
-		network, err := xnetip.IPv4NetworkFromCIDR(genNetipAddr4.Draw(t, "addr"), prefixBits)
+		network, err := xnetip.Network4FromCIDR(genNetipAddr4.Draw(t, "addr"), prefixBits)
 		require.NoError(t, err)
 		expected := network.Addr()
 		for addr := range network.Addrs() {
@@ -3148,9 +3148,9 @@ func Test_IPv4Network_Addrs_MatchesNetipNextDifferential(t *testing.T) {
 
 // verifies that a full drain of the sequence performs no allocation,
 // whatever the mask's shape.
-func Test_IPv4Network_Addrs_AllocationFree(t *testing.T) {
-	contiguous := xnetip.MustParseIPv4Network("192.168.1.0/24")
-	nonContiguous := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+func Test_Network4_Addrs_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseNetwork4("192.168.1.0/24")
+	nonContiguous := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
 	requireNoAllocs(t, func() {
 		for addr := range contiguous.Addrs() {
 			addrSink = addr
@@ -3163,8 +3163,8 @@ func Test_IPv4Network_Addrs_AllocationFree(t *testing.T) {
 	})
 }
 
-func BenchmarkIPv4Network_Addrs_Slash24(b *testing.B) {
-	network := xnetip.MustParseIPv4Network("77.88.55.0/24")
+func BenchmarkNetwork4_Addrs_Slash24(b *testing.B) {
+	network := xnetip.MustParseNetwork4("77.88.55.0/24")
 	b.ReportAllocs()
 	for b.Loop() {
 		for addr := range network.Addrs() {
@@ -3173,8 +3173,8 @@ func BenchmarkIPv4Network_Addrs_Slash24(b *testing.B) {
 	}
 }
 
-func BenchmarkIPv4Network_Addrs_Slash16(b *testing.B) {
-	network := xnetip.MustParseIPv4Network("77.88.0.0/16")
+func BenchmarkNetwork4_Addrs_Slash16(b *testing.B) {
+	network := xnetip.MustParseNetwork4("77.88.0.0/16")
 	b.ReportAllocs()
 	for b.Loop() {
 		for addr := range network.Addrs() {
@@ -3183,8 +3183,8 @@ func BenchmarkIPv4Network_Addrs_Slash16(b *testing.B) {
 	}
 }
 
-func BenchmarkIPv4Network_Addrs_NonContiguous8HostBits(b *testing.B) {
-	network := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+func BenchmarkNetwork4_Addrs_NonContiguous8HostBits(b *testing.B) {
+	network := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
 	b.ReportAllocs()
 	for b.Loop() {
 		for addr := range network.Addrs() {
@@ -3198,18 +3198,18 @@ func BenchmarkIPv4Network_Addrs_NonContiguous8HostBits(b *testing.B) {
 // Equal networks merge to themselves, equal-mask single-bit siblings
 // drop the differing bit through the adjacency predicate, and
 // containment either way returns the container.
-func mergeReferenceIPv4(t require.TestingT, left, right xnetip.IPv4Network) (xnetip.IPv4Network, bool) {
+func mergeReferenceIPv4(t require.TestingT, left, right xnetip.Network4) (xnetip.Network4, bool) {
 	if left == right {
 		return left, true
 	}
 	if left.Mask() == right.Mask() {
 		if !left.IsAdjacent(right) {
-			return xnetip.IPv4Network{}, false
+			return xnetip.Network4{}, false
 		}
 		leftAddr, leftMask := ipv4NetworkBits(left)
 		rightAddr, _ := ipv4NetworkBits(right)
 		mask := leftMask ^ (leftAddr ^ rightAddr)
-		merged, err := xnetip.IPv4NetworkFrom(
+		merged, err := xnetip.Network4From(
 			netipAddrFrom4Bits(leftAddr&mask),
 			netipAddrFrom4Bits(mask),
 		)
@@ -3222,35 +3222,35 @@ func mergeReferenceIPv4(t require.TestingT, left, right xnetip.IPv4Network) (xne
 	if right.Contains(left) {
 		return right, true
 	}
-	return xnetip.IPv4Network{}, false
+	return xnetip.Network4{}, false
 }
 
 // verifies that merging succeeds exactly for duplicates, single-bit
 // siblings and containment, and returns the union network.
-func Test_IPv4Network_Merge_UnitAndBoundary(t *testing.T) {
+func Test_Network4_Merge_UnitAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
-		want  xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
+		want  xnetip.Network4
 		ok    bool
 	}{
-		{name: "identical", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: xnetip.MustParseIPv4Network("192.168.1.0/24"), ok: true},
-		{name: "contiguous siblings", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: xnetip.MustParseIPv4Network("192.168.0.0/23"), ok: true},
-		{name: "contiguous siblings reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: xnetip.MustParseIPv4Network("192.168.0.0/23"), ok: true},
-		{name: "siblings at a higher bit give a non-contiguous mask", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.2.0/24"), want: xnetip.MustParseIPv4Network("192.168.0.0/255.255.253.0"), ok: true},
-		{name: "siblings at bit 16 give a non-contiguous mask", left: xnetip.MustParseIPv4Network("10.0.0.0/24"), right: xnetip.MustParseIPv4Network("10.1.0.0/24"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.254.255.0"), ok: true},
-		{name: "same mask, two differing bits", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.3.0/24"), ok: false},
-		{name: "same mask, two differing bits reversed", left: xnetip.MustParseIPv4Network("192.168.3.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), ok: false},
-		{name: "containment returns the container", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("10.1.0.0/16"), want: xnetip.MustParseIPv4Network("10.0.0.0/8"), ok: true},
-		{name: "containment reversed", left: xnetip.MustParseIPv4Network("10.1.0.0/16"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: xnetip.MustParseIPv4Network("10.0.0.0/8"), ok: true},
-		{name: "comparable masks, address mismatch", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("172.16.0.0/16"), ok: false},
-		{name: "comparable masks, address mismatch reversed", left: xnetip.MustParseIPv4Network("172.16.0.0/16"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), ok: false},
-		{name: "host routes differing in one bit", left: xnetip.MustParseIPv4Network("10.0.0.0/32"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: xnetip.MustParseIPv4Network("10.0.0.0/31"), ok: true},
-		{name: "host routes differing in two bits", left: xnetip.MustParseIPv4Network("10.0.0.0/32"), right: xnetip.MustParseIPv4Network("10.0.0.3/32"), ok: false},
-		{name: "default route absorbs any network", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("203.0.113.0/24"), want: xnetip.MustParseIPv4Network("0.0.0.0/0"), ok: true},
-		{name: "default route with itself", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: xnetip.MustParseIPv4Network("0.0.0.0/0"), ok: true},
-		{name: "top-bit siblings give the default route", left: xnetip.MustParseIPv4Network("0.0.0.0/1"), right: xnetip.MustParseIPv4Network("128.0.0.0/1"), want: xnetip.MustParseIPv4Network("0.0.0.0/0"), ok: true},
+		{name: "identical", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: xnetip.MustParseNetwork4("192.168.1.0/24"), ok: true},
+		{name: "contiguous siblings", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: xnetip.MustParseNetwork4("192.168.0.0/23"), ok: true},
+		{name: "contiguous siblings reversed", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/24"), want: xnetip.MustParseNetwork4("192.168.0.0/23"), ok: true},
+		{name: "siblings at a higher bit give a non-contiguous mask", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.2.0/24"), want: xnetip.MustParseNetwork4("192.168.0.0/255.255.253.0"), ok: true},
+		{name: "siblings at bit 16 give a non-contiguous mask", left: xnetip.MustParseNetwork4("10.0.0.0/24"), right: xnetip.MustParseNetwork4("10.1.0.0/24"), want: xnetip.MustParseNetwork4("10.0.0.0/255.254.255.0"), ok: true},
+		{name: "same mask, two differing bits", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.3.0/24"), ok: false},
+		{name: "same mask, two differing bits reversed", left: xnetip.MustParseNetwork4("192.168.3.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/24"), ok: false},
+		{name: "containment returns the container", left: xnetip.MustParseNetwork4("10.0.0.0/8"), right: xnetip.MustParseNetwork4("10.1.0.0/16"), want: xnetip.MustParseNetwork4("10.0.0.0/8"), ok: true},
+		{name: "containment reversed", left: xnetip.MustParseNetwork4("10.1.0.0/16"), right: xnetip.MustParseNetwork4("10.0.0.0/8"), want: xnetip.MustParseNetwork4("10.0.0.0/8"), ok: true},
+		{name: "comparable masks, address mismatch", left: xnetip.MustParseNetwork4("10.0.0.0/8"), right: xnetip.MustParseNetwork4("172.16.0.0/16"), ok: false},
+		{name: "comparable masks, address mismatch reversed", left: xnetip.MustParseNetwork4("172.16.0.0/16"), right: xnetip.MustParseNetwork4("10.0.0.0/8"), ok: false},
+		{name: "host routes differing in one bit", left: xnetip.MustParseNetwork4("10.0.0.0/32"), right: xnetip.MustParseNetwork4("10.0.0.1/32"), want: xnetip.MustParseNetwork4("10.0.0.0/31"), ok: true},
+		{name: "host routes differing in two bits", left: xnetip.MustParseNetwork4("10.0.0.0/32"), right: xnetip.MustParseNetwork4("10.0.0.3/32"), ok: false},
+		{name: "default route absorbs any network", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("203.0.113.0/24"), want: xnetip.MustParseNetwork4("0.0.0.0/0"), ok: true},
+		{name: "default route with itself", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("0.0.0.0/0"), want: xnetip.MustParseNetwork4("0.0.0.0/0"), ok: true},
+		{name: "top-bit siblings give the default route", left: xnetip.MustParseNetwork4("0.0.0.0/1"), right: xnetip.MustParseNetwork4("128.0.0.0/1"), want: xnetip.MustParseNetwork4("0.0.0.0/0"), ok: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3263,21 +3263,21 @@ func Test_IPv4Network_Merge_UnitAndBoundary(t *testing.T) {
 
 // verifies that merging follows the mask bit pattern: only comparable
 // masks or single-bit siblings combine, wherever the bits sit.
-func Test_IPv4Network_Merge_NonContiguousMasks(t *testing.T) {
+func Test_Network4_Merge_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
-		want  xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
+		want  xnetip.Network4
 		ok    bool
 	}{
-		{name: "pattern siblings at a middle bit", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.1/255.254.0.255"), ok: true},
-		{name: "pattern siblings at a middle bit reversed", left: xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.1/255.254.0.255"), ok: true},
-		{name: "pattern siblings at the lowest bit", left: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.254"), ok: true},
-		{name: "incomparable non-contiguous masks", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.0.255.255"), ok: false},
-		{name: "pattern contains a host route", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.42.0.99/32"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), ok: true},
-		{name: "pattern contains a narrower pattern", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.5.0.0/255.255.255.0"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), ok: true},
-		{name: "alternating mask siblings", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("170.0.170.1/170.85.170.85"), want: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.84"), ok: true},
+		{name: "pattern siblings at a middle bit", left: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), right: xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255"), want: xnetip.MustParseNetwork4("10.0.0.1/255.254.0.255"), ok: true},
+		{name: "pattern siblings at a middle bit reversed", left: xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255"), right: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), want: xnetip.MustParseNetwork4("10.0.0.1/255.254.0.255"), ok: true},
+		{name: "pattern siblings at the lowest bit", left: xnetip.MustParseNetwork4("10.0.0.0/255.255.0.255"), right: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), want: xnetip.MustParseNetwork4("10.0.0.0/255.255.0.254"), ok: true},
+		{name: "incomparable non-contiguous masks", left: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), right: xnetip.MustParseNetwork4("10.0.0.1/255.0.255.255"), ok: false},
+		{name: "pattern contains a host route", left: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork4("10.42.0.99/32"), want: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), ok: true},
+		{name: "pattern contains a narrower pattern", left: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork4("10.5.0.0/255.255.255.0"), want: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), ok: true},
+		{name: "alternating mask siblings", left: xnetip.MustParseNetwork4("170.0.170.0/170.85.170.85"), right: xnetip.MustParseNetwork4("170.0.170.1/170.85.170.85"), want: xnetip.MustParseNetwork4("170.0.170.0/170.85.170.84"), ok: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3290,7 +3290,7 @@ func Test_IPv4Network_Merge_NonContiguousMasks(t *testing.T) {
 
 // verifies that the nine reference pairs, one per branch of the case
 // analysis, agree with the simple oracle.
-func Test_IPv4Network_Merge_ReferenceFixedCases(t *testing.T) {
+func Test_Network4_Merge_ReferenceFixedCases(t *testing.T) {
 	cases := [][2]string{
 		{"192.168.1.0/24", "192.168.1.0/24"},
 		{"192.168.0.0/24", "192.168.1.0/24"},
@@ -3303,8 +3303,8 @@ func Test_IPv4Network_Merge_ReferenceFixedCases(t *testing.T) {
 		{"10.0.0.1/255.255.0.255", "10.0.0.1/255.0.255.255"},
 	}
 	for _, pair := range cases {
-		left := xnetip.MustParseIPv4Network(pair[0])
-		right := xnetip.MustParseIPv4Network(pair[1])
+		left := xnetip.MustParseNetwork4(pair[0])
+		right := xnetip.MustParseNetwork4(pair[1])
 		wantNetwork, wantOK := mergeReferenceIPv4(t, left, right)
 		merged, ok := left.Merge(right)
 		require.Equal(t, wantOK, ok, "pair %v", pair)
@@ -3313,10 +3313,10 @@ func Test_IPv4Network_Merge_ReferenceFixedCases(t *testing.T) {
 }
 
 // verifies that merging agrees with the simple oracle on random pairs.
-func Test_IPv4Network_Merge_MatchesReferenceProperty(t *testing.T) {
+func Test_Network4_Merge_MatchesReferenceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		wantNetwork, wantOK := mergeReferenceIPv4(t, left, right)
 		merged, ok := left.Merge(right)
 		require.Equal(t, wantOK, ok)
@@ -3325,10 +3325,10 @@ func Test_IPv4Network_Merge_MatchesReferenceProperty(t *testing.T) {
 }
 
 // verifies that merging is commutative in both the value and the flag.
-func Test_IPv4Network_Merge_CommutativityProperty(t *testing.T) {
+func Test_Network4_Merge_CommutativityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		leftMerged, leftOK := left.Merge(right)
 		rightMerged, rightOK := right.Merge(left)
 		require.Equal(t, leftOK, rightOK)
@@ -3338,9 +3338,9 @@ func Test_IPv4Network_Merge_CommutativityProperty(t *testing.T) {
 
 // verifies that a network merged with itself is itself: aggregation
 // leans on this path to absorb duplicates.
-func Test_IPv4Network_Merge_SelfIsSelfProperty(t *testing.T) {
+func Test_Network4_Merge_SelfIsSelfProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		merged, ok := network.Merge(network)
 		require.True(t, ok)
 		require.Equal(t, network, merged)
@@ -3349,10 +3349,10 @@ func Test_IPv4Network_Merge_SelfIsSelfProperty(t *testing.T) {
 
 // verifies that a successful merge contains both inputs and returns a
 // normalized network.
-func Test_IPv4Network_Merge_ResultContainsBothAndNormalizedProperty(t *testing.T) {
+func Test_Network4_Merge_ResultContainsBothAndNormalizedProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		merged, ok := left.Merge(right)
 		if !ok {
 			return
@@ -3366,15 +3366,15 @@ func Test_IPv4Network_Merge_ResultContainsBothAndNormalizedProperty(t *testing.T
 
 // verifies on an 8-bit model, networks confined to the top octet, that
 // a successful merge holds exactly the union of the two address sets.
-func Test_IPv4Network_Merge_MembershipBruteForceProperty(t *testing.T) {
+func Test_Network4_Merge_MembershipBruteForceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		leftAddr := uint32(rapid.IntRange(0, 255).Draw(t, "left addr")) << 24
 		leftMask := uint32(rapid.IntRange(0, 255).Draw(t, "left mask")) << 24
 		rightAddr := uint32(rapid.IntRange(0, 255).Draw(t, "right addr")) << 24
 		rightMask := uint32(rapid.IntRange(0, 255).Draw(t, "right mask")) << 24
-		left, err := xnetip.IPv4NetworkFrom(netipAddrFrom4Bits(leftAddr), netipAddrFrom4Bits(leftMask))
+		left, err := xnetip.Network4From(netipAddrFrom4Bits(leftAddr), netipAddrFrom4Bits(leftMask))
 		require.NoError(t, err)
-		right, err := xnetip.IPv4NetworkFrom(netipAddrFrom4Bits(rightAddr), netipAddrFrom4Bits(rightMask))
+		right, err := xnetip.Network4From(netipAddrFrom4Bits(rightAddr), netipAddrFrom4Bits(rightMask))
 		require.NoError(t, err)
 		merged, ok := left.Merge(right)
 		mergedAddr, mergedMask := ipv4NetworkBits(merged)
@@ -3390,9 +3390,9 @@ func Test_IPv4Network_Merge_MembershipBruteForceProperty(t *testing.T) {
 
 // verifies that flipping any single masked bit builds a sibling whose
 // merge drops exactly that bit from the mask.
-func Test_IPv4Network_Merge_ConstructedSiblingProperty(t *testing.T) {
+func Test_Network4_Merge_ConstructedSiblingProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		addrBits, maskBits := ipv4NetworkBits(network)
 		if maskBits == 0 {
 			return
@@ -3404,7 +3404,7 @@ func Test_IPv4Network_Merge_ConstructedSiblingProperty(t *testing.T) {
 			}
 		}
 		bit := uint32(1) << rapid.SampledFrom(setBits).Draw(t, "bit")
-		sibling, err := xnetip.IPv4NetworkFrom(
+		sibling, err := xnetip.Network4From(
 			netipAddrFrom4Bits(addrBits^bit),
 			netipAddrFrom4Bits(maskBits),
 		)
@@ -3418,10 +3418,10 @@ func Test_IPv4Network_Merge_ConstructedSiblingProperty(t *testing.T) {
 
 // verifies that equal masks with neither adjacency nor equality never
 // merge: the differing bits are two or more.
-func Test_IPv4Network_Merge_SameMaskNotAdjacentNotIdenticalProperty(t *testing.T) {
+func Test_Network4_Merge_SameMaskNotAdjacentNotIdenticalProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		if left.Mask() != right.Mask() || left == right || left.IsAdjacent(right) {
 			return
 		}
@@ -3431,63 +3431,63 @@ func Test_IPv4Network_Merge_SameMaskNotAdjacentNotIdenticalProperty(t *testing.T
 }
 
 // verifies that merging allocates nothing on any branch.
-func Test_IPv4Network_Merge_AllocationFree(t *testing.T) {
-	sibling := xnetip.MustParseIPv4Network("192.168.0.0/24")
-	buddy := xnetip.MustParseIPv4Network("192.168.1.0/24")
-	container := xnetip.MustParseIPv4Network("10.0.0.0/8")
-	contained := xnetip.MustParseIPv4Network("10.1.0.0/16")
+func Test_Network4_Merge_AllocationFree(t *testing.T) {
+	sibling := xnetip.MustParseNetwork4("192.168.0.0/24")
+	buddy := xnetip.MustParseNetwork4("192.168.1.0/24")
+	container := xnetip.MustParseNetwork4("10.0.0.0/8")
+	contained := xnetip.MustParseNetwork4("10.1.0.0/16")
 	requireNoAllocs(t, func() { networkSink, okSink = sibling.Merge(buddy) })
 	requireNoAllocs(t, func() { networkSink, okSink = container.Merge(contained) })
 }
 
-func BenchmarkIPv4Network_Merge_EqualMaskAdjacent(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("192.168.0.0/24")
-	right := xnetip.MustParseIPv4Network("192.168.1.0/24")
+func BenchmarkNetwork4_Merge_EqualMaskAdjacent(b *testing.B) {
+	left := xnetip.MustParseNetwork4("192.168.0.0/24")
+	right := xnetip.MustParseNetwork4("192.168.1.0/24")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.Merge(right)
 	}
 }
 
-func BenchmarkIPv4Network_Merge_EqualMaskNonMergeable(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("192.168.0.0/24")
-	right := xnetip.MustParseIPv4Network("192.168.3.0/24")
+func BenchmarkNetwork4_Merge_EqualMaskNonMergeable(b *testing.B) {
+	left := xnetip.MustParseNetwork4("192.168.0.0/24")
+	right := xnetip.MustParseNetwork4("192.168.3.0/24")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.Merge(right)
 	}
 }
 
-func BenchmarkIPv4Network_Merge_Containment(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("10.0.0.0/8")
-	right := xnetip.MustParseIPv4Network("10.1.0.0/16")
+func BenchmarkNetwork4_Merge_Containment(b *testing.B) {
+	left := xnetip.MustParseNetwork4("10.0.0.0/8")
+	right := xnetip.MustParseNetwork4("10.1.0.0/16")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.Merge(right)
 	}
 }
 
-func BenchmarkIPv4Network_Merge_ComparableMasksAddressMismatch(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("10.0.0.0/8")
-	right := xnetip.MustParseIPv4Network("172.16.0.0/16")
+func BenchmarkNetwork4_Merge_ComparableMasksAddressMismatch(b *testing.B) {
+	left := xnetip.MustParseNetwork4("10.0.0.0/8")
+	right := xnetip.MustParseNetwork4("172.16.0.0/16")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.Merge(right)
 	}
 }
 
-func BenchmarkIPv4Network_Merge_IncomparableMasks(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
-	right := xnetip.MustParseIPv4Network("10.0.0.1/255.0.255.255")
+func BenchmarkNetwork4_Merge_IncomparableMasks(b *testing.B) {
+	left := xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255")
+	right := xnetip.MustParseNetwork4("10.0.0.1/255.0.255.255")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.Merge(right)
 	}
 }
 
-func BenchmarkIPv4Network_Merge_NonContiguous(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
-	right := xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255")
+func BenchmarkNetwork4_Merge_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255")
+	right := xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.Merge(right)
@@ -3501,7 +3501,7 @@ func BenchmarkIPv4Network_Merge_NonContiguous(b *testing.B) {
 // shift, independent from the arithmetic isolation the
 // implementation uses. A zero mask has no boundary bit and never
 // qualifies.
-func isAdjacentByLowestMaskBitReferenceIPv4(left, right xnetip.IPv4Network) bool {
+func isAdjacentByLowestMaskBitReferenceIPv4(left, right xnetip.Network4) bool {
 	leftAddr, leftMask := ipv4NetworkBits(left)
 	rightAddr, rightMask := ipv4NetworkBits(right)
 	return leftMask == rightMask && leftMask != 0 &&
@@ -3510,25 +3510,25 @@ func isAdjacentByLowestMaskBitReferenceIPv4(left, right xnetip.IPv4Network) bool
 
 // verifies that only same-mask pairs differing in exactly the mask's
 // lowest set bit qualify, and adjacency at any higher bit is refused.
-func Test_IPv4Network_IsAdjacentByLowestMaskBit_ContiguousAndBoundary(t *testing.T) {
+func Test_Network4_IsAdjacentByLowestMaskBit_ContiguousAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
 		want  bool
 	}{
-		{name: "CIDR siblings", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: true},
-		{name: "CIDR siblings reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: true},
-		{name: "host routes differing in bit 0", left: xnetip.MustParseIPv4Network("192.168.0.0/32"), right: xnetip.MustParseIPv4Network("192.168.0.1/32"), want: true},
-		{name: "host routes differing in bit 0 reversed", left: xnetip.MustParseIPv4Network("192.168.0.1/32"), right: xnetip.MustParseIPv4Network("192.168.0.0/32"), want: true},
-		{name: "identical", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: false},
-		{name: "different masks", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
-		{name: "adjacent at the top mask bit, not the lowest", left: xnetip.MustParseIPv4Network("0.0.0.0/2"), right: xnetip.MustParseIPv4Network("128.0.0.0/2"), want: false},
-		{name: "adjacent one bit above the boundary", left: xnetip.MustParseIPv4Network("10.0.0.0/24"), right: xnetip.MustParseIPv4Network("10.0.2.0/24"), want: false},
-		{name: "default route with itself", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: false},
-		{name: "/1 siblings at bit 31", left: xnetip.MustParseIPv4Network("0.0.0.0/1"), right: xnetip.MustParseIPv4Network("128.0.0.0/1"), want: true},
-		{name: "host routes differing in bit 1", left: xnetip.MustParseIPv4Network("10.0.0.0/32"), right: xnetip.MustParseIPv4Network("10.0.0.2/32"), want: false},
-		{name: "/31 siblings", left: xnetip.MustParseIPv4Network("10.0.0.0/31"), right: xnetip.MustParseIPv4Network("10.0.0.2/31"), want: true},
+		{name: "CIDR siblings", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: true},
+		{name: "CIDR siblings reversed", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/24"), want: true},
+		{name: "host routes differing in bit 0", left: xnetip.MustParseNetwork4("192.168.0.0/32"), right: xnetip.MustParseNetwork4("192.168.0.1/32"), want: true},
+		{name: "host routes differing in bit 0 reversed", left: xnetip.MustParseNetwork4("192.168.0.1/32"), right: xnetip.MustParseNetwork4("192.168.0.0/32"), want: true},
+		{name: "identical", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/24"), want: false},
+		{name: "different masks", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/16"), want: false},
+		{name: "adjacent at the top mask bit, not the lowest", left: xnetip.MustParseNetwork4("0.0.0.0/2"), right: xnetip.MustParseNetwork4("128.0.0.0/2"), want: false},
+		{name: "adjacent one bit above the boundary", left: xnetip.MustParseNetwork4("10.0.0.0/24"), right: xnetip.MustParseNetwork4("10.0.2.0/24"), want: false},
+		{name: "default route with itself", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("0.0.0.0/0"), want: false},
+		{name: "/1 siblings at bit 31", left: xnetip.MustParseNetwork4("0.0.0.0/1"), right: xnetip.MustParseNetwork4("128.0.0.0/1"), want: true},
+		{name: "host routes differing in bit 1", left: xnetip.MustParseNetwork4("10.0.0.0/32"), right: xnetip.MustParseNetwork4("10.0.0.2/32"), want: false},
+		{name: "/31 siblings", left: xnetip.MustParseNetwork4("10.0.0.0/31"), right: xnetip.MustParseNetwork4("10.0.0.2/31"), want: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3542,20 +3542,20 @@ func Test_IPv4Network_IsAdjacentByLowestMaskBit_ContiguousAndBoundary(t *testing
 //
 // A sibling differing at a higher run's boundary stays adjacent in
 // the plain sense but does not qualify here.
-func Test_IPv4Network_IsAdjacentByLowestMaskBit_NonContiguousMasks(t *testing.T) {
+func Test_Network4_IsAdjacentByLowestMaskBit_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
 		want  bool
 	}{
-		{name: "two-run mask at its lowest bit", left: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), want: true},
-		{name: "two-run mask at its lowest bit reversed", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), want: true},
-		{name: "two-run mask at the high run's boundary", left: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.255"), want: false},
-		{name: "mask with lowest set bit 8, differing there", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.0.1.0/255.0.255.0"), want: true},
-		{name: "mask with lowest set bit 8, differing at bit 24", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("11.0.0.0/255.0.255.0"), want: false},
-		{name: "alternating mask, differing at bit 0", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("170.0.170.1/170.85.170.85"), want: true},
-		{name: "alternating mask, differing at bit 2", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("170.0.170.4/170.85.170.85"), want: false},
+		{name: "two-run mask at its lowest bit", left: xnetip.MustParseNetwork4("10.0.0.0/255.255.0.255"), right: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), want: true},
+		{name: "two-run mask at its lowest bit reversed", left: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), right: xnetip.MustParseNetwork4("10.0.0.0/255.255.0.255"), want: true},
+		{name: "two-run mask at the high run's boundary", left: xnetip.MustParseNetwork4("10.0.0.0/255.255.0.255"), right: xnetip.MustParseNetwork4("10.1.0.0/255.255.0.255"), want: false},
+		{name: "mask with lowest set bit 8, differing there", left: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork4("10.0.1.0/255.0.255.0"), want: true},
+		{name: "mask with lowest set bit 8, differing at bit 24", left: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), right: xnetip.MustParseNetwork4("11.0.0.0/255.0.255.0"), want: false},
+		{name: "alternating mask, differing at bit 0", left: xnetip.MustParseNetwork4("170.0.170.0/170.85.170.85"), right: xnetip.MustParseNetwork4("170.0.170.1/170.85.170.85"), want: true},
+		{name: "alternating mask, differing at bit 2", left: xnetip.MustParseNetwork4("170.0.170.0/170.85.170.85"), right: xnetip.MustParseNetwork4("170.0.170.4/170.85.170.85"), want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3566,7 +3566,7 @@ func Test_IPv4Network_IsAdjacentByLowestMaskBit_NonContiguousMasks(t *testing.T)
 
 // verifies that the rejected higher-bit pairs of the unit tables are
 // still plainly adjacent: the predicate is a strict restriction.
-func Test_IPv4Network_IsAdjacentByLowestMaskBit_RejectedPairsStayAdjacent(t *testing.T) {
+func Test_Network4_IsAdjacentByLowestMaskBit_RejectedPairsStayAdjacent(t *testing.T) {
 	cases := [][2]string{
 		{"0.0.0.0/2", "128.0.0.0/2"},
 		{"10.0.0.0/24", "10.0.2.0/24"},
@@ -3574,8 +3574,8 @@ func Test_IPv4Network_IsAdjacentByLowestMaskBit_RejectedPairsStayAdjacent(t *tes
 		{"10.0.0.0/255.0.255.0", "11.0.0.0/255.0.255.0"},
 	}
 	for _, pair := range cases {
-		left := xnetip.MustParseIPv4Network(pair[0])
-		right := xnetip.MustParseIPv4Network(pair[1])
+		left := xnetip.MustParseNetwork4(pair[0])
+		right := xnetip.MustParseNetwork4(pair[1])
 		require.True(t, left.IsAdjacent(right), "pair %v", pair)
 		require.False(t, left.IsAdjacentByLowestMaskBit(right), "pair %v", pair)
 	}
@@ -3583,20 +3583,20 @@ func Test_IPv4Network_IsAdjacentByLowestMaskBit_RejectedPairsStayAdjacent(t *tes
 
 // verifies that the predicate agrees with the trailing-zeros oracle
 // on random pairs.
-func Test_IPv4Network_IsAdjacentByLowestMaskBit_MatchesReferenceProperty(t *testing.T) {
+func Test_Network4_IsAdjacentByLowestMaskBit_MatchesReferenceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		require.Equal(t, isAdjacentByLowestMaskBitReferenceIPv4(left, right), left.IsAdjacentByLowestMaskBit(right))
 	})
 }
 
 // verifies that the predicate implies plain adjacency, is symmetric
 // and is irreflexive.
-func Test_IPv4Network_IsAdjacentByLowestMaskBit_ImpliesAdjacentAndSymmetryProperty(t *testing.T) {
+func Test_Network4_IsAdjacentByLowestMaskBit_ImpliesAdjacentAndSymmetryProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		if left.IsAdjacentByLowestMaskBit(right) {
 			require.True(t, left.IsAdjacent(right))
 		}
@@ -3607,15 +3607,15 @@ func Test_IPv4Network_IsAdjacentByLowestMaskBit_ImpliesAdjacentAndSymmetryProper
 
 // verifies that the buddy at the mask's lowest set bit qualifies and
 // a sibling at any higher set bit is adjacent but does not.
-func Test_IPv4Network_IsAdjacentByLowestMaskBit_BuddyConstructionProperty(t *testing.T) {
+func Test_Network4_IsAdjacentByLowestMaskBit_BuddyConstructionProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		addrBits, maskBits := ipv4NetworkBits(network)
 		if maskBits == 0 {
 			return
 		}
 		lowest := maskBits & -maskBits
-		buddy, err := xnetip.IPv4NetworkFrom(
+		buddy, err := xnetip.Network4From(
 			netipAddrFrom4Bits(addrBits^lowest),
 			netipAddrFrom4Bits(maskBits),
 		)
@@ -3632,7 +3632,7 @@ func Test_IPv4Network_IsAdjacentByLowestMaskBit_BuddyConstructionProperty(t *tes
 			return
 		}
 		bit := uint32(1) << rapid.SampledFrom(higherBits).Draw(t, "higher bit")
-		sibling, err := xnetip.IPv4NetworkFrom(
+		sibling, err := xnetip.Network4From(
 			netipAddrFrom4Bits(addrBits^bit),
 			netipAddrFrom4Bits(maskBits),
 		)
@@ -3643,33 +3643,33 @@ func Test_IPv4Network_IsAdjacentByLowestMaskBit_BuddyConstructionProperty(t *tes
 }
 
 // verifies that the predicate allocates nothing.
-func Test_IPv4Network_IsAdjacentByLowestMaskBit_AllocationFree(t *testing.T) {
-	left := xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255")
-	right := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
+func Test_Network4_IsAdjacentByLowestMaskBit_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseNetwork4("10.0.0.0/255.255.0.255")
+	right := xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255")
 	requireNoAllocs(t, func() { okSink = left.IsAdjacentByLowestMaskBit(right) })
 }
 
-func BenchmarkIPv4Network_IsAdjacentByLowestMaskBit_CIDRSiblings(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("192.168.0.0/24")
-	right := xnetip.MustParseIPv4Network("192.168.1.0/24")
+func BenchmarkNetwork4_IsAdjacentByLowestMaskBit_CIDRSiblings(b *testing.B) {
+	left := xnetip.MustParseNetwork4("192.168.0.0/24")
+	right := xnetip.MustParseNetwork4("192.168.1.0/24")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = left.IsAdjacentByLowestMaskBit(right)
 	}
 }
 
-func BenchmarkIPv4Network_IsAdjacentByLowestMaskBit_AdjacentNonLowestBit(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("0.0.0.0/2")
-	right := xnetip.MustParseIPv4Network("128.0.0.0/2")
+func BenchmarkNetwork4_IsAdjacentByLowestMaskBit_AdjacentNonLowestBit(b *testing.B) {
+	left := xnetip.MustParseNetwork4("0.0.0.0/2")
+	right := xnetip.MustParseNetwork4("128.0.0.0/2")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = left.IsAdjacentByLowestMaskBit(right)
 	}
 }
 
-func BenchmarkIPv4Network_IsAdjacentByLowestMaskBit_NonContiguous(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255")
-	right := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
+func BenchmarkNetwork4_IsAdjacentByLowestMaskBit_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseNetwork4("10.0.0.0/255.255.0.255")
+	right := xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255")
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = left.IsAdjacentByLowestMaskBit(right)
@@ -3683,7 +3683,7 @@ func BenchmarkIPv4Network_IsAdjacentByLowestMaskBit_NonContiguous(b *testing.B) 
 // trailing-zeros adjacency oracle gates a sibling merge whose mask
 // clears the counted bit and whose address is re-normalized through
 // the checked constructor.
-func mergeByLowestMaskBitReferenceIPv4(t require.TestingT, left, right xnetip.IPv4Network) (xnetip.IPv4Network, bool) {
+func mergeByLowestMaskBitReferenceIPv4(t require.TestingT, left, right xnetip.Network4) (xnetip.Network4, bool) {
 	if left.Contains(right) {
 		return left, true
 	}
@@ -3691,12 +3691,12 @@ func mergeByLowestMaskBitReferenceIPv4(t require.TestingT, left, right xnetip.IP
 		return right, true
 	}
 	if !isAdjacentByLowestMaskBitReferenceIPv4(left, right) {
-		return xnetip.IPv4Network{}, false
+		return xnetip.Network4{}, false
 	}
 	leftAddr, leftMask := ipv4NetworkBits(left)
 	rightAddr, _ := ipv4NetworkBits(right)
 	lowest := uint32(1) << bits.TrailingZeros32(leftMask)
-	merged, err := xnetip.IPv4NetworkFrom(
+	merged, err := xnetip.Network4From(
 		netipAddrFrom4Bits(leftAddr&rightAddr),
 		netipAddrFrom4Bits(leftMask&^lowest),
 	)
@@ -3706,27 +3706,27 @@ func mergeByLowestMaskBitReferenceIPv4(t require.TestingT, left, right xnetip.IP
 
 // verifies that merging succeeds exactly for containment and for
 // lowest-mask-bit siblings, and returns the combined network.
-func Test_IPv4Network_MergeByLowestMaskBit_UnitAndBoundary(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_UnitAndBoundary(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
-		want  xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
+		want  xnetip.Network4
 		ok    bool
 	}{
-		{name: "CIDR siblings merge to the parent", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: xnetip.MustParseIPv4Network("192.168.0.0/23"), ok: true},
-		{name: "CIDR siblings reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: xnetip.MustParseIPv4Network("192.168.0.0/23"), ok: true},
-		{name: "host routes differing in bit 0 merge to /31", left: xnetip.MustParseIPv4Network("10.0.0.0/32"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.255.255.254"), ok: true},
-		{name: "adjacent at the top bit is refused", left: xnetip.MustParseIPv4Network("0.0.0.0/2"), right: xnetip.MustParseIPv4Network("128.0.0.0/2"), ok: false},
-		{name: "identical returns itself", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: xnetip.MustParseIPv4Network("192.168.1.0/24"), ok: true},
-		{name: "containment returns the larger", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("10.1.0.0/16"), want: xnetip.MustParseIPv4Network("10.0.0.0/8"), ok: true},
-		{name: "containment reversed", left: xnetip.MustParseIPv4Network("10.1.0.0/16"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: xnetip.MustParseIPv4Network("10.0.0.0/8"), ok: true},
-		{name: "default route with itself", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: xnetip.MustParseIPv4Network("0.0.0.0/0"), ok: true},
-		{name: "default route absorbs any network", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: xnetip.MustParseIPv4Network("0.0.0.0/0"), ok: true},
-		{name: "default route absorbs any network reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: xnetip.MustParseIPv4Network("0.0.0.0/0"), ok: true},
-		{name: "different masks, no containment", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("10.0.0.0/16"), ok: false},
-		{name: "different masks, no containment reversed", left: xnetip.MustParseIPv4Network("10.0.0.0/16"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), ok: false},
-		{name: "same mask, unrelated addresses", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.3.0/24"), ok: false},
+		{name: "CIDR siblings merge to the parent", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: xnetip.MustParseNetwork4("192.168.0.0/23"), ok: true},
+		{name: "CIDR siblings reversed", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("192.168.0.0/24"), want: xnetip.MustParseNetwork4("192.168.0.0/23"), ok: true},
+		{name: "host routes differing in bit 0 merge to /31", left: xnetip.MustParseNetwork4("10.0.0.0/32"), right: xnetip.MustParseNetwork4("10.0.0.1/32"), want: xnetip.MustParseNetwork4("10.0.0.0/255.255.255.254"), ok: true},
+		{name: "adjacent at the top bit is refused", left: xnetip.MustParseNetwork4("0.0.0.0/2"), right: xnetip.MustParseNetwork4("128.0.0.0/2"), ok: false},
+		{name: "identical returns itself", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: xnetip.MustParseNetwork4("192.168.1.0/24"), ok: true},
+		{name: "containment returns the larger", left: xnetip.MustParseNetwork4("10.0.0.0/8"), right: xnetip.MustParseNetwork4("10.1.0.0/16"), want: xnetip.MustParseNetwork4("10.0.0.0/8"), ok: true},
+		{name: "containment reversed", left: xnetip.MustParseNetwork4("10.1.0.0/16"), right: xnetip.MustParseNetwork4("10.0.0.0/8"), want: xnetip.MustParseNetwork4("10.0.0.0/8"), ok: true},
+		{name: "default route with itself", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("0.0.0.0/0"), want: xnetip.MustParseNetwork4("0.0.0.0/0"), ok: true},
+		{name: "default route absorbs any network", left: xnetip.MustParseNetwork4("0.0.0.0/0"), right: xnetip.MustParseNetwork4("192.168.1.0/24"), want: xnetip.MustParseNetwork4("0.0.0.0/0"), ok: true},
+		{name: "default route absorbs any network reversed", left: xnetip.MustParseNetwork4("192.168.1.0/24"), right: xnetip.MustParseNetwork4("0.0.0.0/0"), want: xnetip.MustParseNetwork4("0.0.0.0/0"), ok: true},
+		{name: "different masks, no containment", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("10.0.0.0/16"), ok: false},
+		{name: "different masks, no containment reversed", left: xnetip.MustParseNetwork4("10.0.0.0/16"), right: xnetip.MustParseNetwork4("192.168.0.0/24"), ok: false},
+		{name: "same mask, unrelated addresses", left: xnetip.MustParseNetwork4("192.168.0.0/24"), right: xnetip.MustParseNetwork4("192.168.3.0/24"), ok: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3739,21 +3739,21 @@ func Test_IPv4Network_MergeByLowestMaskBit_UnitAndBoundary(t *testing.T) {
 
 // verifies that non-contiguous masks merge only at the lowest run's
 // boundary bit or by containment.
-func Test_IPv4Network_MergeByLowestMaskBit_NonContiguousMasks(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name  string
-		left  xnetip.IPv4Network
-		right xnetip.IPv4Network
-		want  xnetip.IPv4Network
+		left  xnetip.Network4
+		right xnetip.Network4
+		want  xnetip.Network4
 		ok    bool
 	}{
-		{name: "siblings at the lowest run's bit 0", left: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.254"), ok: true},
-		{name: "siblings at the lowest run's bit 0 reversed", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.254"), ok: true},
-		{name: "siblings at the higher run's bit 16 refused", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255"), ok: false},
-		{name: "containment with non-contiguous masks", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.0/255.128.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), ok: true},
-		{name: "containment with non-contiguous masks reversed", left: xnetip.MustParseIPv4Network("10.0.0.0/255.128.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), ok: true},
-		{name: "alternating mask, siblings at bit 0", left: xnetip.MustParseIPv4Network("0.0.0.0/85.85.85.85"), right: xnetip.MustParseIPv4Network("0.0.0.1/85.85.85.85"), want: xnetip.MustParseIPv4Network("0.0.0.0/85.85.85.84"), ok: true},
-		{name: "alternating mask, siblings at bit 2 refused", left: xnetip.MustParseIPv4Network("0.0.0.0/85.85.85.85"), right: xnetip.MustParseIPv4Network("0.0.0.4/85.85.85.85"), ok: false},
+		{name: "siblings at the lowest run's bit 0", left: xnetip.MustParseNetwork4("10.0.0.0/255.255.0.255"), right: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), want: xnetip.MustParseNetwork4("10.0.0.0/255.255.0.254"), ok: true},
+		{name: "siblings at the lowest run's bit 0 reversed", left: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), right: xnetip.MustParseNetwork4("10.0.0.0/255.255.0.255"), want: xnetip.MustParseNetwork4("10.0.0.0/255.255.0.254"), ok: true},
+		{name: "siblings at the higher run's bit 16 refused", left: xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255"), right: xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255"), ok: false},
+		{name: "containment with non-contiguous masks", left: xnetip.MustParseNetwork4("10.0.0.0/255.0.0.255"), right: xnetip.MustParseNetwork4("10.0.0.0/255.128.0.255"), want: xnetip.MustParseNetwork4("10.0.0.0/255.0.0.255"), ok: true},
+		{name: "containment with non-contiguous masks reversed", left: xnetip.MustParseNetwork4("10.0.0.0/255.128.0.255"), right: xnetip.MustParseNetwork4("10.0.0.0/255.0.0.255"), want: xnetip.MustParseNetwork4("10.0.0.0/255.0.0.255"), ok: true},
+		{name: "alternating mask, siblings at bit 0", left: xnetip.MustParseNetwork4("0.0.0.0/85.85.85.85"), right: xnetip.MustParseNetwork4("0.0.0.1/85.85.85.85"), want: xnetip.MustParseNetwork4("0.0.0.0/85.85.85.84"), ok: true},
+		{name: "alternating mask, siblings at bit 2 refused", left: xnetip.MustParseNetwork4("0.0.0.0/85.85.85.85"), right: xnetip.MustParseNetwork4("0.0.0.4/85.85.85.85"), ok: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3768,7 +3768,7 @@ func Test_IPv4Network_MergeByLowestMaskBit_NonContiguousMasks(t *testing.T) {
 // still combined by the unrestricted merge.
 //
 // The refusal is what keeps the result inside the inputs' class.
-func Test_IPv4Network_MergeByLowestMaskBit_RefusedPairsStillMerge(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_RefusedPairsStillMerge(t *testing.T) {
 	cases := []struct {
 		name string
 		pair [2]string
@@ -3779,20 +3779,20 @@ func Test_IPv4Network_MergeByLowestMaskBit_RefusedPairsStillMerge(t *testing.T) 
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			left := xnetip.MustParseIPv4Network(testCase.pair[0])
-			right := xnetip.MustParseIPv4Network(testCase.pair[1])
+			left := xnetip.MustParseNetwork4(testCase.pair[0])
+			right := xnetip.MustParseNetwork4(testCase.pair[1])
 			_, ok := left.MergeByLowestMaskBit(right)
 			require.False(t, ok)
 			merged, ok := left.Merge(right)
 			require.True(t, ok)
-			require.Equal(t, xnetip.MustParseIPv4Network(testCase.want), merged)
+			require.Equal(t, xnetip.MustParseNetwork4(testCase.want), merged)
 		})
 	}
 }
 
 // verifies that the seven reference pairs, one per branch of the case
 // analysis, agree with the simple oracle.
-func Test_IPv4Network_MergeByLowestMaskBit_ReferenceFixedCases(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_ReferenceFixedCases(t *testing.T) {
 	cases := [][2]string{
 		{"192.168.0.0/24", "192.168.1.0/24"},
 		{"10.0.0.0/255.255.0.255", "10.0.0.1/255.255.0.255"},
@@ -3803,8 +3803,8 @@ func Test_IPv4Network_MergeByLowestMaskBit_ReferenceFixedCases(t *testing.T) {
 		{"0.0.0.0/0", "0.0.0.0/0"},
 	}
 	for _, pair := range cases {
-		left := xnetip.MustParseIPv4Network(pair[0])
-		right := xnetip.MustParseIPv4Network(pair[1])
+		left := xnetip.MustParseNetwork4(pair[0])
+		right := xnetip.MustParseNetwork4(pair[1])
 		wantNetwork, wantOK := mergeByLowestMaskBitReferenceIPv4(t, left, right)
 		merged, ok := left.MergeByLowestMaskBit(right)
 		require.Equal(t, wantOK, ok, "pair %v", pair)
@@ -3814,10 +3814,10 @@ func Test_IPv4Network_MergeByLowestMaskBit_ReferenceFixedCases(t *testing.T) {
 
 // verifies that the merge agrees with the simple oracle on random
 // pairs.
-func Test_IPv4Network_MergeByLowestMaskBit_MatchesReferenceProperty(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_MatchesReferenceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		wantNetwork, wantOK := mergeByLowestMaskBitReferenceIPv4(t, left, right)
 		merged, ok := left.MergeByLowestMaskBit(right)
 		require.Equal(t, wantOK, ok)
@@ -3827,10 +3827,10 @@ func Test_IPv4Network_MergeByLowestMaskBit_MatchesReferenceProperty(t *testing.T
 
 // verifies that the merge fires exactly on containment in either
 // direction or on a lowest-mask-bit sibling pair.
-func Test_IPv4Network_MergeByLowestMaskBit_OKIffPredicateProperty(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_OKIffPredicateProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		_, ok := left.MergeByLowestMaskBit(right)
 		want := left.Contains(right) || right.Contains(left) || left.IsAdjacentByLowestMaskBit(right)
 		require.Equal(t, want, ok)
@@ -3839,10 +3839,10 @@ func Test_IPv4Network_MergeByLowestMaskBit_OKIffPredicateProperty(t *testing.T) 
 
 // verifies that the merge is commutative in both the value and the
 // flag.
-func Test_IPv4Network_MergeByLowestMaskBit_CommutativityProperty(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_CommutativityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		leftMerged, leftOK := left.MergeByLowestMaskBit(right)
 		rightMerged, rightOK := right.MergeByLowestMaskBit(left)
 		require.Equal(t, leftOK, rightOK)
@@ -3852,10 +3852,10 @@ func Test_IPv4Network_MergeByLowestMaskBit_CommutativityProperty(t *testing.T) {
 
 // verifies that the merge is a restriction of Merge: whenever it
 // fires it returns exactly the same network.
-func Test_IPv4Network_MergeByLowestMaskBit_AgreesWithMergeProperty(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_AgreesWithMergeProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		merged, ok := left.MergeByLowestMaskBit(right)
 		if !ok {
 			return
@@ -3868,7 +3868,7 @@ func Test_IPv4Network_MergeByLowestMaskBit_AgreesWithMergeProperty(t *testing.T)
 
 // verifies that constructed buddy pairs always merge, agree with
 // Merge, commute, contain both inputs and yield a normalized result.
-func Test_IPv4Network_MergeByLowestMaskBit_SiblingsMergeAndAgreeProperty(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_SiblingsMergeAndAgreeProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		pair := genIPv4LowestBitSiblingPair.Draw(t, "pair")
 		merged, ok := pair[0].MergeByLowestMaskBit(pair[1])
@@ -3888,7 +3888,7 @@ func Test_IPv4Network_MergeByLowestMaskBit_SiblingsMergeAndAgreeProperty(t *test
 
 // verifies the class closure: two contiguous buddies always merge
 // into a contiguous parent.
-func Test_IPv4Network_MergeByLowestMaskBit_ClosureContiguousProperty(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_ClosureContiguousProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		pair := genIPv4ContiguousSiblingPair.Draw(t, "pair")
 		require.True(t, pair[0].IsContiguous())
@@ -3901,15 +3901,15 @@ func Test_IPv4Network_MergeByLowestMaskBit_ClosureContiguousProperty(t *testing.
 
 // verifies on an 8-bit model, networks confined to the top octet,
 // that a successful merge holds exactly the union of the two sets.
-func Test_IPv4Network_MergeByLowestMaskBit_MembershipBruteForceProperty(t *testing.T) {
+func Test_Network4_MergeByLowestMaskBit_MembershipBruteForceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		leftAddr := uint32(rapid.IntRange(0, 255).Draw(t, "left addr")) << 24
 		leftMask := uint32(rapid.IntRange(0, 255).Draw(t, "left mask")) << 24
 		rightAddr := uint32(rapid.IntRange(0, 255).Draw(t, "right addr")) << 24
 		rightMask := uint32(rapid.IntRange(0, 255).Draw(t, "right mask")) << 24
-		left, err := xnetip.IPv4NetworkFrom(netipAddrFrom4Bits(leftAddr), netipAddrFrom4Bits(leftMask))
+		left, err := xnetip.Network4From(netipAddrFrom4Bits(leftAddr), netipAddrFrom4Bits(leftMask))
 		require.NoError(t, err)
-		right, err := xnetip.IPv4NetworkFrom(netipAddrFrom4Bits(rightAddr), netipAddrFrom4Bits(rightMask))
+		right, err := xnetip.Network4From(netipAddrFrom4Bits(rightAddr), netipAddrFrom4Bits(rightMask))
 		require.NoError(t, err)
 		merged, ok := left.MergeByLowestMaskBit(right)
 		if !ok {
@@ -3928,45 +3928,45 @@ func Test_IPv4Network_MergeByLowestMaskBit_MembershipBruteForceProperty(t *testi
 
 // verifies that the merge allocates nothing on the sibling and the
 // containment paths.
-func Test_IPv4Network_MergeByLowestMaskBit_AllocationFree(t *testing.T) {
-	sibling := xnetip.MustParseIPv4Network("192.168.0.0/24")
-	buddy := xnetip.MustParseIPv4Network("192.168.1.0/24")
-	container := xnetip.MustParseIPv4Network("10.0.0.0/8")
-	contained := xnetip.MustParseIPv4Network("10.1.0.0/16")
+func Test_Network4_MergeByLowestMaskBit_AllocationFree(t *testing.T) {
+	sibling := xnetip.MustParseNetwork4("192.168.0.0/24")
+	buddy := xnetip.MustParseNetwork4("192.168.1.0/24")
+	container := xnetip.MustParseNetwork4("10.0.0.0/8")
+	contained := xnetip.MustParseNetwork4("10.1.0.0/16")
 	requireNoAllocs(t, func() { networkSink, okSink = sibling.MergeByLowestMaskBit(buddy) })
 	requireNoAllocs(t, func() { networkSink, okSink = container.MergeByLowestMaskBit(contained) })
 }
 
-func BenchmarkIPv4Network_MergeByLowestMaskBit_CIDRSiblings(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("192.168.0.0/24")
-	right := xnetip.MustParseIPv4Network("192.168.1.0/24")
+func BenchmarkNetwork4_MergeByLowestMaskBit_CIDRSiblings(b *testing.B) {
+	left := xnetip.MustParseNetwork4("192.168.0.0/24")
+	right := xnetip.MustParseNetwork4("192.168.1.0/24")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.MergeByLowestMaskBit(right)
 	}
 }
 
-func BenchmarkIPv4Network_MergeByLowestMaskBit_AdjacentNonLowestBit(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("0.0.0.0/2")
-	right := xnetip.MustParseIPv4Network("128.0.0.0/2")
+func BenchmarkNetwork4_MergeByLowestMaskBit_AdjacentNonLowestBit(b *testing.B) {
+	left := xnetip.MustParseNetwork4("0.0.0.0/2")
+	right := xnetip.MustParseNetwork4("128.0.0.0/2")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.MergeByLowestMaskBit(right)
 	}
 }
 
-func BenchmarkIPv4Network_MergeByLowestMaskBit_NonContiguous(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255")
-	right := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
+func BenchmarkNetwork4_MergeByLowestMaskBit_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseNetwork4("10.0.0.0/255.255.0.255")
+	right := xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.MergeByLowestMaskBit(right)
 	}
 }
 
-func BenchmarkIPv4Network_MergeByLowestMaskBit_Containment(b *testing.B) {
-	left := xnetip.MustParseIPv4Network("10.0.0.0/8")
-	right := xnetip.MustParseIPv4Network("10.1.0.0/16")
+func BenchmarkNetwork4_MergeByLowestMaskBit_Containment(b *testing.B) {
+	left := xnetip.MustParseNetwork4("10.0.0.0/8")
+	right := xnetip.MustParseNetwork4("10.1.0.0/16")
 	b.ReportAllocs()
 	for b.Loop() {
 		networkSink, okSink = left.MergeByLowestMaskBit(right)
@@ -3979,13 +3979,13 @@ func BenchmarkIPv4Network_MergeByLowestMaskBit_Containment(b *testing.B) {
 // It keeps a mask bit only when every input masks it and agrees with
 // the receiver's address on it, and re-normalizes the address through
 // the checked constructor.
-func supernetForReferenceIPv4(t require.TestingT, receiver xnetip.IPv4Network, nets []xnetip.IPv4Network) xnetip.IPv4Network {
+func supernetForReferenceIPv4(t require.TestingT, receiver xnetip.Network4, nets []xnetip.Network4) xnetip.Network4 {
 	addr, mask := ipv4NetworkBits(receiver)
 	for _, network := range nets {
 		otherAddr, otherMask := ipv4NetworkBits(network)
 		mask &= otherMask &^ (addr ^ otherAddr)
 	}
-	oracle, err := xnetip.IPv4NetworkFrom(
+	oracle, err := xnetip.Network4From(
 		netipAddrFrom4Bits(addr&mask),
 		netipAddrFrom4Bits(mask),
 	)
@@ -3995,10 +3995,10 @@ func supernetForReferenceIPv4(t require.TestingT, receiver xnetip.IPv4Network, n
 
 // ipv4RelatedNetworks returns count consecutive /28 blocks under
 // 10.0.0.0/16, so a fold over them never collapses the mask to zero.
-func ipv4RelatedNetworks(t require.TestingT, count int) []xnetip.IPv4Network {
-	networks := make([]xnetip.IPv4Network, count)
+func ipv4RelatedNetworks(t require.TestingT, count int) []xnetip.Network4 {
+	networks := make([]xnetip.Network4, count)
 	for idx := range networks {
-		network, err := xnetip.IPv4NetworkFromCIDR(netipAddrFrom4Bits(0x0A000000|uint32(idx)*16), 28)
+		network, err := xnetip.Network4FromCIDR(netipAddrFrom4Bits(0x0A000000|uint32(idx)*16), 28)
 		require.NoError(t, err)
 		networks[idx] = network
 	}
@@ -4011,11 +4011,11 @@ func ipv4RelatedNetworks(t require.TestingT, count int) []xnetip.IPv4Network {
 // The addresses spread over the second and fourth octets, so a fold
 // over them exercises the two-run shape without collapsing the mask
 // to zero.
-func ipv4RelatedNonContiguousNetworks(t require.TestingT, count int) []xnetip.IPv4Network {
-	networks := make([]xnetip.IPv4Network, count)
+func ipv4RelatedNonContiguousNetworks(t require.TestingT, count int) []xnetip.Network4 {
+	networks := make([]xnetip.Network4, count)
 	for idx := range networks {
 		addr := 0x0A000000 | (uint32(idx)>>8&0xFF)<<16 | uint32(idx)&0xFF
-		network, err := xnetip.IPv4NetworkFrom(
+		network, err := xnetip.Network4From(
 			netipAddrFrom4Bits(addr),
 			netipAddrFrom4Bits(0xFFFF00FF),
 		)
@@ -4027,25 +4027,25 @@ func ipv4RelatedNonContiguousNetworks(t require.TestingT, count int) []xnetip.IP
 
 // verifies that the fold keeps exactly the mask bits every input
 // masks and agrees on, over the ported reference cases.
-func Test_IPv4Network_SupernetFor_UnitAndBoundary(t *testing.T) {
+func Test_Network4_SupernetFor_UnitAndBoundary(t *testing.T) {
 	cases := []struct {
 		name     string
-		receiver xnetip.IPv4Network
-		nets     []xnetip.IPv4Network
-		want     xnetip.IPv4Network
+		receiver xnetip.Network4
+		nets     []xnetip.Network4
+		want     xnetip.Network4
 	}{
-		{name: "two /25 halves fold to the /24", receiver: xnetip.MustParseIPv4Network("192.0.2.0/25"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("192.0.2.128/25")}, want: xnetip.MustParseIPv4Network("192.0.2.0/24")},
-		{name: "two /25 halves reversed", receiver: xnetip.MustParseIPv4Network("192.0.2.128/25"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("192.0.2.0/25")}, want: xnetip.MustParseIPv4Network("192.0.2.0/24")},
-		{name: "equal networks yield themselves", receiver: xnetip.MustParseIPv4Network("192.0.2.128/25"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("192.0.2.128/25")}, want: xnetip.MustParseIPv4Network("192.0.2.128/25")},
-		{name: "wider CIDR absorbs the receiver", receiver: xnetip.MustParseIPv4Network("10.0.0.0/24"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.0.0.0/16")}, want: xnetip.MustParseIPv4Network("10.0.0.0/16")},
-		{name: "wider CIDR absorbs the element", receiver: xnetip.MustParseIPv4Network("10.0.0.0/16"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.0.0.0/24")}, want: xnetip.MustParseIPv4Network("10.0.0.0/16")},
-		{name: "empty slice returns the receiver", receiver: xnetip.MustParseIPv4Network("10.0.0.0/8"), nets: nil, want: xnetip.MustParseIPv4Network("10.0.0.0/8")},
-		{name: "default route receiver stays the default route", receiver: xnetip.MustParseIPv4Network("0.0.0.0/0"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.0.0.0/8")}, want: xnetip.MustParseIPv4Network("0.0.0.0/0")},
-		{name: "contiguous inputs leave a hole off the mask boundary", receiver: xnetip.MustParseIPv4Network("10.0.0.0/24"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.1.0.0/24")}, want: xnetip.MustParseIPv4Network("10.0.0.0/255.254.255.0")},
-		{name: "three hosts differing in the third octet", receiver: xnetip.MustParseIPv4Network("10.40.101.1/32"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.40.102.1/32"), xnetip.MustParseIPv4Network("10.40.103.1/32")}, want: xnetip.MustParseIPv4Network("10.40.100.1/255.255.252.255")},
-		{name: "three hosts crossing the first octet", receiver: xnetip.MustParseIPv4Network("10.40.101.1/32"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.40.102.1/32"), xnetip.MustParseIPv4Network("11.40.103.1/32")}, want: xnetip.MustParseIPv4Network("10.40.100.1/254.255.252.255")},
-		{name: "five /24 blocks far apart", receiver: xnetip.MustParseIPv4Network("192.168.0.0/24"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("192.168.1.0/24"), xnetip.MustParseIPv4Network("192.168.2.0/24"), xnetip.MustParseIPv4Network("192.168.100.0/24"), xnetip.MustParseIPv4Network("192.168.200.0/24")}, want: xnetip.MustParseIPv4Network("192.168.0.0/255.255.16.0")},
-		{name: "top-bit disagreement clears the top mask bits", receiver: xnetip.MustParseIPv4Network("128.0.0.0/24"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("192.0.0.0/24"), xnetip.MustParseIPv4Network("65.0.0.0/24")}, want: xnetip.MustParseIPv4Network("0.0.0.0/62.255.255.0")},
+		{name: "two /25 halves fold to the /24", receiver: xnetip.MustParseNetwork4("192.0.2.0/25"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("192.0.2.128/25")}, want: xnetip.MustParseNetwork4("192.0.2.0/24")},
+		{name: "two /25 halves reversed", receiver: xnetip.MustParseNetwork4("192.0.2.128/25"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("192.0.2.0/25")}, want: xnetip.MustParseNetwork4("192.0.2.0/24")},
+		{name: "equal networks yield themselves", receiver: xnetip.MustParseNetwork4("192.0.2.128/25"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("192.0.2.128/25")}, want: xnetip.MustParseNetwork4("192.0.2.128/25")},
+		{name: "wider CIDR absorbs the receiver", receiver: xnetip.MustParseNetwork4("10.0.0.0/24"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("10.0.0.0/16")}, want: xnetip.MustParseNetwork4("10.0.0.0/16")},
+		{name: "wider CIDR absorbs the element", receiver: xnetip.MustParseNetwork4("10.0.0.0/16"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("10.0.0.0/24")}, want: xnetip.MustParseNetwork4("10.0.0.0/16")},
+		{name: "empty slice returns the receiver", receiver: xnetip.MustParseNetwork4("10.0.0.0/8"), nets: nil, want: xnetip.MustParseNetwork4("10.0.0.0/8")},
+		{name: "default route receiver stays the default route", receiver: xnetip.MustParseNetwork4("0.0.0.0/0"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("10.0.0.0/8")}, want: xnetip.MustParseNetwork4("0.0.0.0/0")},
+		{name: "contiguous inputs leave a hole off the mask boundary", receiver: xnetip.MustParseNetwork4("10.0.0.0/24"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("10.1.0.0/24")}, want: xnetip.MustParseNetwork4("10.0.0.0/255.254.255.0")},
+		{name: "three hosts differing in the third octet", receiver: xnetip.MustParseNetwork4("10.40.101.1/32"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("10.40.102.1/32"), xnetip.MustParseNetwork4("10.40.103.1/32")}, want: xnetip.MustParseNetwork4("10.40.100.1/255.255.252.255")},
+		{name: "three hosts crossing the first octet", receiver: xnetip.MustParseNetwork4("10.40.101.1/32"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("10.40.102.1/32"), xnetip.MustParseNetwork4("11.40.103.1/32")}, want: xnetip.MustParseNetwork4("10.40.100.1/254.255.252.255")},
+		{name: "five /24 blocks far apart", receiver: xnetip.MustParseNetwork4("192.168.0.0/24"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("192.168.1.0/24"), xnetip.MustParseNetwork4("192.168.2.0/24"), xnetip.MustParseNetwork4("192.168.100.0/24"), xnetip.MustParseNetwork4("192.168.200.0/24")}, want: xnetip.MustParseNetwork4("192.168.0.0/255.255.16.0")},
+		{name: "top-bit disagreement clears the top mask bits", receiver: xnetip.MustParseNetwork4("128.0.0.0/24"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("192.0.0.0/24"), xnetip.MustParseNetwork4("65.0.0.0/24")}, want: xnetip.MustParseNetwork4("0.0.0.0/62.255.255.0")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -4056,11 +4056,11 @@ func Test_IPv4Network_SupernetFor_UnitAndBoundary(t *testing.T) {
 
 // verifies that a complete set of sibling blocks folds to their
 // common parent, from every choice of receiver.
-func Test_IPv4Network_SupernetFor_SiblingBlocksFoldToParent(t *testing.T) {
-	parent := xnetip.MustParseIPv4Network("192.0.2.0/24")
-	blocks := make([]xnetip.IPv4Network, 8)
+func Test_Network4_SupernetFor_SiblingBlocksFoldToParent(t *testing.T) {
+	parent := xnetip.MustParseNetwork4("192.0.2.0/24")
+	blocks := make([]xnetip.Network4, 8)
 	for idx := range blocks {
-		network, err := xnetip.IPv4NetworkFromCIDR(netipAddrFrom4Bits(0xC0000200|uint32(idx)*32), 27)
+		network, err := xnetip.Network4FromCIDR(netipAddrFrom4Bits(0xC0000200|uint32(idx)*32), 27)
 		require.NoError(t, err)
 		blocks[idx] = network
 	}
@@ -4068,9 +4068,9 @@ func Test_IPv4Network_SupernetFor_SiblingBlocksFoldToParent(t *testing.T) {
 		others := slices.Concat(blocks[:receiverIdx], blocks[receiverIdx+1:])
 		require.Equal(t, parent, receiver.SupernetFor(others), "receiver %v", receiver)
 	}
-	halves := make([]xnetip.IPv4Network, 16)
+	halves := make([]xnetip.Network4, 16)
 	for idx := range halves {
-		network, err := xnetip.IPv4NetworkFromCIDR(netipAddrFrom4Bits(0xC0000200|uint32(idx)*16), 28)
+		network, err := xnetip.Network4FromCIDR(netipAddrFrom4Bits(0xC0000200|uint32(idx)*16), 28)
 		require.NoError(t, err)
 		halves[idx] = network
 	}
@@ -4079,16 +4079,16 @@ func Test_IPv4Network_SupernetFor_SiblingBlocksFoldToParent(t *testing.T) {
 
 // verifies that non-contiguous inputs fold bit by bit: holes of the
 // input masks and address disagreements both clear result bits.
-func Test_IPv4Network_SupernetFor_NonContiguousMasks(t *testing.T) {
+func Test_Network4_SupernetFor_NonContiguousMasks(t *testing.T) {
 	cases := []struct {
 		name     string
-		receiver xnetip.IPv4Network
-		nets     []xnetip.IPv4Network
-		want     xnetip.IPv4Network
+		receiver xnetip.Network4
+		nets     []xnetip.Network4
+		want     xnetip.Network4
 	}{
-		{name: "three two-run networks crossing the first octet", receiver: xnetip.MustParseIPv4Network("10.40.0.1/255.255.0.255"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.40.0.2/255.255.0.255"), xnetip.MustParseIPv4Network("11.40.0.3/255.255.0.255")}, want: xnetip.MustParseIPv4Network("10.40.0.0/254.255.0.252")},
-		{name: "alternating addresses disagree on every bit", receiver: xnetip.MustParseIPv4Network("170.170.170.170/255.255.255.255"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("85.85.85.85/255.255.255.255")}, want: xnetip.MustParseIPv4Network("0.0.0.0/0")},
-		{name: "mask of the input narrows the result", receiver: xnetip.MustParseIPv4Network("10.0.0.0/255.255.255.0"), nets: []xnetip.IPv4Network{xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")}, want: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")},
+		{name: "three two-run networks crossing the first octet", receiver: xnetip.MustParseNetwork4("10.40.0.1/255.255.0.255"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("10.40.0.2/255.255.0.255"), xnetip.MustParseNetwork4("11.40.0.3/255.255.0.255")}, want: xnetip.MustParseNetwork4("10.40.0.0/254.255.0.252")},
+		{name: "alternating addresses disagree on every bit", receiver: xnetip.MustParseNetwork4("170.170.170.170/255.255.255.255"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("85.85.85.85/255.255.255.255")}, want: xnetip.MustParseNetwork4("0.0.0.0/0")},
+		{name: "mask of the input narrows the result", receiver: xnetip.MustParseNetwork4("10.0.0.0/255.255.255.0"), nets: []xnetip.Network4{xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")}, want: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -4099,20 +4099,20 @@ func Test_IPv4Network_SupernetFor_NonContiguousMasks(t *testing.T) {
 
 // verifies that the fold agrees with the simple oracle on random
 // receivers and slices.
-func Test_IPv4Network_SupernetFor_MatchesReferenceProperty(t *testing.T) {
+func Test_Network4_SupernetFor_MatchesReferenceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		receiver := genIPv4Network.Draw(t, "receiver")
-		nets := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "nets")
+		receiver := genNetwork4.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genNetwork4, 0, 32).Draw(t, "nets")
 		require.Equal(t, supernetForReferenceIPv4(t, receiver, nets), receiver.SupernetFor(nets))
 	})
 }
 
 // verifies that the result is normalized and contains the receiver
 // and every element.
-func Test_IPv4Network_SupernetFor_ContainsAllProperty(t *testing.T) {
+func Test_Network4_SupernetFor_ContainsAllProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		receiver := genIPv4Network.Draw(t, "receiver")
-		nets := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "nets")
+		receiver := genNetwork4.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genNetwork4, 0, 32).Draw(t, "nets")
 		result := receiver.SupernetFor(nets)
 		resultAddr, resultMask := ipv4NetworkBits(result)
 		require.Equal(t, resultAddr, resultAddr&resultMask)
@@ -4129,10 +4129,10 @@ func Test_IPv4Network_SupernetFor_ContainsAllProperty(t *testing.T) {
 // Conversely, every dropped bit of the receiver's mask has an input
 // that either leaves the bit unmasked or disagrees with the receiver
 // on it, so no further bit could have been kept.
-func Test_IPv4Network_SupernetFor_MaximalityProperty(t *testing.T) {
+func Test_Network4_SupernetFor_MaximalityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		receiver := genIPv4Network.Draw(t, "receiver")
-		nets := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "nets")
+		receiver := genNetwork4.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genNetwork4, 0, 32).Draw(t, "nets")
 		result := receiver.SupernetFor(nets)
 		receiverAddr, receiverMask := ipv4NetworkBits(receiver)
 		_, resultMask := ipv4NetworkBits(result)
@@ -4161,10 +4161,10 @@ func Test_IPv4Network_SupernetFor_MaximalityProperty(t *testing.T) {
 }
 
 // verifies that the fold does not depend on the order of the slice.
-func Test_IPv4Network_SupernetFor_OrderIndependenceProperty(t *testing.T) {
+func Test_Network4_SupernetFor_OrderIndependenceProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		receiver := genIPv4Network.Draw(t, "receiver")
-		nets := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "nets")
+		receiver := genNetwork4.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genNetwork4, 0, 32).Draw(t, "nets")
 		shuffled := rapid.Permutation(nets).Draw(t, "shuffled")
 		require.Equal(t, receiver.SupernetFor(nets), receiver.SupernetFor(shuffled))
 	})
@@ -4172,12 +4172,12 @@ func Test_IPv4Network_SupernetFor_OrderIndependenceProperty(t *testing.T) {
 
 // verifies that whenever two networks merge, the merged network is
 // exactly the supernet of one for the other.
-func Test_IPv4Network_SupernetFor_AgreesWithMergeProperty(t *testing.T) {
+func Test_Network4_SupernetFor_AgreesWithMergeProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		left := genIPv4Network.Draw(t, "left")
-		right := genIPv4Network.Draw(t, "right")
+		left := genNetwork4.Draw(t, "left")
+		right := genNetwork4.Draw(t, "right")
 		if merged, ok := left.Merge(right); ok {
-			require.Equal(t, merged, left.SupernetFor([]xnetip.IPv4Network{right}))
+			require.Equal(t, merged, left.SupernetFor([]xnetip.Network4{right}))
 		}
 		pair := genIPv4LowestBitSiblingPair.Draw(t, "pair")
 		merged, ok := pair[0].Merge(pair[1])
@@ -4188,14 +4188,14 @@ func Test_IPv4Network_SupernetFor_AgreesWithMergeProperty(t *testing.T) {
 
 // verifies that the fold allocates nothing over a 64-element slice,
 // whatever the mask's shape.
-func Test_IPv4Network_SupernetFor_AllocationFree(t *testing.T) {
+func Test_Network4_SupernetFor_AllocationFree(t *testing.T) {
 	related := ipv4RelatedNetworks(t, 64)
 	nonContiguous := ipv4RelatedNonContiguousNetworks(t, 64)
 	requireNoAllocs(t, func() { networkSink = related[0].SupernetFor(related[1:]) })
 	requireNoAllocs(t, func() { networkSink = nonContiguous[0].SupernetFor(nonContiguous[1:]) })
 }
 
-func BenchmarkIPv4Network_SupernetFor_64x28(b *testing.B) {
+func BenchmarkNetwork4_SupernetFor_64x28(b *testing.B) {
 	nets := ipv4RelatedNetworks(b, 64)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -4203,7 +4203,7 @@ func BenchmarkIPv4Network_SupernetFor_64x28(b *testing.B) {
 	}
 }
 
-func BenchmarkIPv4Network_SupernetFor_1024x28(b *testing.B) {
+func BenchmarkNetwork4_SupernetFor_1024x28(b *testing.B) {
 	nets := ipv4RelatedNetworks(b, 1024)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -4211,7 +4211,7 @@ func BenchmarkIPv4Network_SupernetFor_1024x28(b *testing.B) {
 	}
 }
 
-func BenchmarkIPv4Network_SupernetFor_1024xNonContiguous(b *testing.B) {
+func BenchmarkNetwork4_SupernetFor_1024xNonContiguous(b *testing.B) {
 	nets := ipv4RelatedNonContiguousNetworks(b, 1024)
 	b.ReportAllocs()
 	for b.Loop() {

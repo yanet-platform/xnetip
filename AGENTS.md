@@ -13,12 +13,12 @@ Priorities: **functionality first, performance second**. Iteration 1 scope: the 
 ```bash
 go build ./... && go vet ./...
 go test ./...                              # all tests (black-box package xnetip_test)
-go test -run 'Test_IPv4Network_Contains' -v ./...
+go test -run 'Test_Network4_Contains' -v ./...
 go test -short ./...                       # rapid checks divided by five
 go test -run 'Test_X' -rapid.checks=1000 -rapid.seed=<n> ./...   # more checks (default 100), replay a failure
-go test -run xxx -bench 'BenchmarkIPv4Network_Contains' -benchmem ./...
+go test -run xxx -bench 'BenchmarkNetwork4_Contains' -benchmem ./...
 go test -run xxx -bench . -count 10 > new.txt && benchstat old.txt new.txt   # A/B, same session
-go test -fuzz 'FuzzParseIPv4Network' -fuzztime 30s ./...                     # parsers only
+go test -fuzz 'FuzzParseNetwork4' -fuzztime 30s ./...                     # parsers only
 gofumpt -l -w . ; golangci-lint run ./... ; gocommentlint                    # gate = all clean
 make test | make lint | make bench          # wrappers for the above (added by session 001)
 ```
@@ -29,8 +29,8 @@ CI (GitHub Actions, `.github/workflows/ci.yml`) runs `go test -race`, vet, gofum
 
 ```
 uint128.go         unexported 128-bit helper {hi, lo uint64}, exported methods, unexported constructors — every IPv6 bit trick goes through it
-addr4.go addr6.go  unexported address kernels ipv4Addr{uint32} ipv6Addr{uint128} — the public API speaks netip.Addr
-net4.go net6.go net.go               IPv4Network  IPv6Network  IPNetwork{network IPv6Network; is4 bool}
+addr4.go addr6.go  unexported address kernels addr4{uint32} addr6{uint128} — the public API speaks netip.Addr
+net4.go net6.go net.go               Network4  Network6  Network{network Network6; is4 bool}
                    a type's whole API lives in its file (constructors, Parse*, formatters, marshalling, set algebra, Addrs, Difference)
 errors.go compact.go             sentinels, Compact[T]
 range.go aggregate.go binary_split.go   free functions over ranges and slices (RangeToNetworks*, Aggregate*, BinarySplit*), one file each
@@ -42,11 +42,11 @@ testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by t
 
 ## Types and invariants
 
-- The public API speaks `netip.Addr`: accessors (`Addr`, `Mask`, `LastAddr`), iterators (`Addrs`) and checked constructors all use it. A constructor taking `netip.Addr` returns `(T, error)` and rejects a foreign family and the invalid zero `Addr` with `ErrAddrFamilyMismatch`; a zone is dropped silently. Relational operations taking `netip.Addr` are total — a foreign-family argument (an IPv4-mapped address against an IPv4 network included) is simply not contained, the `netip.Prefix.Contains` rule. Internally addresses are host-order integers (unexported `ipv4Addr{uint32}`, `ipv6Addr{uint128}`), zone-free by construction.
-- Networks are always normalized: `addr & mask == addr`. Every constructor enforces it. Zero values are valid: `IPv4Network{}` = `0.0.0.0/0`, `IPv6Network{}` = `::/0`, `IPNetwork{}` = `::/0`.
-- `IPNetwork` stores IPv4 **IPv4-mapped**: addr `::ffff:a.b.c.d`, mask `ffff:ffff:ffff:ffff:ffff:ffff:M`. Invariant: `is4 ⇒ network.IsIPv4MappedIPv6()`. Every operation delegates to the 128-bit form and stays correct, `PrefixLen()` subtracts 96 for IPv4. Cross-family: relational ops are false, `Intersection`/`Merge` return `ok=false`, `Compare` orders IPv4 before IPv6.
+- The public API speaks `netip.Addr`: accessors (`Addr`, `Mask`, `LastAddr`), iterators (`Addrs`) and checked constructors all use it. A constructor taking `netip.Addr` returns `(T, error)` and rejects a foreign family and the invalid zero `Addr` with `ErrAddrFamilyMismatch`; a zone is dropped silently. Relational operations taking `netip.Addr` are total — a foreign-family argument (an IPv4-mapped address against an IPv4 network included) is simply not contained, the `netip.Prefix.Contains` rule. Internally addresses are host-order integers (unexported `addr4{uint32}`, `addr6{uint128}`), zone-free by construction.
+- Networks are always normalized: `addr & mask == addr`. Every constructor enforces it. Zero values are valid: `Network4{}` = `0.0.0.0/0`, `Network6{}` = `::/0`, `Network{}` = `::/0`.
+- `Network` stores IPv4 **IPv4-mapped**: addr `::ffff:a.b.c.d`, mask `ffff:ffff:ffff:ffff:ffff:ffff:M`. Invariant: `is4 ⇒ network.IsIPv4MappedIPv6()`. Every operation delegates to the 128-bit form and stays correct, `PrefixLen()` subtracts 96 for IPv4. Cross-family: relational ops are false, `Intersection`/`Merge` return `ok=false`, `Compare` orders IPv4 before IPv6.
 - Mask semantics, contiguity, `PrefixLen() (int, bool)`, `ToContiguous()` (plain network), `LastAddr()`, adjacency, merge, lowest-mask-bit variants, `SupernetFor`, `Difference` (exactly popcount(m2 &^ m1) pairwise-disjoint networks), host-index iteration order — all exactly as documented in `../netip/src/net.rs`. Differences from Rust are listed in `.roadmap/00-overview.md` ("Deliberate divergences"). The CIDR suffix after `/` is strict (digits only, no leading zeros, no `+`), `%zone` in parse input is an error.
-- Go idioms for Rust traits: `Option<T>` → `(T, bool)`. Parse/construct errors → `error` built from exported sentinels wrapped with `%w` and the input echoed. `Ord` → `Compare(other) int` only. `Display` → `String()` + `AppendTo([]byte) []byte` + `MarshalText`/`UnmarshalText`. Iterators → `iter.Seq` (`Addrs`, `AddrsBackward`, `NumHostBits() int`, `Difference`, `RangeToNetworksIPv4/6`). `fmt::Compact<T>` → generic `Compact[T Network]`. Free slice functions are verb-first (`AggregateIPv4`, `BinarySplitIPv6`).
+- Go idioms for Rust traits: `Option<T>` → `(T, bool)`. Parse/construct errors → `error` built from exported sentinels wrapped with `%w` and the input echoed. `Ord` → `Compare(other) int` only. `Display` → `String()` + `AppendTo([]byte) []byte` + `MarshalText`/`UnmarshalText`. Iterators → `iter.Seq` (`Addrs`, `AddrsBackward`, `NumHostBits() int`, `Difference`, `RangeToNetworks4/6`). `fmt::Compact<T>` → generic `Compact[T network]`. Free slice functions are verb-first (`Aggregate4`, `BinarySplit6`).
 - Parsing goes through `net/netip` in iteration 1: split at the first `/` ourselves (dotted masks are a supported form), `netip.ParseAddr` for the address and the mask, our own strict prefix-length rule.
 
 ## Hard constraints

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// IPv6Network is an IPv6 network: an address and a mask of arbitrary
+// Network6 is an IPv6 network: an address and a mask of arbitrary
 // shape.
 //
 // The mask need not be contiguous (ffff:0:ffff:: is a valid mask). The
@@ -15,12 +15,12 @@ import (
 // two values describing the same address set compare equal with ==. The
 // zero value is ::/0, the network of every IPv6 address. Values are
 // immutable and safe to copy.
-type IPv6Network struct {
-	addr ipv6Addr
-	mask ipv6Addr
+type Network6 struct {
+	addr addr6
+	mask addr6
 }
 
-// IPv6NetworkFrom returns the network with the given address and mask.
+// Network6From returns the network with the given address and mask.
 //
 // The address is normalized by the mask:
 // 2a02:6b8:c00:1:2:3:4:5/ffff:ffff:ff00:: becomes
@@ -29,12 +29,12 @@ type IPv6Network struct {
 // and converts as its 16-byte form, a zone is dropped silently): an Is4
 // address or the invalid zero netip.Addr is rejected with
 // ErrAddrFamilyMismatch.
-func IPv6NetworkFrom(addr, mask netip.Addr) (IPv6Network, error) {
-	addrKernel, addrOk := ipv6AddrFromNetip(addr)
-	maskKernel, maskOk := ipv6AddrFromNetip(mask)
+func Network6From(addr, mask netip.Addr) (Network6, error) {
+	addrKernel, addrOk := addr6FromNetip(addr)
+	maskKernel, maskOk := addr6FromNetip(mask)
 	if !addrOk || !maskOk {
 		input := addr.String() + "/" + mask.String()
-		return IPv6Network{}, wrapParseError("IPv6NetworkFrom", input, ErrAddrFamilyMismatch, nil)
+		return Network6{}, wrapParseError("Network6From", input, ErrAddrFamilyMismatch, nil)
 	}
 	return fromBits6(addrKernel, maskKernel), nil
 }
@@ -45,14 +45,14 @@ func IPv6NetworkFrom(addr, mask netip.Addr) (IPv6Network, error) {
 // It is the total internal fast path shared by every constructor: the
 // address is normalized by the mask, so any kernel pair yields a valid
 // network.
-func fromBits6(addr, mask ipv6Addr) IPv6Network {
-	return IPv6Network{
-		addr: ipv6Addr{addr.bits.And(mask.bits)},
+func fromBits6(addr, mask addr6) Network6 {
+	return Network6{
+		addr: addr6{addr.bits.And(mask.bits)},
 		mask: mask,
 	}
 }
 
-// IPv6NetworkFromCIDR returns the network of addr with the top bits
+// Network6FromCIDR returns the network of addr with the top bits
 // bits masked.
 //
 // Host bits of addr are cleared: 2001:db8::1 with 64 gives
@@ -62,42 +62,42 @@ func fromBits6(addr, mask ipv6Addr) IPv6Network {
 // the invalid zero netip.Addr is rejected with ErrAddrFamilyMismatch —
 // and bits must be in the range 0 through 128, otherwise
 // ErrCIDROverflow is returned.
-func IPv6NetworkFromCIDR(addr netip.Addr, bits int) (IPv6Network, error) {
-	addrKernel, ok := ipv6AddrFromNetip(addr)
+func Network6FromCIDR(addr netip.Addr, bits int) (Network6, error) {
+	addrKernel, ok := addr6FromNetip(addr)
 	if !ok {
 		input := cidrInput(addr, bits)
-		return IPv6Network{}, wrapParseError("IPv6NetworkFromCIDR", input, ErrAddrFamilyMismatch, nil)
+		return Network6{}, wrapParseError("Network6FromCIDR", input, ErrAddrFamilyMismatch, nil)
 	}
 	if bits < 0 || bits > 128 {
 		input := cidrInput(addr, bits)
-		return IPv6Network{}, wrapParseError("IPv6NetworkFromCIDR", input, ErrCIDROverflow, nil)
+		return Network6{}, wrapParseError("Network6FromCIDR", input, ErrCIDROverflow, nil)
 	}
-	return fromBits6(addrKernel, ipv6Addr{uint128MaskFromPrefix(bits)}), nil
+	return fromBits6(addrKernel, addr6{uint128MaskFromPrefix(bits)}), nil
 }
 
-// IPv6NetworkFromPrefix converts a netip.Prefix into an IPv6Network.
+// Network6FromPrefix converts a netip.Prefix into a Network6.
 //
 // The result is normalized: host bits of the prefix address are
 // cleared, the same network netip.Prefix.Masked would report. An
 // IPv4-mapped IPv6 prefix (::ffff:a.b.c.d/n) is IPv6 and is accepted,
 // and a zone never appears because netip.Prefix carries none. ok is
 // false when the prefix is invalid or its address is Is4 — convert
-// that one through IPv4NetworkFromPrefix instead. The inverse of
+// that one through Network4FromPrefix instead. The inverse of
 // Prefix.
-func IPv6NetworkFromPrefix(p netip.Prefix) (IPv6Network, bool) {
+func Network6FromPrefix(p netip.Prefix) (Network6, bool) {
 	if !p.IsValid() || !p.Addr().Is6() {
-		return IPv6Network{}, false
+		return Network6{}, false
 	}
 	// A valid Is6 prefix carries a length within 0 through 128, so the
 	// constructor cannot fail; its error answers false, not a panic.
-	network, err := IPv6NetworkFromCIDR(p.Addr(), p.Bits())
+	network, err := Network6FromCIDR(p.Addr(), p.Bits())
 	if err != nil {
-		return IPv6Network{}, false
+		return Network6{}, false
 	}
 	return network, true
 }
 
-// IPv6NetworkFromAddr returns the host route that contains exactly
+// Network6FromAddr returns the host route that contains exactly
 // addr.
 //
 // The mask is all ones (/128), so the result is normalized by
@@ -105,21 +105,21 @@ func IPv6NetworkFromPrefix(p netip.Prefix) (IPv6Network, bool) {
 // IPv4-mapped address is IPv6, a zone is dropped silently): an Is4
 // address or the invalid zero netip.Addr is rejected with
 // ErrAddrFamilyMismatch.
-func IPv6NetworkFromAddr(addr netip.Addr) (IPv6Network, error) {
-	addrKernel, ok := ipv6AddrFromNetip(addr)
+func Network6FromAddr(addr netip.Addr) (Network6, error) {
+	addrKernel, ok := addr6FromNetip(addr)
 	if !ok {
-		return IPv6Network{}, wrapParseError("IPv6NetworkFromAddr", addr.String(), ErrAddrFamilyMismatch, nil)
+		return Network6{}, wrapParseError("Network6FromAddr", addr.String(), ErrAddrFamilyMismatch, nil)
 	}
-	return IPv6Network{addr: addrKernel, mask: ipv6AllBits}, nil
+	return Network6{addr: addrKernel, mask: ipv6AllBits}, nil
 }
 
 // ipv6AllBits is the all-ones mask, the mask of a host route.
 //
 // Pairing an address with it keeps every address bit, so a host route
 // is normalized by construction.
-var ipv6AllBits = ipv6AddrFromBits(^uint64(0), ^uint64(0))
+var ipv6AllBits = addr6FromBits(^uint64(0), ^uint64(0))
 
-// ParseIPv6Network parses an IPv6 network in CIDR, explicit-mask or
+// ParseNetwork6 parses an IPv6 network in CIDR, explicit-mask or
 // bare address notation.
 //
 // Accepted forms are "2001:db8::/32", "2001:db8::/ffff:ffff::" (the
@@ -130,44 +130,44 @@ var ipv6AllBits = ipv6AddrFromBits(^uint64(0), ^uint64(0))
 // most 128. A zone suffix ("%eth0") anywhere is an error. Errors wrap
 // ErrZone, ErrAddrFamilyMismatch (an IPv4 literal), ErrCIDROverflow,
 // ErrInvalidMask or ErrParse together with the net/netip cause.
-func ParseIPv6Network(s string) (IPv6Network, error) {
+func ParseNetwork6(s string) (Network6, error) {
 	addrText, suffix, hasSuffix := strings.Cut(s, "/")
 	addr, err := netip.ParseAddr(addrText)
 	if err != nil {
-		return IPv6Network{}, wrapParseError("ParseIPv6Network", s, ErrParse, err)
+		return Network6{}, wrapParseError("ParseNetwork6", s, ErrParse, err)
 	}
-	return parseIPv6NetworkParts("ParseIPv6Network", s, addr, suffix, hasSuffix)
+	return parseNetwork6Parts("ParseNetwork6", s, addr, suffix, hasSuffix)
 }
 
-// parseIPv6NetworkParts finishes a network parse whose address part
+// parseNetwork6Parts finishes a network parse whose address part
 // is already parsed.
 //
 // Errors carry the given parser name and echo the full input. The
 // suffix is read as a strict prefix length first and as a colon-form
 // mask second, so a digits-only suffix past the limit is an overflow,
 // never a mask attempt. A missing suffix is a host route.
-func parseIPv6NetworkParts(function, input string, addr netip.Addr, suffix string, hasSuffix bool) (IPv6Network, error) {
+func parseNetwork6Parts(function, input string, addr netip.Addr, suffix string, hasSuffix bool) (Network6, error) {
 	addrKernel, err := ipv6ParsedKernel(addr)
 	if err != nil {
-		return IPv6Network{}, wrapParseError(function, input, err, nil)
+		return Network6{}, wrapParseError(function, input, err, nil)
 	}
 	if !hasSuffix {
-		return IPv6Network{addr: addrKernel, mask: ipv6AllBits}, nil
+		return Network6{addr: addrKernel, mask: ipv6AllBits}, nil
 	}
 	bits, isPrefixForm, ok := parsePrefixLenText(suffix, 128)
 	switch {
 	case ok:
-		return fromBits6(addrKernel, ipv6Addr{uint128MaskFromPrefix(bits)}), nil
+		return fromBits6(addrKernel, addr6{uint128MaskFromPrefix(bits)}), nil
 	case isPrefixForm:
-		return IPv6Network{}, wrapParseError(function, input, ErrCIDROverflow, nil)
+		return Network6{}, wrapParseError(function, input, ErrCIDROverflow, nil)
 	}
 	mask, err := netip.ParseAddr(suffix)
 	if err != nil {
-		return IPv6Network{}, wrapParseError(function, input, ErrInvalidMask, err)
+		return Network6{}, wrapParseError(function, input, ErrInvalidMask, err)
 	}
 	maskKernel, err := ipv6ParsedKernel(mask)
 	if err != nil {
-		return IPv6Network{}, wrapParseError(function, input, ErrInvalidMask, err)
+		return Network6{}, wrapParseError(function, input, ErrInvalidMask, err)
 	}
 	return fromBits6(addrKernel, maskKernel), nil
 }
@@ -179,23 +179,23 @@ func parseIPv6NetworkParts(function, input string, addr netip.Addr, suffix strin
 // input carrying a zone is an error: the result is the bare ErrZone or
 // ErrAddrFamilyMismatch sentinel for the caller to wrap under its own
 // position, address or mask.
-func ipv6ParsedKernel(addr netip.Addr) (ipv6Addr, error) {
+func ipv6ParsedKernel(addr netip.Addr) (addr6, error) {
 	if addr.Zone() != "" {
-		return ipv6Addr{}, ErrZone
+		return addr6{}, ErrZone
 	}
-	kernel, ok := ipv6AddrFromNetip(addr)
+	kernel, ok := addr6FromNetip(addr)
 	if !ok {
-		return ipv6Addr{}, ErrAddrFamilyMismatch
+		return addr6{}, ErrAddrFamilyMismatch
 	}
 	return kernel, nil
 }
 
-// MustParseIPv6Network calls ParseIPv6Network and panics on error.
+// MustParseNetwork6 calls ParseNetwork6 and panics on error.
 //
 // It is intended for tests and package-level constants built from
 // literals.
-func MustParseIPv6Network(s string) IPv6Network {
-	network, err := ParseIPv6Network(s)
+func MustParseNetwork6(s string) Network6 {
+	network, err := ParseNetwork6(s)
 	if err != nil {
 		panic(err)
 	}
@@ -204,12 +204,12 @@ func MustParseIPv6Network(s string) IPv6Network {
 
 // Addr returns the network address (already normalized by the mask) as
 // an Is6 netip.Addr.
-func (m IPv6Network) Addr() netip.Addr {
+func (m Network6) Addr() netip.Addr {
 	return m.addr.Netip()
 }
 
 // Mask returns the network mask as an Is6 netip.Addr.
-func (m IPv6Network) Mask() netip.Addr {
+func (m Network6) Mask() netip.Addr {
 	return m.mask.Netip()
 }
 
@@ -222,8 +222,8 @@ func (m IPv6Network) Mask() netip.Addr {
 // beyond all of them, so none is greater. Host bits need not form a
 // trailing run for either fact to hold. The result is an Is6
 // netip.Addr, zone-free.
-func (m IPv6Network) LastAddr() netip.Addr {
-	return ipv6Addr{m.addr.bits.Or(m.mask.bits.Not())}.Netip()
+func (m Network6) LastAddr() netip.Addr {
+	return addr6{m.addr.bits.Or(m.mask.bits.Not())}.Netip()
 }
 
 // NumHostBits returns the number of host bits, the zero bits of the
@@ -234,7 +234,7 @@ func (m IPv6Network) LastAddr() netip.Addr {
 // exactly for every network including the default route, whose 2 to
 // the 128 members fit no integer type. The exponent is the lossless
 // form and the only count the type offers.
-func (m IPv6Network) NumHostBits() int {
+func (m Network6) NumHostBits() int {
 	return m.mask.bits.Not().OnesCount()
 }
 
@@ -248,7 +248,7 @@ func (m IPv6Network) NumHostBits() int {
 // netip.Addr, zone-free. The sequence is re-iterable, allocation-free
 // and stops early when the consumer breaks. The count is exactly
 // 1 << NumHostBits(), which may exceed any integer type.
-func (m IPv6Network) Addrs() iter.Seq[netip.Addr] {
+func (m Network6) Addrs() iter.Seq[netip.Addr] {
 	return func(yield func(netip.Addr) bool) {
 		base, mask := m.addr.bits, m.mask.bits
 		hostMask := mask.Not()
@@ -262,7 +262,7 @@ func (m IPv6Network) Addrs() iter.Seq[netip.Addr] {
 		// whose count would overflow the word.
 		if hostMask.And(hostMask.AddOne()).IsZero() {
 			for {
-				if !yield(ipv6Addr{front}.Netip()) || front == last {
+				if !yield(addr6{front}.Netip()) || front == last {
 					return
 				}
 				front = front.AddOne()
@@ -274,7 +274,7 @@ func (m IPv6Network) Addrs() iter.Seq[netip.Addr] {
 		// straight across them, so the increment lands in the next
 		// host position however the host bits are scattered.
 		for {
-			if !yield(ipv6Addr{front}.Netip()) || front == last {
+			if !yield(addr6{front}.Netip()) || front == last {
 				return
 			}
 			front = front.Or(mask).AddOne().And(hostMask).Or(base)
@@ -289,8 +289,8 @@ func (m IPv6Network) Addrs() iter.Seq[netip.Addr] {
 // unsigned 128-bit integers: the address decides first and the mask
 // breaks ties, so a container sorts before the networks nested under
 // the same address. This order is a documented contract: the output
-// of AggregateIPv6 and the input of BinarySplitIPv6 are sorted by it.
-func (m IPv6Network) Compare(other IPv6Network) int {
+// of Aggregate6 and the input of BinarySplit6 are sorted by it.
+func (m Network6) Compare(other Network6) int {
 	if order := m.addr.Compare(other.addr); order != 0 {
 		return order
 	}
@@ -305,7 +305,7 @@ func (m IPv6Network) Compare(other IPv6Network) int {
 // constrains at least those positions. Identical networks contain
 // each other, ::/0 contains everything, a host route contains only
 // itself. Masks may be non-contiguous.
-func (m IPv6Network) Contains(other IPv6Network) bool {
+func (m Network6) Contains(other Network6) bool {
 	// With this network as `(a1, m1)` and the other as `(a2, m2)`,
 	// inclusion is the match `a2&m1 == a1` plus the subset `m2&m1 == m1`.
 	//
@@ -328,7 +328,7 @@ func (m IPv6Network) Contains(other IPv6Network) bool {
 // Masks may be non-contiguous. When one network contains the other the
 // result is the contained one, and a network intersected with itself
 // is itself.
-func (m IPv6Network) Intersection(other IPv6Network) (IPv6Network, bool) {
+func (m Network6) Intersection(other Network6) (Network6, bool) {
 	// The disjointness test compares the addresses on the doubly
 	// constrained bits alone.
 	//
@@ -338,16 +338,16 @@ func (m IPv6Network) Intersection(other IPv6Network) (IPv6Network, bool) {
 	a1, m1 := m.addr.bits, m.mask.bits
 	a2, m2 := other.addr.bits, other.mask.bits
 	if a1.And(m2) != a2.And(m1) {
-		return IPv6Network{}, false
+		return Network6{}, false
 	}
 	// The raw construction is exact, no masking AND is needed.
 	//
 	// Every set bit of either address lies inside its own mask and
 	// thus inside the union mask, so the union address is already
 	// normalized.
-	return IPv6Network{
-		addr: ipv6Addr{a1.Or(a2)},
-		mask: ipv6Addr{m1.Or(m2)},
+	return Network6{
+		addr: addr6{a1.Or(a2)},
+		mask: addr6{m1.Or(m2)},
 	}, true
 }
 
@@ -359,7 +359,7 @@ func (m IPv6Network) Intersection(other IPv6Network) (IPv6Network, bool) {
 // returning ok, and holds for non-contiguous masks. A network always
 // intersects itself and the unspecified network ::/0 intersects
 // everything.
-func (m IPv6Network) Intersects(other IPv6Network) bool {
+func (m Network6) Intersects(other Network6) bool {
 	_, ok := m.Intersection(other)
 	return ok
 }
@@ -368,7 +368,7 @@ func (m IPv6Network) Intersects(other IPv6Network) bool {
 //
 // It is the logical complement of Intersects and holds the same
 // guarantees for non-contiguous masks.
-func (m IPv6Network) IsDisjoint(other IPv6Network) bool {
+func (m Network6) IsDisjoint(other Network6) bool {
 	return !m.Intersects(other)
 }
 
@@ -381,7 +381,7 @@ func (m IPv6Network) IsDisjoint(other IPv6Network) bool {
 // bit may sit anywhere in the mask, so merging two contiguous
 // networks that are adjacent at a non-boundary bit yields a
 // non-contiguous mask. Works with non-contiguous masks.
-func (m IPv6Network) IsAdjacent(other IPv6Network) bool {
+func (m Network6) IsAdjacent(other Network6) bool {
 	_, ok := m.adjacentBit(other)
 	return ok
 }
@@ -392,7 +392,7 @@ func (m IPv6Network) IsAdjacent(other IPv6Network) bool {
 // ok is false when the masks differ or the addresses differ in zero
 // or more than one bit. Both addresses are normalized, so their
 // difference can hold only masked bits and needs no extra masking.
-func (m IPv6Network) adjacentBit(other IPv6Network) (uint128, bool) {
+func (m Network6) adjacentBit(other Network6) (uint128, bool) {
 	if m.mask != other.mask {
 		return uint128{}, false
 	}
@@ -415,7 +415,7 @@ func (m IPv6Network) adjacentBit(other IPv6Network) (uint128, bool) {
 // differing bit may be any masked bit, so merging two contiguous
 // networks adjacent at a non-boundary bit yields a non-contiguous
 // mask. Works with non-contiguous masks.
-func (m IPv6Network) Merge(other IPv6Network) (IPv6Network, bool) {
+func (m Network6) Merge(other Network6) (Network6, bool) {
 	a1, m1 := m.addr.bits, m.mask.bits
 	a2, m2 := other.addr.bits, other.mask.bits
 	if m1 == m2 {
@@ -426,12 +426,12 @@ func (m IPv6Network) Merge(other IPv6Network) (IPv6Network, bool) {
 		// itself unchanged when the difference is zero (a duplicate).
 		diff := a1.Xor(a2)
 		if !diff.ClearLowestSetBit().IsZero() {
-			return IPv6Network{}, false
+			return Network6{}, false
 		}
 		mask := m1.Xor(diff)
-		return IPv6Network{
-			addr: ipv6Addr{a1.And(mask)},
-			mask: ipv6Addr{mask},
+		return Network6{
+			addr: addr6{a1.And(mask)},
+			mask: addr6{mask},
 		}, true
 	}
 	// With unequal masks only containment remains.
@@ -445,15 +445,15 @@ func (m IPv6Network) Merge(other IPv6Network) (IPv6Network, bool) {
 		if a1.And(m2) == a2 {
 			return other, true
 		}
-		return IPv6Network{}, false
+		return Network6{}, false
 	}
 	if common == m1 {
 		if a2.And(m1) == a1 {
 			return m, true
 		}
-		return IPv6Network{}, false
+		return Network6{}, false
 	}
-	return IPv6Network{}, false
+	return Network6{}, false
 }
 
 // IsAdjacentByLowestMaskBit reports whether the two networks share a
@@ -467,7 +467,7 @@ func (m IPv6Network) Merge(other IPv6Network) (IPv6Network, bool) {
 // adjacent, and the unspecified network /0 is never adjacent to
 // anything. For a two-run non-contiguous mask only the lower run's
 // boundary bit counts. Works with non-contiguous masks.
-func (m IPv6Network) IsAdjacentByLowestMaskBit(other IPv6Network) bool {
+func (m Network6) IsAdjacentByLowestMaskBit(other Network6) bool {
 	// The empty mask must be rejected explicitly: its isolated lowest
 	// set bit is zero, and two equal addresses differ by zero too.
 	a1, m1 := m.addr.bits, m.mask.bits
@@ -486,7 +486,7 @@ func (m IPv6Network) IsAdjacentByLowestMaskBit(other IPv6Network) bool {
 // accepts it, so the result stays in the inputs' class — for a
 // non-contiguous mask only the lowest run's boundary bit is a merge
 // point. Whenever ok is true the result equals Merge's.
-func (m IPv6Network) MergeByLowestMaskBit(other IPv6Network) (IPv6Network, bool) {
+func (m Network6) MergeByLowestMaskBit(other Network6) (Network6, bool) {
 	if m.mask == other.mask {
 		if m.addr == other.addr {
 			return m, true
@@ -497,12 +497,12 @@ func (m IPv6Network) MergeByLowestMaskBit(other IPv6Network) (IPv6Network, bool)
 			// The addresses differ only in the mask's lowest set bit,
 			// which the reduced mask clears, so their AND holds no
 			// bit outside that mask.
-			return IPv6Network{
-				addr: ipv6Addr{m.addr.bits.And(other.addr.bits)},
-				mask: ipv6Addr{m.mask.bits.ClearLowestSetBit()},
+			return Network6{
+				addr: addr6{m.addr.bits.And(other.addr.bits)},
+				mask: addr6{m.mask.bits.ClearLowestSetBit()},
 			}, true
 		}
-		return IPv6Network{}, false
+		return Network6{}, false
 	}
 	// With unequal masks adjacency is impossible, so containment is
 	// the only remaining way to merge.
@@ -515,7 +515,7 @@ func (m IPv6Network) MergeByLowestMaskBit(other IPv6Network) (IPv6Network, bool)
 	if other.Contains(m) {
 		return other, true
 	}
-	return IPv6Network{}, false
+	return Network6{}, false
 }
 
 // SupernetFor returns the smallest network containing this network
@@ -528,12 +528,12 @@ func (m IPv6Network) MergeByLowestMaskBit(other IPv6Network) (IPv6Network, bool)
 // result may be non-contiguous even when every input is a CIDR block:
 // addresses differing at a bit off their mask boundary leave a hole.
 // Works with non-contiguous masks.
-func (m IPv6Network) SupernetFor(nets []IPv6Network) IPv6Network {
+func (m Network6) SupernetFor(nets []Network6) Network6 {
 	mask := m.mask.bits
 	for idx := range nets {
 		mask = nets[idx].supernetMask(m.addr, mask)
 	}
-	return fromBits6(m.addr, ipv6Addr{mask})
+	return fromBits6(m.addr, addr6{mask})
 }
 
 // supernetMask folds this network into the running supernet mask of a
@@ -543,7 +543,7 @@ func (m IPv6Network) SupernetFor(nets []IPv6Network) IPv6Network {
 // its address agrees with the receiver's address on it: exactly the
 // bits a common supernet of the receiver and this network may
 // constrain.
-func (m IPv6Network) supernetMask(addr ipv6Addr, mask uint128) uint128 {
+func (m Network6) supernetMask(addr addr6, mask uint128) uint128 {
 	return mask.And(m.mask.bits.AndNot(addr.bits.Xor(m.addr.bits)))
 }
 
@@ -555,7 +555,7 @@ func (m IPv6Network) supernetMask(addr ipv6Addr, mask uint128) uint128 {
 // ffff:0:ffff::, is not. The formula is the 128-bit twin of the IPv4
 // one: or with the wrapped predecessor against all ones, with the
 // subtraction borrowing across the 64-bit halves.
-func (m IPv6Network) IsContiguous() bool {
+func (m Network6) IsContiguous() bool {
 	return m.mask.bits.IsContiguousMask()
 }
 
@@ -570,7 +570,7 @@ func (m IPv6Network) IsContiguous() bool {
 // run of ones, and the mask is bi-contiguous exactly when every run
 // ends at bit 127 or at bit 63, so clearing those two positions from
 // the run tops must leave nothing.
-func (m IPv6Network) IsBicontiguous() bool {
+func (m Network6) IsBicontiguous() bool {
 	mask := m.mask.bits
 	runTops := mask.AndNot(mask.Shr(1))
 	return runTops.AndNot(uint128FromHalves(1<<63, 1<<63)).IsZero()
@@ -584,7 +584,7 @@ func (m IPv6Network) IsBicontiguous() bool {
 // prefix length describes the network and the first result is 0. An
 // IPv4-mapped network reports its 128-bit length: the image of an
 // IPv4 /24 is a /120 here.
-func (m IPv6Network) PrefixLen() (int, bool) {
+func (m Network6) PrefixLen() (int, bool) {
 	if !m.IsContiguous() {
 		return 0, false
 	}
@@ -596,8 +596,8 @@ func (m IPv6Network) PrefixLen() (int, bool) {
 // ok is false when the mask is not contiguous, because netip.Prefix
 // can only express prefix lengths, and the first result is then the
 // invalid zero netip.Prefix. The returned prefix is already masked
-// and carries no zone. The inverse of IPv6NetworkFromPrefix.
-func (m IPv6Network) Prefix() (netip.Prefix, bool) {
+// and carries no zone. The inverse of Network6FromPrefix.
+func (m Network6) Prefix() (netip.Prefix, bool) {
 	bits, ok := m.PrefixLen()
 	if !ok {
 		return netip.Prefix{}, false
@@ -606,7 +606,7 @@ func (m IPv6Network) Prefix() (netip.Prefix, bool) {
 }
 
 // String returns the text form of the network, see AppendTo.
-func (m IPv6Network) String() string {
+func (m Network6) String() string {
 	// The buffer covers the longest form (address and mask of 45
 	// bytes each), so the string conversion is the only allocation.
 	var buffer [91]byte
@@ -619,8 +619,8 @@ func (m IPv6Network) String() string {
 // A contiguous network is written as "addr/prefix", a non-contiguous
 // one as "addr/mask" with the mask in the same compressed form as an
 // address. The suffix is always present, so a host route is written
-// with "/128". The output parses back with ParseIPv6Network.
-func (m IPv6Network) AppendTo(b []byte) []byte {
+// with "/128". The output parses back with ParseNetwork6.
+func (m Network6) AppendTo(b []byte) []byte {
 	b = m.addr.AppendTo(b)
 	b = append(b, '/')
 	if prefix, ok := m.PrefixLen(); ok {
@@ -635,22 +635,22 @@ func (m IPv6Network) AppendTo(b []byte) []byte {
 // "/" and either a prefix length (contiguous mask) or a colon-form
 // mask (non-contiguous mask). It never fails and allocates only the
 // returned slice.
-func (m IPv6Network) MarshalText() ([]byte, error) {
+func (m Network6) MarshalText() ([]byte, error) {
 	return m.AppendTo(make([]byte, 0, len("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"))), nil
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 //
-// The text must be accepted by ParseIPv6Network, so a zone suffix is
+// The text must be accepted by ParseNetwork6, so a zone suffix is
 // rejected. Empty text wraps ErrEmptyInput rather than yielding the
 // zero value the way it yields the invalid zero netip.Prefix: the zero
-// IPv6Network is the valid network ::/0, so empty text would silently
+// Network6 is the valid network ::/0, so empty text would silently
 // hide a missing field. The receiver is untouched on any error.
-func (m *IPv6Network) UnmarshalText(text []byte) error {
+func (m *Network6) UnmarshalText(text []byte) error {
 	if len(text) == 0 {
-		return wrapParseError("IPv6Network.UnmarshalText", "", ErrEmptyInput, nil)
+		return wrapParseError("Network6.UnmarshalText", "", ErrEmptyInput, nil)
 	}
-	network, err := ParseIPv6Network(string(text))
+	network, err := ParseNetwork6(string(text))
 	if err != nil {
 		return err
 	}
@@ -663,10 +663,10 @@ func (m *IPv6Network) UnmarshalText(text []byte) error {
 //
 // True when the address lies in ::ffff:0:0/96 and the mask keeps all
 // of those upper 96 bits, so the network is exactly the image of an
-// IPv4 network under IPv4Network.ToIPv6Mapped. An address with the
+// IPv4 network under Network4.ToIPv6Mapped. An address with the
 // ::ffff pattern under a mask that does not pin the upper bits is not
 // mapped: collapsing it to IPv4 would lose addresses.
-func (m IPv6Network) IsIPv4MappedIPv6() bool {
+func (m Network6) IsIPv4MappedIPv6() bool {
 	maskHi, maskLo := m.mask.Bits()
 	return m.addr.Is4In6() && maskHi == ^uint64(0) && maskLo>>32 == 0xffffffff
 }
@@ -677,17 +677,17 @@ func (m IPv6Network) IsIPv4MappedIPv6() bool {
 // The result is the low 32 bits of the address and the mask, valid
 // only when IsIPv4MappedIPv6 holds, otherwise ok is false. Truncation
 // preserves normalization, because the upper 96 bits of a mapped
-// network are fully masked. The inverse of IPv4Network.ToIPv6Mapped.
-func (m IPv6Network) ToIPv4Mapped() (IPv4Network, bool) {
+// network are fully masked. The inverse of Network4.ToIPv6Mapped.
+func (m Network6) ToIPv4Mapped() (Network4, bool) {
 	if !m.IsIPv4MappedIPv6() {
-		return IPv4Network{}, false
+		return Network4{}, false
 	}
 	_, addrLo := m.addr.Bits()
 	_, maskLo := m.mask.Bits()
-	return fromBits4(ipv4AddrFromBits(uint32(addrLo)), ipv4AddrFromBits(uint32(maskLo))), true
+	return fromBits4(addr4FromBits(uint32(addrLo)), addr4FromBits(uint32(maskLo))), true
 }
 
-// IPNetwork returns this IPv6 network as an IPNetwork.
-func (m IPv6Network) IPNetwork() IPNetwork {
-	return IPNetworkFrom6(m)
+// Network returns this IPv6 network as a Network.
+func (m Network6) Network() Network {
+	return NetworkFrom6(m)
 }

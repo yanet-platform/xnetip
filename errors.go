@@ -18,7 +18,7 @@ var ErrParse = errors.New("invalid address or network text")
 // ErrAddrFamilyMismatch reports an address of the other IP family where one
 // family was required.
 //
-// Examples are IPv6 text given to ParseIPv4Addr or an IPv6 mask given to
+// Examples are IPv6 text given to ParseNetwork4 or an IPv6 mask given to
 // an IPv4 network.
 var ErrAddrFamilyMismatch = errors.New("address family mismatch")
 

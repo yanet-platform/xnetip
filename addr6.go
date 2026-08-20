@@ -2,33 +2,33 @@ package xnetip
 
 import "net/netip"
 
-// ipv6Addr is an IPv6 address stored as a 128-bit integer.
+// addr6 is an IPv6 address stored as a 128-bit integer.
 //
 // It is the internal address kernel of the IPv6 network type: the public
 // API speaks netip.Addr, while the mask algebra runs on this plain bit
 // pattern, which has no zone and no invalid state by construction.
 // IPv4-mapped addresses (::ffff:a.b.c.d) are ordinary IPv6 addresses
 // here, as in netip's 16-byte form.
-type ipv6Addr struct {
+type addr6 struct {
 	bits uint128
 }
 
-// ipv6AddrFrom16 returns the address of the given 16 bytes in network
+// addr6From16 returns the address of the given 16 bytes in network
 // order.
-func ipv6AddrFrom16(addr [16]byte) ipv6Addr {
-	return ipv6Addr{uint128From16(addr)}
+func addr6From16(addr [16]byte) addr6 {
+	return addr6{uint128From16(addr)}
 }
 
-// ipv6AddrFromBits returns the address whose 128-bit pattern is
+// addr6FromBits returns the address whose 128-bit pattern is
 // hi<<64 | lo.
 //
 // hi holds the first eight bytes in network order and lo the last eight,
-// so ipv6AddrFromBits(0x20010db800000000, 1) is 2001:db8::1.
-func ipv6AddrFromBits(hi, lo uint64) ipv6Addr {
-	return ipv6Addr{uint128FromHalves(hi, lo)}
+// so addr6FromBits(0x20010db800000000, 1) is 2001:db8::1.
+func addr6FromBits(hi, lo uint64) addr6 {
+	return addr6{uint128FromHalves(hi, lo)}
 }
 
-// ipv6AddrFromNetip converts a netip.Addr to ipv6Addr, dropping any zone.
+// addr6FromNetip converts a netip.Addr to addr6, dropping any zone.
 //
 // ok is false unless a.Is6() reports true: an IPv4 address and the
 // invalid zero netip.Addr are not converted, while an IPv4-mapped
@@ -37,21 +37,21 @@ func ipv6AddrFromBits(hi, lo uint64) ipv6Addr {
 // addresses of this package are zone-free by design — a zone only scopes
 // link-local forwarding and has no bearing on mask algebra. On failure
 // the returned address is the zero value.
-func ipv6AddrFromNetip(a netip.Addr) (addr ipv6Addr, ok bool) {
+func addr6FromNetip(a netip.Addr) (addr addr6, ok bool) {
 	if !a.Is6() {
-		return ipv6Addr{}, false
+		return addr6{}, false
 	}
-	return ipv6AddrFrom16(a.As16()), true
+	return addr6From16(a.As16()), true
 }
 
 // As16 returns the address as 16 bytes in network order.
-func (m ipv6Addr) As16() [16]byte {
+func (m addr6) As16() [16]byte {
 	return m.bits.As16()
 }
 
 // Bits returns the two host-order halves of the address, the first eight
 // bytes in hi and the last eight in lo.
-func (m ipv6Addr) Bits() (hi, lo uint64) {
+func (m addr6) Bits() (hi, lo uint64) {
 	return m.bits.hi, m.bits.lo
 }
 
@@ -60,7 +60,7 @@ func (m ipv6Addr) Bits() (hi, lo uint64) {
 // The view is always valid, so it can flow into every standard API that
 // takes a netip.Addr, and converting it back always succeeds. An
 // IPv4-mapped value keeps its 16-byte form (Is4In6, not Is4).
-func (m ipv6Addr) Netip() netip.Addr {
+func (m addr6) Netip() netip.Addr {
 	return netip.AddrFrom16(m.As16())
 }
 
@@ -70,11 +70,11 @@ func (m ipv6Addr) Netip() netip.Addr {
 // The second result is false for every address outside ::ffff:0:0/96,
 // including the deprecated IPv4-compatible form ::a.b.c.d (RFC 4291
 // section 2.5.5.1), which netip.Addr.Unmap does not unwrap either.
-func (m ipv6Addr) ToIPv4Mapped() (ipv4Addr, bool) {
+func (m addr6) ToIPv4Mapped() (addr4, bool) {
 	if !m.Is4In6() {
-		return ipv4Addr{}, false
+		return addr4{}, false
 	}
-	return ipv4AddrFromBits(uint32(m.bits.lo)), true
+	return addr4FromBits(uint32(m.bits.lo)), true
 }
 
 // ipv4MappedPrefix is the low half of the IPv4-mapped range
@@ -86,7 +86,7 @@ const ipv4MappedPrefix = uint64(0xffff) << 32
 //
 // The family-agnostic network type stores IPv4 networks in this range
 // and relies on the test to keep its family flag consistent.
-func (m ipv6Addr) Is4In6() bool {
+func (m addr6) Is4In6() bool {
 	return m.bits.hi == 0 && m.bits.lo>>32 == ipv4MappedPrefix>>32
 }
 
@@ -97,7 +97,7 @@ func (m ipv6Addr) Is4In6() bool {
 // IPv6 addresses without zones. It is the order every sorting operation
 // in this package uses for IPv6 addresses, and the key the network order
 // packs together with the mask.
-func (m ipv6Addr) Compare(other ipv6Addr) int {
+func (m addr6) Compare(other addr6) int {
 	return m.bits.Compare(other.bits)
 }
 
@@ -108,6 +108,6 @@ func (m ipv6Addr) Compare(other ipv6Addr) int {
 // "::ffff:a.b.c.d", 45 bytes at most. It is the allocation-free kernel
 // behind the network formatters: with enough capacity in b it performs
 // no allocation.
-func (m ipv6Addr) AppendTo(b []byte) []byte {
+func (m addr6) AppendTo(b []byte) []byte {
 	return netip.AddrFrom16(m.As16()).AppendTo(b)
 }

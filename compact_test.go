@@ -11,8 +11,8 @@ import (
 // verifies that an IPv4 host route prints as its bare address, without
 // the /32 suffix the base string form always carries.
 func Test_Compact_IPv4_HostRouteIsBare(t *testing.T) {
-	network := xnetip.MustParseIPv4Network("127.0.0.1/32")
-	require.Equal(t, "127.0.0.1", xnetip.Compact[xnetip.IPv4Network]{Network: network}.String())
+	network := xnetip.MustParseNetwork4("127.0.0.1/32")
+	require.Equal(t, "127.0.0.1", xnetip.Compact[xnetip.Network4]{Network: network}.String())
 }
 
 // verifies that a contiguous non-host IPv4 network keeps the
@@ -20,16 +20,16 @@ func Test_Compact_IPv4_HostRouteIsBare(t *testing.T) {
 func Test_Compact_IPv4_ContiguousKeepsPrefixForm(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    string
 	}{
-		{name: "CIDR", network: xnetip.MustParseIPv4Network("10.0.0.0/24"), want: "10.0.0.0/24"},
-		{name: "zero prefix", network: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: "0.0.0.0/0"},
-		{name: "all-zero mask normalizes the address away", network: mustIPv4Network(t, "10.1.2.3", "0.0.0.0"), want: "0.0.0.0/0"},
+		{name: "CIDR", network: xnetip.MustParseNetwork4("10.0.0.0/24"), want: "10.0.0.0/24"},
+		{name: "zero prefix", network: xnetip.MustParseNetwork4("0.0.0.0/0"), want: "0.0.0.0/0"},
+		{name: "all-zero mask normalizes the address away", network: mustNetwork4(t, "10.1.2.3", "0.0.0.0"), want: "0.0.0.0/0"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			require.Equal(t, testCase.want, xnetip.Compact[xnetip.IPv4Network]{Network: testCase.network}.String())
+			require.Equal(t, testCase.want, xnetip.Compact[xnetip.Network4]{Network: testCase.network}.String())
 		})
 	}
 }
@@ -39,15 +39,15 @@ func Test_Compact_IPv4_ContiguousKeepsPrefixForm(t *testing.T) {
 func Test_Compact_IPv4_NonContiguousKeepsMaskForm(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv4Network
+		network xnetip.Network4
 		want    string
 	}{
-		{name: "two-run mask", network: xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255"), want: "192.168.0.1/255.255.0.255"},
-		{name: "alternating mask", network: xnetip.MustParseIPv4Network("170.85.170.85/170.85.170.85"), want: "170.85.170.85/170.85.170.85"},
+		{name: "two-run mask", network: xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255"), want: "192.168.0.1/255.255.0.255"},
+		{name: "alternating mask", network: xnetip.MustParseNetwork4("170.85.170.85/170.85.170.85"), want: "170.85.170.85/170.85.170.85"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			require.Equal(t, testCase.want, xnetip.Compact[xnetip.IPv4Network]{Network: testCase.network}.String())
+			require.Equal(t, testCase.want, xnetip.Compact[xnetip.Network4]{Network: testCase.network}.String())
 		})
 	}
 }
@@ -55,8 +55,8 @@ func Test_Compact_IPv4_NonContiguousKeepsMaskForm(t *testing.T) {
 // verifies that an IPv6 host route prints as its bare address, without
 // the /128 suffix the base string form always carries.
 func Test_Compact_IPv6_HostRouteIsBare(t *testing.T) {
-	network := xnetip.MustParseIPv6Network("::1/128")
-	require.Equal(t, "::1", xnetip.Compact[xnetip.IPv6Network]{Network: network}.String())
+	network := xnetip.MustParseNetwork6("::1/128")
+	require.Equal(t, "::1", xnetip.Compact[xnetip.Network6]{Network: network}.String())
 }
 
 // verifies that a contiguous non-host IPv6 network keeps the
@@ -64,15 +64,15 @@ func Test_Compact_IPv6_HostRouteIsBare(t *testing.T) {
 func Test_Compact_IPv6_ContiguousKeepsPrefixForm(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPv6Network
+		network xnetip.Network6
 		want    string
 	}{
-		{name: "CIDR", network: xnetip.MustParseIPv6Network("2001:db8::/32"), want: "2001:db8::/32"},
-		{name: "zero prefix", network: xnetip.MustParseIPv6Network("::/0"), want: "::/0"},
+		{name: "CIDR", network: xnetip.MustParseNetwork6("2001:db8::/32"), want: "2001:db8::/32"},
+		{name: "zero prefix", network: xnetip.MustParseNetwork6("::/0"), want: "::/0"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			require.Equal(t, testCase.want, xnetip.Compact[xnetip.IPv6Network]{Network: testCase.network}.String())
+			require.Equal(t, testCase.want, xnetip.Compact[xnetip.Network6]{Network: testCase.network}.String())
 		})
 	}
 }
@@ -80,48 +80,48 @@ func Test_Compact_IPv6_ContiguousKeepsPrefixForm(t *testing.T) {
 // verifies that a non-contiguous IPv6 network has no prefix length and
 // keeps the explicit colon-form mask of the base string.
 func Test_Compact_IPv6_NonContiguousKeepsMaskForm(t *testing.T) {
-	network := xnetip.MustParseIPv6Network("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")
+	network := xnetip.MustParseNetwork6("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")
 	_, ok := network.PrefixLen()
 	require.False(t, ok)
-	require.Equal(t, network.String(), xnetip.Compact[xnetip.IPv6Network]{Network: network}.String())
+	require.Equal(t, network.String(), xnetip.Compact[xnetip.Network6]{Network: network}.String())
 }
 
 // verifies that the family-agnostic adapter renders exactly as the
 // family it holds would, the IPv4 host-route rule included.
-func Test_Compact_IPNetwork_DelegatesToFamily(t *testing.T) {
+func Test_Compact_Network_DelegatesToFamily(t *testing.T) {
 	cases := []struct {
 		name    string
-		network xnetip.IPNetwork
+		network xnetip.Network
 		want    string
 	}{
-		{name: "IPv4 host route is bare", network: xnetip.MustParseIPNetwork("127.0.0.1/32"), want: "127.0.0.1"},
-		{name: "IPv6 CIDR", network: xnetip.MustParseIPNetwork("2001:db8::/32"), want: "2001:db8::/32"},
-		{name: "IPv4 zero prefix", network: xnetip.MustParseIPNetwork("0.0.0.0/0"), want: "0.0.0.0/0"},
-		{name: "IPv4 non-contiguous mask", network: xnetip.MustParseIPNetwork("192.168.0.1/255.255.0.255"), want: "192.168.0.1/255.255.0.255"},
+		{name: "IPv4 host route is bare", network: xnetip.MustParseNetwork("127.0.0.1/32"), want: "127.0.0.1"},
+		{name: "IPv6 CIDR", network: xnetip.MustParseNetwork("2001:db8::/32"), want: "2001:db8::/32"},
+		{name: "IPv4 zero prefix", network: xnetip.MustParseNetwork("0.0.0.0/0"), want: "0.0.0.0/0"},
+		{name: "IPv4 non-contiguous mask", network: xnetip.MustParseNetwork("192.168.0.1/255.255.0.255"), want: "192.168.0.1/255.255.0.255"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			require.Equal(t, testCase.want, xnetip.Compact[xnetip.IPNetwork]{Network: testCase.network}.String())
+			require.Equal(t, testCase.want, xnetip.Compact[xnetip.Network]{Network: testCase.network}.String())
 		})
 	}
 }
 
 // verifies that an IPv4-mapped IPv6 host route prints bare and in the
 // mapped form, because 4in6 is IPv6 and never rewrites as IPv4.
-func Test_Compact_IPNetwork_MappedHostRouteStaysIPv6(t *testing.T) {
-	network := xnetip.MustParseIPNetwork("::ffff:1.2.3.4/128")
+func Test_Compact_Network_MappedHostRouteStaysIPv6(t *testing.T) {
+	network := xnetip.MustParseNetwork("::ffff:1.2.3.4/128")
 	require.True(t, network.Is6())
-	require.Equal(t, "::ffff:1.2.3.4", xnetip.Compact[xnetip.IPNetwork]{Network: network}.String())
+	require.Equal(t, "::ffff:1.2.3.4", xnetip.Compact[xnetip.Network]{Network: network}.String())
 }
 
 // verifies that appending writes after the caller's bytes and leaves
 // them intact, in every instantiation.
 func Test_Compact_AppendTo_KeepsExistingBytes(t *testing.T) {
-	compact4 := xnetip.Compact[xnetip.IPv4Network]{Network: xnetip.MustParseIPv4Network("127.0.0.1/32")}
+	compact4 := xnetip.Compact[xnetip.Network4]{Network: xnetip.MustParseNetwork4("127.0.0.1/32")}
 	require.Equal(t, "net=127.0.0.1", string(compact4.AppendTo([]byte("net="))))
-	compact6 := xnetip.Compact[xnetip.IPv6Network]{Network: xnetip.MustParseIPv6Network("2001:db8::/32")}
+	compact6 := xnetip.Compact[xnetip.Network6]{Network: xnetip.MustParseNetwork6("2001:db8::/32")}
 	require.Equal(t, "net=2001:db8::/32", string(compact6.AppendTo([]byte("net="))))
-	compact := xnetip.Compact[xnetip.IPNetwork]{Network: xnetip.MustParseIPNetwork("192.168.0.1/255.255.0.255")}
+	compact := xnetip.Compact[xnetip.Network]{Network: xnetip.MustParseNetwork("192.168.0.1/255.255.0.255")}
 	require.Equal(t, "net=192.168.0.1/255.255.0.255", string(compact.AppendTo([]byte("net="))))
 }
 
@@ -129,8 +129,8 @@ func Test_Compact_AppendTo_KeepsExistingBytes(t *testing.T) {
 // IPv4 host routes, where it is the bare address rendering.
 func Test_Compact_IPv4_MatchesStringExceptHostRouteProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		compact := xnetip.Compact[xnetip.IPv4Network]{Network: network}.String()
+		network := genNetwork4.Draw(t, "network")
+		compact := xnetip.Compact[xnetip.Network4]{Network: network}.String()
 		if prefix, ok := network.PrefixLen(); ok && prefix == 32 {
 			require.Equal(t, network.Addr().String(), compact)
 		} else {
@@ -143,8 +143,8 @@ func Test_Compact_IPv4_MatchesStringExceptHostRouteProperty(t *testing.T) {
 // IPv6 host routes, where it is the bare address rendering.
 func Test_Compact_IPv6_MatchesStringExceptHostRouteProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		compact := xnetip.Compact[xnetip.IPv6Network]{Network: network}.String()
+		network := genNetwork6.Draw(t, "network")
+		compact := xnetip.Compact[xnetip.Network6]{Network: network}.String()
 		if prefix, ok := network.PrefixLen(); ok && prefix == 128 {
 			require.Equal(t, network.Addr().String(), compact)
 		} else {
@@ -155,19 +155,19 @@ func Test_Compact_IPv6_MatchesStringExceptHostRouteProperty(t *testing.T) {
 
 // verifies that the family-agnostic adapter is exactly the inner
 // family's adapter, in both directions of the family.
-func Test_Compact_IPNetwork_DelegatesProperty(t *testing.T) {
+func Test_Compact_Network_DelegatesProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network4 := genIPv4Network.Draw(t, "network4")
+		network4 := genNetwork4.Draw(t, "network4")
 		require.Equal(
 			t,
-			xnetip.Compact[xnetip.IPv4Network]{Network: network4}.String(),
-			xnetip.Compact[xnetip.IPNetwork]{Network: network4.IPNetwork()}.String(),
+			xnetip.Compact[xnetip.Network4]{Network: network4}.String(),
+			xnetip.Compact[xnetip.Network]{Network: network4.Network()}.String(),
 		)
-		network6 := genIPv6Network.Draw(t, "network6")
+		network6 := genNetwork6.Draw(t, "network6")
 		require.Equal(
 			t,
-			xnetip.Compact[xnetip.IPv6Network]{Network: network6}.String(),
-			xnetip.Compact[xnetip.IPNetwork]{Network: network6.IPNetwork()}.String(),
+			xnetip.Compact[xnetip.Network6]{Network: network6}.String(),
+			xnetip.Compact[xnetip.Network]{Network: network6.Network()}.String(),
 		)
 	})
 }
@@ -176,11 +176,11 @@ func Test_Compact_IPNetwork_DelegatesProperty(t *testing.T) {
 // compact string form has, in every instantiation.
 func Test_Compact_AppendTo_MatchesStringProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		compact4 := xnetip.Compact[xnetip.IPv4Network]{Network: genIPv4Network.Draw(t, "network4")}
+		compact4 := xnetip.Compact[xnetip.Network4]{Network: genNetwork4.Draw(t, "network4")}
 		require.Equal(t, []byte(compact4.String()), compact4.AppendTo(nil))
-		compact6 := xnetip.Compact[xnetip.IPv6Network]{Network: genIPv6Network.Draw(t, "network6")}
+		compact6 := xnetip.Compact[xnetip.Network6]{Network: genNetwork6.Draw(t, "network6")}
 		require.Equal(t, []byte(compact6.String()), compact6.AppendTo(nil))
-		compact := xnetip.Compact[xnetip.IPNetwork]{Network: genIPNetwork.Draw(t, "network")}
+		compact := xnetip.Compact[xnetip.Network]{Network: genNetwork.Draw(t, "network")}
 		require.Equal(t, []byte(compact.String()), compact.AppendTo(nil))
 	})
 }
@@ -192,8 +192,8 @@ func Test_Compact_AppendTo_MatchesStringProperty(t *testing.T) {
 // dropping the host-route suffix loses nothing.
 func Test_Compact_IPv4_ReparsesToSameNetworkProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
-		parsed, err := xnetip.ParseIPv4Network(xnetip.Compact[xnetip.IPv4Network]{Network: network}.String())
+		network := genNetwork4.Draw(t, "network")
+		parsed, err := xnetip.ParseNetwork4(xnetip.Compact[xnetip.Network4]{Network: network}.String())
 		require.NoError(t, err)
 		require.Equal(t, network, parsed)
 	})
@@ -206,22 +206,22 @@ func Test_Compact_IPv4_ReparsesToSameNetworkProperty(t *testing.T) {
 // dropping the host-route suffix loses nothing.
 func Test_Compact_IPv6_ReparsesToSameNetworkProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
-		parsed, err := xnetip.ParseIPv6Network(xnetip.Compact[xnetip.IPv6Network]{Network: network}.String())
+		network := genNetwork6.Draw(t, "network")
+		parsed, err := xnetip.ParseNetwork6(xnetip.Compact[xnetip.Network6]{Network: network}.String())
 		require.NoError(t, err)
 		require.Equal(t, network, parsed)
 	})
 }
 
-// verifies that the compact form reparses to the original IPNetwork,
+// verifies that the compact form reparses to the original Network,
 // with the family preserved.
 //
 // An IPv4-mapped IPv6 network prints in the mapped form and comes
 // back IPv6, so the family survives the round trip.
-func Test_Compact_IPNetwork_ReparsesToSameNetworkProperty(t *testing.T) {
+func Test_Compact_Network_ReparsesToSameNetworkProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPNetwork.Draw(t, "network")
-		parsed, err := xnetip.ParseIPNetwork(xnetip.Compact[xnetip.IPNetwork]{Network: network}.String())
+		network := genNetwork.Draw(t, "network")
+		parsed, err := xnetip.ParseNetwork(xnetip.Compact[xnetip.Network]{Network: network}.String())
 		require.NoError(t, err)
 		require.Equal(t, network, parsed)
 	})
@@ -231,12 +231,12 @@ func Test_Compact_IPNetwork_ReparsesToSameNetworkProperty(t *testing.T) {
 // byte-identical to the net/netip rendering of the same value.
 func Test_Compact_IPv4_MatchesNetipRenderingProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv4Network.Draw(t, "network")
+		network := genNetwork4.Draw(t, "network")
 		prefix, ok := network.Prefix()
 		if !ok {
 			return
 		}
-		compact := xnetip.Compact[xnetip.IPv4Network]{Network: network}.String()
+		compact := xnetip.Compact[xnetip.Network4]{Network: network}.String()
 		if prefix.Bits() == 32 {
 			require.Equal(t, network.Addr().String(), compact)
 		} else {
@@ -249,12 +249,12 @@ func Test_Compact_IPv4_MatchesNetipRenderingProperty(t *testing.T) {
 // byte-identical to the net/netip rendering of the same value.
 func Test_Compact_IPv6_MatchesNetipRenderingProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		network := genIPv6Network.Draw(t, "network")
+		network := genNetwork6.Draw(t, "network")
 		prefix, ok := network.Prefix()
 		if !ok {
 			return
 		}
-		compact := xnetip.Compact[xnetip.IPv6Network]{Network: network}.String()
+		compact := xnetip.Compact[xnetip.Network6]{Network: network}.String()
 		if prefix.Bits() == 128 {
 			require.Equal(t, network.Addr().String(), compact)
 		} else {
@@ -267,25 +267,25 @@ func Test_Compact_IPv6_MatchesNetipRenderingProperty(t *testing.T) {
 // nothing, whatever the shape and the instantiation.
 func Test_Compact_AppendTo_AllocationFree(t *testing.T) {
 	buffer := make([]byte, 0, 128)
-	compacts4 := []xnetip.Compact[xnetip.IPv4Network]{
-		{Network: xnetip.MustParseIPv4Network("127.0.0.1/32")},
-		{Network: xnetip.MustParseIPv4Network("10.0.0.0/24")},
-		{Network: xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")},
+	compacts4 := []xnetip.Compact[xnetip.Network4]{
+		{Network: xnetip.MustParseNetwork4("127.0.0.1/32")},
+		{Network: xnetip.MustParseNetwork4("10.0.0.0/24")},
+		{Network: xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")},
 	}
 	for _, compact := range compacts4 {
 		requireNoAllocs(t, func() { bytesSink = compact.AppendTo(buffer[:0]) })
 	}
-	compacts6 := []xnetip.Compact[xnetip.IPv6Network]{
-		{Network: xnetip.MustParseIPv6Network("::1/128")},
-		{Network: xnetip.MustParseIPv6Network("2001:db8::/32")},
-		{Network: xnetip.MustParseIPv6Network("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")},
+	compacts6 := []xnetip.Compact[xnetip.Network6]{
+		{Network: xnetip.MustParseNetwork6("::1/128")},
+		{Network: xnetip.MustParseNetwork6("2001:db8::/32")},
+		{Network: xnetip.MustParseNetwork6("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")},
 	}
 	for _, compact := range compacts6 {
 		requireNoAllocs(t, func() { bytesSink = compact.AppendTo(buffer[:0]) })
 	}
-	compacts := []xnetip.Compact[xnetip.IPNetwork]{
-		{Network: xnetip.MustParseIPNetwork("127.0.0.1/32")},
-		{Network: xnetip.MustParseIPNetwork("2001:db8::/32")},
+	compacts := []xnetip.Compact[xnetip.Network]{
+		{Network: xnetip.MustParseNetwork("127.0.0.1/32")},
+		{Network: xnetip.MustParseNetwork("2001:db8::/32")},
 	}
 	for _, compact := range compacts {
 		requireNoAllocs(t, func() { bytesSink = compact.AppendTo(buffer[:0]) })
@@ -295,18 +295,18 @@ func Test_Compact_AppendTo_AllocationFree(t *testing.T) {
 // verifies that rendering to a string costs exactly the one string
 // conversion in every instantiation, pinning any extra copy.
 func Test_Compact_String_SingleAllocation(t *testing.T) {
-	hostRoute := xnetip.Compact[xnetip.IPv4Network]{Network: xnetip.MustParseIPv4Network("127.0.0.1/32")}
+	hostRoute := xnetip.Compact[xnetip.Network4]{Network: xnetip.MustParseNetwork4("127.0.0.1/32")}
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = hostRoute.String() })))
-	nonContiguous := xnetip.Compact[xnetip.IPv4Network]{Network: xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")}
+	nonContiguous := xnetip.Compact[xnetip.Network4]{Network: xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")}
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = nonContiguous.String() })))
-	cidr6 := xnetip.Compact[xnetip.IPv6Network]{Network: xnetip.MustParseIPv6Network("2001:db8::/32")}
+	cidr6 := xnetip.Compact[xnetip.Network6]{Network: xnetip.MustParseNetwork6("2001:db8::/32")}
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = cidr6.String() })))
-	ipNetwork := xnetip.Compact[xnetip.IPNetwork]{Network: xnetip.MustParseIPNetwork("::1/128")}
+	ipNetwork := xnetip.Compact[xnetip.Network]{Network: xnetip.MustParseNetwork("::1/128")}
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = ipNetwork.String() })))
 }
 
 func BenchmarkCompact_IPv4_HostRoute(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv4Network]{Network: xnetip.MustParseIPv4Network("127.0.0.1/32")}
+	compact := xnetip.Compact[xnetip.Network4]{Network: xnetip.MustParseNetwork4("127.0.0.1/32")}
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = compact.String()
@@ -314,7 +314,7 @@ func BenchmarkCompact_IPv4_HostRoute(b *testing.B) {
 }
 
 func BenchmarkCompact_IPv4_CIDR(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv4Network]{Network: xnetip.MustParseIPv4Network("10.0.0.0/24")}
+	compact := xnetip.Compact[xnetip.Network4]{Network: xnetip.MustParseNetwork4("10.0.0.0/24")}
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = compact.String()
@@ -322,7 +322,7 @@ func BenchmarkCompact_IPv4_CIDR(b *testing.B) {
 }
 
 func BenchmarkCompact_IPv4_NonContiguous(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv4Network]{Network: xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")}
+	compact := xnetip.Compact[xnetip.Network4]{Network: xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")}
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = compact.String()
@@ -330,7 +330,7 @@ func BenchmarkCompact_IPv4_NonContiguous(b *testing.B) {
 }
 
 func BenchmarkCompact_IPv6_HostRoute(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv6Network]{Network: xnetip.MustParseIPv6Network("::1/128")}
+	compact := xnetip.Compact[xnetip.Network6]{Network: xnetip.MustParseNetwork6("::1/128")}
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = compact.String()
@@ -338,7 +338,7 @@ func BenchmarkCompact_IPv6_HostRoute(b *testing.B) {
 }
 
 func BenchmarkCompact_IPv6_CIDR(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv6Network]{Network: xnetip.MustParseIPv6Network("2001:db8::/32")}
+	compact := xnetip.Compact[xnetip.Network6]{Network: xnetip.MustParseNetwork6("2001:db8::/32")}
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = compact.String()
@@ -346,23 +346,23 @@ func BenchmarkCompact_IPv6_CIDR(b *testing.B) {
 }
 
 func BenchmarkCompact_IPv6_NonContiguous(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv6Network]{Network: xnetip.MustParseIPv6Network("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")}
+	compact := xnetip.Compact[xnetip.Network6]{Network: xnetip.MustParseNetwork6("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")}
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = compact.String()
 	}
 }
 
-func BenchmarkCompact_IPNetwork_V4(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPNetwork]{Network: xnetip.MustParseIPNetwork("10.0.0.0/24")}
+func BenchmarkCompact_Network_V4(b *testing.B) {
+	compact := xnetip.Compact[xnetip.Network]{Network: xnetip.MustParseNetwork("10.0.0.0/24")}
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = compact.String()
 	}
 }
 
-func BenchmarkCompact_IPNetwork_V6(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPNetwork]{Network: xnetip.MustParseIPNetwork("2001:db8::/32")}
+func BenchmarkCompact_Network_V6(b *testing.B) {
+	compact := xnetip.Compact[xnetip.Network]{Network: xnetip.MustParseNetwork("2001:db8::/32")}
 	b.ReportAllocs()
 	for b.Loop() {
 		stringSink = compact.String()
@@ -370,7 +370,7 @@ func BenchmarkCompact_IPNetwork_V6(b *testing.B) {
 }
 
 func BenchmarkCompactAppendTo_IPv4_HostRoute(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv4Network]{Network: xnetip.MustParseIPv4Network("127.0.0.1/32")}
+	compact := xnetip.Compact[xnetip.Network4]{Network: xnetip.MustParseNetwork4("127.0.0.1/32")}
 	buffer := make([]byte, 0, 128)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -379,7 +379,7 @@ func BenchmarkCompactAppendTo_IPv4_HostRoute(b *testing.B) {
 }
 
 func BenchmarkCompactAppendTo_IPv4_CIDR(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv4Network]{Network: xnetip.MustParseIPv4Network("10.0.0.0/24")}
+	compact := xnetip.Compact[xnetip.Network4]{Network: xnetip.MustParseNetwork4("10.0.0.0/24")}
 	buffer := make([]byte, 0, 128)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -388,7 +388,7 @@ func BenchmarkCompactAppendTo_IPv4_CIDR(b *testing.B) {
 }
 
 func BenchmarkCompactAppendTo_IPv4_NonContiguous(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv4Network]{Network: xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")}
+	compact := xnetip.Compact[xnetip.Network4]{Network: xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")}
 	buffer := make([]byte, 0, 128)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -397,7 +397,7 @@ func BenchmarkCompactAppendTo_IPv4_NonContiguous(b *testing.B) {
 }
 
 func BenchmarkCompactAppendTo_IPv6_HostRoute(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv6Network]{Network: xnetip.MustParseIPv6Network("::1/128")}
+	compact := xnetip.Compact[xnetip.Network6]{Network: xnetip.MustParseNetwork6("::1/128")}
 	buffer := make([]byte, 0, 128)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -406,7 +406,7 @@ func BenchmarkCompactAppendTo_IPv6_HostRoute(b *testing.B) {
 }
 
 func BenchmarkCompactAppendTo_IPv6_CIDR(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv6Network]{Network: xnetip.MustParseIPv6Network("2001:db8::/32")}
+	compact := xnetip.Compact[xnetip.Network6]{Network: xnetip.MustParseNetwork6("2001:db8::/32")}
 	buffer := make([]byte, 0, 128)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -415,7 +415,7 @@ func BenchmarkCompactAppendTo_IPv6_CIDR(b *testing.B) {
 }
 
 func BenchmarkCompactAppendTo_IPv6_NonContiguous(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPv6Network]{Network: xnetip.MustParseIPv6Network("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")}
+	compact := xnetip.Compact[xnetip.Network6]{Network: xnetip.MustParseNetwork6("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")}
 	buffer := make([]byte, 0, 128)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -423,8 +423,8 @@ func BenchmarkCompactAppendTo_IPv6_NonContiguous(b *testing.B) {
 	}
 }
 
-func BenchmarkCompactAppendTo_IPNetwork_V4(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPNetwork]{Network: xnetip.MustParseIPNetwork("10.0.0.0/24")}
+func BenchmarkCompactAppendTo_Network_V4(b *testing.B) {
+	compact := xnetip.Compact[xnetip.Network]{Network: xnetip.MustParseNetwork("10.0.0.0/24")}
 	buffer := make([]byte, 0, 128)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -432,8 +432,8 @@ func BenchmarkCompactAppendTo_IPNetwork_V4(b *testing.B) {
 	}
 }
 
-func BenchmarkCompactAppendTo_IPNetwork_V6(b *testing.B) {
-	compact := xnetip.Compact[xnetip.IPNetwork]{Network: xnetip.MustParseIPNetwork("2001:db8::/32")}
+func BenchmarkCompactAppendTo_Network_V6(b *testing.B) {
+	compact := xnetip.Compact[xnetip.Network]{Network: xnetip.MustParseNetwork("2001:db8::/32")}
 	buffer := make([]byte, 0, 128)
 	b.ReportAllocs()
 	for b.Loop() {
