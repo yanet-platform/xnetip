@@ -165,3 +165,17 @@ func (m IPNetwork) Mask() netip.Addr {
 	}
 	return m.network.mask.Netip()
 }
+
+// ToIPv6Mapped embeds the network into IPv6 address space.
+//
+// An IPv4 network is returned as its IPv4-mapped IPv6 network (address
+// ::ffff:a.b.c.d, mask ffff:ffff:ffff:ffff:ffff:ffff:M). An IPv6
+// network is returned unchanged, so the result is not necessarily
+// IPv4-mapped: any IPv6 network passes through as is. Lifting both
+// operands of a dual-stack comparison this way makes containment and
+// intersection, which are false across families, meaningful. Both arms
+// return the stored network, which for the IPv4 arm already is the
+// mapped image by the storage invariant.
+func (m IPNetwork) ToIPv6Mapped() IPv6Network {
+	return m.network
+}

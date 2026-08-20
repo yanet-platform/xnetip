@@ -827,3 +827,117 @@ func Test_IPNetworkFrom_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { ipNetworkSink, err = xnetip.IPNetworkFrom(addr6, mask6) })
 	require.NoError(t, err)
 }
+
+// mustIPNetwork4 builds the IPNetwork of an Is4 address and mask pair
+// given in string form, stopping the test on any constructor error.
+func mustIPNetwork4(t require.TestingT, addr, mask string) xnetip.IPNetwork {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	network, err := xnetip.IPNetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	require.NoError(t, err)
+	require.True(t, network.Is4())
+	return network
+}
+
+// mustIPNetwork6 builds the IPNetwork of an Is6 address and mask pair
+// given in string form, stopping the test on any constructor error.
+func mustIPNetwork6(t require.TestingT, addr, mask string) xnetip.IPNetwork {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	network, err := xnetip.IPNetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	require.NoError(t, err)
+	require.True(t, network.Is6())
+	return network
+}
+
+// mustIPv6Network builds an IPv6Network from an address and mask pair
+// given in string form, stopping the test on any constructor error.
+func mustIPv6Network(t require.TestingT, addr, mask string) xnetip.IPv6Network {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	network, err := xnetip.IPv6NetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	require.NoError(t, err)
+	return network
+}
+
+// verifies that an IPv4 network embeds as its IPv4-mapped IPv6 image
+// and an IPv6 network passes through unchanged, whatever its shape.
+func Test_IPNetwork_ToIPv6Mapped_EmbedsIntoIPv6Space(t *testing.T) {
+	cases := []struct {
+		name     string
+		network  xnetip.IPNetwork
+		wantAddr string
+		wantMask string
+	}{
+		{name: "IPv4 contiguous", network: mustIPNetwork4(t, "192.168.1.0", "255.255.255.0"), wantAddr: "::ffff:c0a8:100", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"},
+		{name: "IPv6 identity contiguous", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"), wantAddr: "2001:db8::", wantMask: "ffff:ffff::"},
+		{name: "IPv4 universe pins only the mapped prefix", network: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"), wantAddr: "::ffff:0:0", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff::"},
+		{name: "IPv4 host route becomes a /128", network: mustIPNetwork4(t, "10.0.0.1", "255.255.255.255"), wantAddr: "::ffff:a00:1", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+		{name: "IPv6 universe identity", network: mustIPNetwork6(t, "::", "::"), wantAddr: "::", wantMask: "::"},
+		{name: "IPv6 mapped network stays as is", network: mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), wantAddr: "::ffff:c0a8:100", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"},
+		{name: "IPv4 non-contiguous keeps the low mask hole", network: mustIPNetwork4(t, "192.168.0.1", "255.255.0.255"), wantAddr: "::ffff:c0a8:1", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff"},
+		{name: "IPv6 non-contiguous identity", network: mustIPNetwork6(t, "2a02:6b8:c00::1234:abcd:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), wantAddr: "2a02:6b8:c00::1234:abcd:0:0", wantMask: "ffff:ffff:ff00::ffff:ffff:0:0"},
+		{name: "IPv4 alternating mask carries into the low bits", network: mustIPNetwork4(t, "170.85.170.85", "170.85.170.85"), wantAddr: "::ffff:aa55:aa55", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:aa55:aa55"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			mapped := testCase.network.ToIPv6Mapped()
+			require.Equal(t, mustIPv6Network(t, testCase.wantAddr, testCase.wantMask), mapped)
+		})
+	}
+}
+
+// verifies that the family-agnostic embedding equals the IPv4 type's
+// own embedding for an IPv4 network.
+func Test_IPNetwork_ToIPv6Mapped_EqualsIPv4NetworkMethod(t *testing.T) {
+	network, err := xnetip.IPv4NetworkFrom(
+		netip.MustParseAddr("192.168.1.0"),
+		netip.MustParseAddr("255.255.255.0"),
+	)
+	require.NoError(t, err)
+	require.Equal(t, network.ToIPv6Mapped(), xnetip.IPNetworkFrom4(network).ToIPv6Mapped())
+}
+
+// verifies that embedding an IPv4 network agrees with the concrete
+// method, lands in the mapped range and round-trips back.
+func Test_IPNetwork_ToIPv6Mapped_IPv4RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		mapped := xnetip.IPNetworkFrom4(network).ToIPv6Mapped()
+		require.Equal(t, network.ToIPv6Mapped(), mapped)
+		require.True(t, mapped.IsIPv4MappedIPv6())
+		recovered, ok := mapped.ToIPv4Mapped()
+		require.True(t, ok)
+		require.Equal(t, network, recovered)
+	})
+}
+
+// verifies that embedding an IPv6 network is the identity, whatever
+// the mask shape.
+func Test_IPNetwork_ToIPv6Mapped_IPv6IdentityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		require.Equal(t, network, xnetip.IPNetworkFrom6(network).ToIPv6Mapped())
+	})
+}
+
+// verifies that the address of an embedded IPv4 network unmaps back to
+// the original address, with net/netip as the unmapping oracle.
+func Test_IPNetwork_ToIPv6Mapped_MatchesNetipUnmap(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		mapped := xnetip.IPNetworkFrom4(network).ToIPv6Mapped()
+		require.Equal(t, network.Addr(), mapped.Addr().Unmap())
+	})
+}
+
+// verifies that the embedding allocates nothing for either family.
+func Test_IPNetwork_ToIPv6Mapped_AllocationFree(t *testing.T) {
+	network4 := mustIPNetwork4(t, "192.168.1.0", "255.255.255.0")
+	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+	requireNoAllocs(t, func() { network6Sink = network4.ToIPv6Mapped() })
+	requireNoAllocs(t, func() { network6Sink = network6.ToIPv6Mapped() })
+}
