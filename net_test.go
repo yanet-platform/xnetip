@@ -1750,6 +1750,235 @@ func Test_Network_IsDisjoint_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { okSink = left4.IsDisjoint(right6) })
 }
 
+// verifies that an IPv4 pair delegates to the IPv4 peel.
+//
+// The parts equal the concrete result wrapped, every one carrying
+// the IPv4 family.
+func Test_Network_Difference_IPv4Superset(t *testing.T) {
+	source := xnetip.MustParseNetwork("192.168.0.0/16")
+	other := xnetip.MustParseNetwork("192.168.1.0/24")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 8)
+	source4 := xnetip.MustParseNetwork4("192.168.0.0/16")
+	other4 := xnetip.MustParseNetwork4("192.168.1.0/24")
+	expected := []xnetip.Network{}
+	for part := range source4.Difference(other4) {
+		expected = append(expected, xnetip.NetworkFrom4(part))
+	}
+	require.Equal(t, expected, parts)
+	for _, part := range parts {
+		require.True(t, part.Is4(), "part %v not IPv4", part)
+	}
+}
+
+// verifies that an IPv6 pair delegates to the IPv6 peel with every
+// part carrying the IPv6 family.
+func Test_Network_Difference_IPv6Superset(t *testing.T) {
+	source := xnetip.MustParseNetwork("2001:db8::/48")
+	other := xnetip.MustParseNetwork("2001:db8::/64")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 16)
+	for _, part := range parts {
+		require.True(t, part.Is6(), "part %v not IPv6", part)
+	}
+}
+
+// verifies that a disjoint IPv4 pair yields the source once.
+func Test_Network_Difference_IPv4Disjoint(t *testing.T) {
+	source := xnetip.MustParseNetwork("10.0.0.0/8")
+	other := xnetip.MustParseNetwork("192.168.0.0/16")
+	require.Equal(t, []xnetip.Network{source}, slices.Collect(source.Difference(other)))
+}
+
+// verifies that an IPv6 subset leaves nothing.
+func Test_Network_Difference_IPv6Subset(t *testing.T) {
+	source := xnetip.MustParseNetwork("2001:db8::/64")
+	other := xnetip.MustParseNetwork("2001:db8::/48")
+	require.Empty(t, slices.Collect(source.Difference(other)))
+}
+
+// verifies the cross-family rule that operands of different
+// families share no address, so the difference is the source.
+//
+// Adjust if D2 resolves differently.
+func Test_Network_Difference_CrossFamilyYieldsSource(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		other  string
+	}{
+		{name: "IPv4 minus IPv6", source: "10.0.0.0/8", other: "2001:db8::/32"},
+		{name: "IPv6 minus IPv4", source: "2001:db8::/32", other: "10.0.0.0/8"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			source := xnetip.MustParseNetwork(testCase.source)
+			other := xnetip.MustParseNetwork(testCase.other)
+			require.Equal(t, []xnetip.Network{source}, slices.Collect(source.Difference(other)))
+		})
+	}
+}
+
+// verifies that an IPv4-mapped IPv6 network and an IPv4 network are
+// different families.
+//
+// The difference is the IPv6 source, not the arithmetic overlap of
+// the mapped storage forms.
+//
+// Adjust if D2 resolves differently.
+func Test_Network_Difference_MappedIPv6VersusIPv4(t *testing.T) {
+	source := xnetip.MustParseNetwork("::ffff:10.0.0.0/104")
+	other := xnetip.MustParseNetwork("10.0.0.0/8")
+	require.True(t, source.Is6())
+	require.True(t, other.Is4())
+	require.Equal(t, []xnetip.Network{source}, slices.Collect(source.Difference(other)))
+}
+
+// verifies the documented peel order through the family-agnostic
+// type on the hand-checked case.
+//
+// The universe minus one host yields the 32 contiguous networks /1
+// through /32 wrapped as IPv4 networks, most significant differing
+// bit first.
+func Test_Network_Difference_ExactOrderThroughNetwork(t *testing.T) {
+	source := xnetip.MustParseNetwork("0.0.0.0/0")
+	other := xnetip.MustParseNetwork("8.8.8.8/32")
+	expectedTexts := []string{
+		"128.0.0.0/1", "64.0.0.0/2", "32.0.0.0/3", "16.0.0.0/4",
+		"0.0.0.0/5", "12.0.0.0/6", "10.0.0.0/7", "9.0.0.0/8",
+		"8.128.0.0/9", "8.64.0.0/10", "8.32.0.0/11", "8.16.0.0/12",
+		"8.0.0.0/13", "8.12.0.0/14", "8.10.0.0/15", "8.9.0.0/16",
+		"8.8.128.0/17", "8.8.64.0/18", "8.8.32.0/19", "8.8.16.0/20",
+		"8.8.0.0/21", "8.8.12.0/22", "8.8.10.0/23", "8.8.9.0/24",
+		"8.8.8.128/25", "8.8.8.64/26", "8.8.8.32/27", "8.8.8.16/28",
+		"8.8.8.0/29", "8.8.8.12/30", "8.8.8.10/31", "8.8.8.9/32",
+	}
+	expected := []xnetip.Network{}
+	for _, text := range expectedTexts {
+		expected = append(expected, xnetip.MustParseNetwork(text))
+	}
+	require.Equal(t, expected, slices.Collect(source.Difference(other)))
+}
+
+// verifies that breaking out of the loop stops the sequence after
+// exactly the consumed items.
+func Test_Network_Difference_EarlyBreakStops(t *testing.T) {
+	source := xnetip.MustParseNetwork("192.168.0.0/16")
+	other := xnetip.MustParseNetwork("192.168.1.0/24")
+	consumed := 0
+	for range source.Difference(other) {
+		consumed++
+		if consumed == 2 {
+			break
+		}
+	}
+	require.Equal(t, 2, consumed)
+}
+
+// verifies the exact non-contiguous IPv4 peel through the
+// family-agnostic type, every part carrying the IPv4 family.
+func Test_Network_Difference_IPv4NonContiguous(t *testing.T) {
+	source := xnetip.MustParseNetwork("10.0.0.0/255.0.0.0")
+	other := xnetip.MustParseNetwork("10.0.0.1/255.0.0.255")
+	expectedTexts := []string{
+		"10.0.0.128/255.0.0.128", "10.0.0.64/255.0.0.192",
+		"10.0.0.32/255.0.0.224", "10.0.0.16/255.0.0.240",
+		"10.0.0.8/255.0.0.248", "10.0.0.4/255.0.0.252",
+		"10.0.0.2/255.0.0.254", "10.0.0.0/255.0.0.255",
+	}
+	expected := []xnetip.Network{}
+	for _, text := range expectedTexts {
+		expected = append(expected, xnetip.MustParseNetwork(text))
+	}
+	parts := slices.Collect(source.Difference(other))
+	require.Equal(t, expected, parts)
+	for _, part := range parts {
+		require.True(t, part.Is4(), "part %v not IPv4", part)
+	}
+}
+
+// verifies the non-contiguous IPv6 peel through the family-agnostic
+// type.
+//
+// The eight IPv6 parts end at the subtrahend's address under the
+// fully extended mask.
+func Test_Network_Difference_IPv6NonContiguous(t *testing.T) {
+	source := xnetip.MustParseNetwork("2001::/ffff::")
+	other := xnetip.MustParseNetwork("2001::1/ffff::ff")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 8)
+	for _, part := range parts {
+		require.True(t, part.Is6(), "part %v not IPv6", part)
+	}
+	require.Equal(t, xnetip.MustParseNetwork("2001::/ffff::ff"), parts[7])
+}
+
+// verifies delegation on random same-family pairs.
+//
+// The collected result equals the concrete family result wrapped, in
+// the same order, so every part carries the source's family.
+func Test_Network_Difference_DelegationProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		if rapid.Bool().Draw(t, "is4") {
+			source := genNetwork4.Draw(t, "source4")
+			other := genNetwork4.Draw(t, "other4")
+			var expected []xnetip.Network
+			for part := range source.Difference(other) {
+				expected = append(expected, xnetip.NetworkFrom4(part))
+			}
+			collected := slices.Collect(xnetip.NetworkFrom4(source).Difference(xnetip.NetworkFrom4(other)))
+			require.Equal(t, expected, collected)
+			return
+		}
+		source := genNetwork6.Draw(t, "source6")
+		other := genNetwork6.Draw(t, "other6")
+		var expected []xnetip.Network
+		for part := range source.Difference(other) {
+			expected = append(expected, xnetip.NetworkFrom6(part))
+		}
+		collected := slices.Collect(xnetip.NetworkFrom6(source).Difference(xnetip.NetworkFrom6(other)))
+		require.Equal(t, expected, collected)
+	})
+}
+
+// verifies the cross-family rule on random pairs in both orders:
+// the result is always the source alone.
+//
+// Adjust if D2 resolves differently.
+func Test_Network_Difference_CrossFamilyProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network4 := xnetip.NetworkFrom4(genNetwork4.Draw(t, "network4"))
+		network6 := xnetip.NetworkFrom6(genNetwork6.Draw(t, "network6"))
+		require.Equal(t, []xnetip.Network{network4}, slices.Collect(network4.Difference(network6)))
+		require.Equal(t, []xnetip.Network{network6}, slices.Collect(network6.Difference(network4)))
+	})
+}
+
+// verifies through the family-agnostic operations that every part
+// lies inside the source and is disjoint from the subtrahend.
+func Test_Network_Difference_PartsInvariantsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genNetwork.Draw(t, "source")
+		other := genNetwork.Draw(t, "other")
+		for part := range source.Difference(other) {
+			require.True(t, source.Contains(part), "part %v not in source %v", part, source)
+			require.False(t, other.Intersects(part), "part %v intersects %v", part, other)
+		}
+	})
+}
+
+// verifies that consuming the sequence with a range loop allocates
+// nothing in either family.
+func Test_Network_Difference_AllocationFree(t *testing.T) {
+	source := xnetip.MustParseNetwork("0.0.0.0/0")
+	other := xnetip.MustParseNetwork("8.8.8.8/32")
+	requireNoAllocs(t, func() {
+		for part := range source.Difference(other) {
+			ipNetworkSink = part
+		}
+	})
+}
+
 // verifies that adjacency delegates within a family and is false
 // across families.
 //

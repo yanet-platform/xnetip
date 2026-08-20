@@ -421,6 +421,56 @@ func (m Network) IsDisjoint(other Network) bool {
 	return !m.Intersects(other)
 }
 
+// Difference returns the networks whose union is the set difference
+// m \ other, each part carrying m's address family.
+//
+// Same-family operands delegate to the concrete peel: exactly
+// popcount(d) pairwise-disjoint parts with d the mask bits fixed by
+// the intersection but free in m, most significant bit of d first,
+// as documented on Network4.Difference and Network6.Difference.
+// Operands of different families share no address, so the difference
+// is m itself, yielded once. Masks may be non-contiguous. The
+// sequence is allocation-free and re-iterable.
+func (m Network) Difference(other Network) iter.Seq[Network] {
+	return func(yield func(Network) bool) {
+		// Operands of different families are disjoint, so the
+		// difference is the whole receiver, yielded as is.
+		if m.is4 != other.is4 {
+			yield(m)
+			return
+		}
+		// An IPv4 pair must unwrap before peeling.
+		//
+		// Running the 128-bit peel on the mapped storage would lose
+		// the family of every part. The mapped-storage invariant
+		// makes the low 32 stored bits the IPv4 networks, already
+		// normalized, and the family dispatch stays inside this
+		// closure so a range over the sequence remains a direct
+		// call.
+		if m.is4 {
+			network := Network4{
+				addr: addr4FromBits(uint32(m.network.addr.bits.lo)),
+				mask: addr4FromBits(uint32(m.network.mask.bits.lo)),
+			}
+			otherNetwork := Network4{
+				addr: addr4FromBits(uint32(other.network.addr.bits.lo)),
+				mask: addr4FromBits(uint32(other.network.mask.bits.lo)),
+			}
+			for part := range network.Difference(otherNetwork) {
+				if !yield(NetworkFrom4(part)) {
+					return
+				}
+			}
+			return
+		}
+		for part := range m.network.Difference(other.network) {
+			if !yield(NetworkFrom6(part)) {
+				return
+			}
+		}
+	}
+}
+
 // IsAdjacent reports whether the two networks share a mask and differ
 // in exactly one masked bit.
 //
