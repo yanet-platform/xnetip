@@ -227,6 +227,43 @@ var genIPv4Prefix = rapid.Custom(func(t *rapid.T) netip.Prefix {
 	return netip.PrefixFrom(address, bits)
 })
 
+// genIPv4LowestBitSiblingPair draws a network with a non-empty mask
+// and its buddy at the mask's lowest set bit.
+//
+// Such a pair is adjacent by the lowest mask bit by construction, so
+// it exercises the merging case that random pairs almost never hit,
+// over every mask shape the network generator draws.
+var genIPv4LowestBitSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv4Network {
+	network := genIPv4Network.Filter(func(network xnetip.IPv4Network) bool {
+		return network.Mask() != netipAddrFrom4Bits(0)
+	}).Draw(t, "network")
+	addrBits, maskBits := ipv4NetworkBits(network)
+	buddy, err := xnetip.IPv4NetworkFrom(
+		netipAddrFrom4Bits(addrBits^(maskBits&-maskBits)),
+		netipAddrFrom4Bits(maskBits),
+	)
+	require.NoError(t, err)
+	return [2]xnetip.IPv4Network{network, buddy}
+})
+
+// genIPv4ContiguousSiblingPair draws a CIDR network of prefix length
+// one or more and its buddy at the prefix boundary bit.
+//
+// Both halves are contiguous, so the pair pins the class closure of
+// the lowest-mask-bit merge: the parent must be contiguous too.
+var genIPv4ContiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv4Network {
+	bits := rapid.IntRange(1, 32).Draw(t, "bits")
+	network, err := xnetip.IPv4NetworkFromCIDR(genNetipAddr4.Draw(t, "addr"), bits)
+	require.NoError(t, err)
+	addrBits, maskBits := ipv4NetworkBits(network)
+	buddy, err := xnetip.IPv4NetworkFrom(
+		netipAddrFrom4Bits(addrBits^(maskBits&-maskBits)),
+		netipAddrFrom4Bits(maskBits),
+	)
+	require.NoError(t, err)
+	return [2]xnetip.IPv4Network{network, buddy}
+})
+
 // genIPv6Network draws an IPv6 network through the checked
 // constructor, asserting every draw normalized.
 //

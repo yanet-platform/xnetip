@@ -439,6 +439,50 @@ func (m IPv4Network) IsAdjacentByLowestMaskBit(other IPv4Network) bool {
 	return m1 == m2 && m1 != 0 && a1^a2 == m1&-m1
 }
 
+// MergeByLowestMaskBit merges two networks when one contains the
+// other or when they are lowest-mask-bit siblings.
+//
+// Exactly two disjoint cases merge and everything else reports
+// false: containment returns the larger network, and a sibling pair
+// sharing a mask and differing in precisely its lowest set bit
+// returns the common address under that mask with the bit removed.
+// Adjacency at any higher masked bit is refused even though Merge
+// accepts it, so the result stays in the inputs' class — for a
+// non-contiguous mask only the lowest run's boundary bit is a merge
+// point. Whenever ok is true the result equals Merge's.
+func (m IPv4Network) MergeByLowestMaskBit(other IPv4Network) (IPv4Network, bool) {
+	if m.mask == other.mask {
+		if m.addr == other.addr {
+			return m, true
+		}
+		if m.IsAdjacentByLowestMaskBit(other) {
+			// The sibling result is normalized without a masking AND.
+			//
+			// The addresses differ only in the mask's lowest set bit,
+			// which the reduced mask clears, so their AND holds no
+			// bit outside that mask.
+			m1 := m.mask.Bits()
+			return IPv4Network{
+				addr: ipv4AddrFromBits(m.addr.Bits() & other.addr.Bits()),
+				mask: ipv4AddrFromBits(m1 & (m1 - 1)),
+			}, true
+		}
+		return IPv4Network{}, false
+	}
+	// With unequal masks adjacency is impossible, so containment is
+	// the only remaining way to merge.
+	//
+	// The equal-mask branch above needed only the address compare
+	// because containment degenerates to equality there.
+	if m.Contains(other) {
+		return m, true
+	}
+	if other.Contains(m) {
+		return other, true
+	}
+	return IPv4Network{}, false
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //

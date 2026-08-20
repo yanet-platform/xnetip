@@ -3358,3 +3358,300 @@ func BenchmarkIPv4Network_IsAdjacentByLowestMaskBit_NonContiguous(b *testing.B) 
 		okSink = left.IsAdjacentByLowestMaskBit(right)
 	}
 }
+
+// mergeByLowestMaskBitReferenceIPv4 is the simple oracle for the
+// class-closed merge.
+//
+// Containment either way returns the container, otherwise the
+// trailing-zeros adjacency oracle gates a sibling merge whose mask
+// clears the counted bit and whose address is re-normalized through
+// the checked constructor.
+func mergeByLowestMaskBitReferenceIPv4(t require.TestingT, left, right xnetip.IPv4Network) (xnetip.IPv4Network, bool) {
+	if left.Contains(right) {
+		return left, true
+	}
+	if right.Contains(left) {
+		return right, true
+	}
+	if !isAdjacentByLowestMaskBitReferenceIPv4(left, right) {
+		return xnetip.IPv4Network{}, false
+	}
+	leftAddr, leftMask := ipv4NetworkBits(left)
+	rightAddr, _ := ipv4NetworkBits(right)
+	lowest := uint32(1) << bits.TrailingZeros32(leftMask)
+	merged, err := xnetip.IPv4NetworkFrom(
+		netipAddrFrom4Bits(leftAddr&rightAddr),
+		netipAddrFrom4Bits(leftMask&^lowest),
+	)
+	require.NoError(t, err)
+	return merged, true
+}
+
+// verifies that merging succeeds exactly for containment and for
+// lowest-mask-bit siblings, and returns the combined network.
+func Test_IPv4Network_MergeByLowestMaskBit_UnitAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  xnetip.IPv4Network
+		ok    bool
+	}{
+		{name: "CIDR siblings merge to the parent", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: xnetip.MustParseIPv4Network("192.168.0.0/23"), ok: true},
+		{name: "CIDR siblings reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: xnetip.MustParseIPv4Network("192.168.0.0/23"), ok: true},
+		{name: "host routes differing in bit 0 merge to /31", left: xnetip.MustParseIPv4Network("10.0.0.0/32"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.255.255.254"), ok: true},
+		{name: "adjacent at the top bit is refused", left: xnetip.MustParseIPv4Network("0.0.0.0/2"), right: xnetip.MustParseIPv4Network("128.0.0.0/2"), ok: false},
+		{name: "identical returns itself", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: xnetip.MustParseIPv4Network("192.168.1.0/24"), ok: true},
+		{name: "containment returns the larger", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("10.1.0.0/16"), want: xnetip.MustParseIPv4Network("10.0.0.0/8"), ok: true},
+		{name: "containment reversed", left: xnetip.MustParseIPv4Network("10.1.0.0/16"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: xnetip.MustParseIPv4Network("10.0.0.0/8"), ok: true},
+		{name: "default route with itself", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: xnetip.MustParseIPv4Network("0.0.0.0/0"), ok: true},
+		{name: "default route absorbs any network", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: xnetip.MustParseIPv4Network("0.0.0.0/0"), ok: true},
+		{name: "default route absorbs any network reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: xnetip.MustParseIPv4Network("0.0.0.0/0"), ok: true},
+		{name: "different masks, no containment", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("10.0.0.0/16"), ok: false},
+		{name: "different masks, no containment reversed", left: xnetip.MustParseIPv4Network("10.0.0.0/16"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), ok: false},
+		{name: "same mask, unrelated addresses", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.3.0/24"), ok: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			merged, ok := testCase.left.MergeByLowestMaskBit(testCase.right)
+			require.Equal(t, testCase.ok, ok)
+			require.Equal(t, testCase.want, merged)
+		})
+	}
+}
+
+// verifies that non-contiguous masks merge only at the lowest run's
+// boundary bit or by containment.
+func Test_IPv4Network_MergeByLowestMaskBit_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  xnetip.IPv4Network
+		ok    bool
+	}{
+		{name: "siblings at the lowest run's bit 0", left: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.254"), ok: true},
+		{name: "siblings at the lowest run's bit 0 reversed", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.254"), ok: true},
+		{name: "siblings at the higher run's bit 16 refused", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255"), ok: false},
+		{name: "containment with non-contiguous masks", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.0/255.128.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), ok: true},
+		{name: "containment with non-contiguous masks reversed", left: xnetip.MustParseIPv4Network("10.0.0.0/255.128.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), want: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), ok: true},
+		{name: "alternating mask, siblings at bit 0", left: xnetip.MustParseIPv4Network("0.0.0.0/85.85.85.85"), right: xnetip.MustParseIPv4Network("0.0.0.1/85.85.85.85"), want: xnetip.MustParseIPv4Network("0.0.0.0/85.85.85.84"), ok: true},
+		{name: "alternating mask, siblings at bit 2 refused", left: xnetip.MustParseIPv4Network("0.0.0.0/85.85.85.85"), right: xnetip.MustParseIPv4Network("0.0.0.4/85.85.85.85"), ok: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			merged, ok := testCase.left.MergeByLowestMaskBit(testCase.right)
+			require.Equal(t, testCase.ok, ok)
+			require.Equal(t, testCase.want, merged)
+		})
+	}
+}
+
+// verifies that the refused higher-bit pairs of the unit tables are
+// still combined by the unrestricted merge.
+//
+// The refusal is what keeps the result inside the inputs' class.
+func Test_IPv4Network_MergeByLowestMaskBit_RefusedPairsStillMerge(t *testing.T) {
+	cases := []struct {
+		name string
+		pair [2]string
+		want string
+	}{
+		{name: "top-bit pair merges non-contiguously", pair: [2]string{"0.0.0.0/2", "128.0.0.0/2"}, want: "0.0.0.0/64.0.0.0"},
+		{name: "higher-run pair widens the two-run mask", pair: [2]string{"10.0.0.1/255.255.0.255", "10.1.0.1/255.255.0.255"}, want: "10.0.0.1/255.254.0.255"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			left := xnetip.MustParseIPv4Network(testCase.pair[0])
+			right := xnetip.MustParseIPv4Network(testCase.pair[1])
+			_, ok := left.MergeByLowestMaskBit(right)
+			require.False(t, ok)
+			merged, ok := left.Merge(right)
+			require.True(t, ok)
+			require.Equal(t, xnetip.MustParseIPv4Network(testCase.want), merged)
+		})
+	}
+}
+
+// verifies that the seven reference pairs, one per branch of the case
+// analysis, agree with the simple oracle.
+func Test_IPv4Network_MergeByLowestMaskBit_ReferenceFixedCases(t *testing.T) {
+	cases := [][2]string{
+		{"192.168.0.0/24", "192.168.1.0/24"},
+		{"10.0.0.0/255.255.0.255", "10.0.0.1/255.255.0.255"},
+		{"0.0.0.0/2", "128.0.0.0/2"},
+		{"192.168.1.0/24", "192.168.1.0/24"},
+		{"10.0.0.0/8", "10.1.0.0/16"},
+		{"10.0.0.0/8", "172.16.0.0/16"},
+		{"0.0.0.0/0", "0.0.0.0/0"},
+	}
+	for _, pair := range cases {
+		left := xnetip.MustParseIPv4Network(pair[0])
+		right := xnetip.MustParseIPv4Network(pair[1])
+		wantNetwork, wantOK := mergeByLowestMaskBitReferenceIPv4(t, left, right)
+		merged, ok := left.MergeByLowestMaskBit(right)
+		require.Equal(t, wantOK, ok, "pair %v", pair)
+		require.Equal(t, wantNetwork, merged, "pair %v", pair)
+	}
+}
+
+// verifies that the merge agrees with the simple oracle on random
+// pairs.
+func Test_IPv4Network_MergeByLowestMaskBit_MatchesReferenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		wantNetwork, wantOK := mergeByLowestMaskBitReferenceIPv4(t, left, right)
+		merged, ok := left.MergeByLowestMaskBit(right)
+		require.Equal(t, wantOK, ok)
+		require.Equal(t, wantNetwork, merged)
+	})
+}
+
+// verifies that the merge fires exactly on containment in either
+// direction or on a lowest-mask-bit sibling pair.
+func Test_IPv4Network_MergeByLowestMaskBit_OKIffPredicateProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		_, ok := left.MergeByLowestMaskBit(right)
+		want := left.Contains(right) || right.Contains(left) || left.IsAdjacentByLowestMaskBit(right)
+		require.Equal(t, want, ok)
+	})
+}
+
+// verifies that the merge is commutative in both the value and the
+// flag.
+func Test_IPv4Network_MergeByLowestMaskBit_CommutativityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		leftMerged, leftOK := left.MergeByLowestMaskBit(right)
+		rightMerged, rightOK := right.MergeByLowestMaskBit(left)
+		require.Equal(t, leftOK, rightOK)
+		require.Equal(t, leftMerged, rightMerged)
+	})
+}
+
+// verifies that the merge is a restriction of Merge: whenever it
+// fires it returns exactly the same network.
+func Test_IPv4Network_MergeByLowestMaskBit_AgreesWithMergeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		merged, ok := left.MergeByLowestMaskBit(right)
+		if !ok {
+			return
+		}
+		unrestricted, unrestrictedOK := left.Merge(right)
+		require.True(t, unrestrictedOK)
+		require.Equal(t, unrestricted, merged)
+	})
+}
+
+// verifies that constructed buddy pairs always merge, agree with
+// Merge, commute, contain both inputs and yield a normalized result.
+func Test_IPv4Network_MergeByLowestMaskBit_SiblingsMergeAndAgreeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		pair := genIPv4LowestBitSiblingPair.Draw(t, "pair")
+		merged, ok := pair[0].MergeByLowestMaskBit(pair[1])
+		require.True(t, ok)
+		unrestricted, unrestrictedOK := pair[0].Merge(pair[1])
+		require.True(t, unrestrictedOK)
+		require.Equal(t, unrestricted, merged)
+		reversed, reversedOK := pair[1].MergeByLowestMaskBit(pair[0])
+		require.True(t, reversedOK)
+		require.Equal(t, merged, reversed)
+		require.True(t, merged.Contains(pair[0]))
+		require.True(t, merged.Contains(pair[1]))
+		mergedAddr, mergedMask := ipv4NetworkBits(merged)
+		require.Equal(t, mergedAddr, mergedAddr&mergedMask)
+	})
+}
+
+// verifies the class closure: two contiguous buddies always merge
+// into a contiguous parent.
+func Test_IPv4Network_MergeByLowestMaskBit_ClosureContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		pair := genIPv4ContiguousSiblingPair.Draw(t, "pair")
+		require.True(t, pair[0].IsContiguous())
+		require.True(t, pair[1].IsContiguous())
+		merged, ok := pair[0].MergeByLowestMaskBit(pair[1])
+		require.True(t, ok)
+		require.True(t, merged.IsContiguous())
+	})
+}
+
+// verifies on an 8-bit model, networks confined to the top octet,
+// that a successful merge holds exactly the union of the two sets.
+func Test_IPv4Network_MergeByLowestMaskBit_MembershipBruteForceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		leftAddr := uint32(rapid.IntRange(0, 255).Draw(t, "left addr")) << 24
+		leftMask := uint32(rapid.IntRange(0, 255).Draw(t, "left mask")) << 24
+		rightAddr := uint32(rapid.IntRange(0, 255).Draw(t, "right addr")) << 24
+		rightMask := uint32(rapid.IntRange(0, 255).Draw(t, "right mask")) << 24
+		left, err := xnetip.IPv4NetworkFrom(netipAddrFrom4Bits(leftAddr), netipAddrFrom4Bits(leftMask))
+		require.NoError(t, err)
+		right, err := xnetip.IPv4NetworkFrom(netipAddrFrom4Bits(rightAddr), netipAddrFrom4Bits(rightMask))
+		require.NoError(t, err)
+		merged, ok := left.MergeByLowestMaskBit(right)
+		if !ok {
+			return
+		}
+		mergedAddr, mergedMask := ipv4NetworkBits(merged)
+		for x := range uint32(256) {
+			candidate := x << 24
+			inLeft := candidate&leftMask == leftAddr&leftMask
+			inRight := candidate&rightMask == rightAddr&rightMask
+			inMerged := candidate&mergedMask == mergedAddr
+			require.Equal(t, inLeft || inRight, inMerged, "member 0x%08x", candidate)
+		}
+	})
+}
+
+// verifies that the merge allocates nothing on the sibling and the
+// containment paths.
+func Test_IPv4Network_MergeByLowestMaskBit_AllocationFree(t *testing.T) {
+	sibling := xnetip.MustParseIPv4Network("192.168.0.0/24")
+	buddy := xnetip.MustParseIPv4Network("192.168.1.0/24")
+	container := xnetip.MustParseIPv4Network("10.0.0.0/8")
+	contained := xnetip.MustParseIPv4Network("10.1.0.0/16")
+	requireNoAllocs(t, func() { networkSink, okSink = sibling.MergeByLowestMaskBit(buddy) })
+	requireNoAllocs(t, func() { networkSink, okSink = container.MergeByLowestMaskBit(contained) })
+}
+
+func BenchmarkIPv4Network_MergeByLowestMaskBit_CIDRSiblings(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("192.168.0.0/24")
+	right := xnetip.MustParseIPv4Network("192.168.1.0/24")
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink, okSink = left.MergeByLowestMaskBit(right)
+	}
+}
+
+func BenchmarkIPv4Network_MergeByLowestMaskBit_AdjacentNonLowestBit(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("0.0.0.0/2")
+	right := xnetip.MustParseIPv4Network("128.0.0.0/2")
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink, okSink = left.MergeByLowestMaskBit(right)
+	}
+}
+
+func BenchmarkIPv4Network_MergeByLowestMaskBit_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255")
+	right := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink, okSink = left.MergeByLowestMaskBit(right)
+	}
+}
+
+func BenchmarkIPv4Network_MergeByLowestMaskBit_Containment(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("10.0.0.0/8")
+	right := xnetip.MustParseIPv4Network("10.1.0.0/16")
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink, okSink = left.MergeByLowestMaskBit(right)
+	}
+}
