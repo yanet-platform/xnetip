@@ -3354,3 +3354,120 @@ func Test_IPNetwork_Merge_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = four.Merge(fourBuddy) })
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = six.Merge(sixBuddy) })
 }
+
+// verifies that lowest-mask-bit adjacency works within a family and
+// never across families, the IPv4 default route included.
+//
+// Two IPv4 default routes are the pitfall of mapped storage: their
+// stored /96 masks are equal and non-empty, but their addresses are
+// equal too, so the 128-bit predicate still refuses them.
+func Test_IPNetwork_IsAdjacentByLowestMaskBit_FamiliesAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  bool
+	}{
+		{name: "IPv4 CIDR siblings", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: true},
+		{name: "IPv6 CIDR siblings", left: xnetip.MustParseIPNetwork("2001:db8::/48"), right: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: true},
+		{name: "mixed families", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
+		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv4 adjacent at the top bit", left: xnetip.MustParseIPNetwork("0.0.0.0/2"), right: xnetip.MustParseIPNetwork("128.0.0.0/2"), want: false},
+		{name: "IPv4 default route with itself", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.MustParseIPNetwork("0.0.0.0/0"), want: false},
+		{name: "IPv6 default route with itself", left: xnetip.MustParseIPNetwork("::/0"), right: xnetip.MustParseIPNetwork("::/0"), want: false},
+		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.IPNetwork{}, want: false},
+		{name: "mapped IPv6 siblings vs IPv4 siblings", left: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/120"), right: xnetip.MustParseIPNetwork("10.0.0.0/24"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacentByLowestMaskBit(testCase.right))
+		})
+	}
+}
+
+// verifies that non-contiguous lowest-bit adjacency of both families
+// flows through the wrapper.
+func Test_IPNetwork_IsAdjacentByLowestMaskBit_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  bool
+	}{
+		{name: "IPv4 two-run mask at its lowest bit", left: xnetip.MustParseIPNetwork("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255"), want: true},
+		{name: "IPv4 two-run mask at the higher boundary", left: xnetip.MustParseIPNetwork("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPNetwork("10.1.0.0/255.255.0.255"), want: false},
+		{name: "IPv6 two-run mask at its lowest bit", left: xnetip.MustParseIPNetwork("::/ffff:ffff::ffff"), right: xnetip.MustParseIPNetwork("::1/ffff:ffff::ffff"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacentByLowestMaskBit(testCase.right))
+		})
+	}
+}
+
+// verifies that the wrapped predicate equals the concrete answer in
+// each family, on random pairs and on constructed buddies.
+//
+// The buddy flips the lowest set mask bit of the address, so every
+// draw with a non-empty mask exercises the accepting case that
+// random pairs almost never hit.
+func Test_IPNetwork_IsAdjacentByLowestMaskBit_AgreesWithConcreteProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left4 := genIPv4Network.Draw(t, "left4")
+		right4 := genIPv4Network.Draw(t, "right4")
+		require.Equal(
+			t,
+			left4.IsAdjacentByLowestMaskBit(right4),
+			xnetip.IPNetworkFrom4(left4).IsAdjacentByLowestMaskBit(xnetip.IPNetworkFrom4(right4)),
+		)
+		addrBits, maskBits := ipv4NetworkBits(left4)
+		if maskBits != 0 {
+			buddy, err := xnetip.IPv4NetworkFrom(
+				netipAddrFrom4Bits(addrBits^(maskBits&-maskBits)),
+				netipAddrFrom4Bits(maskBits),
+			)
+			require.NoError(t, err)
+			require.True(t, left4.IsAdjacentByLowestMaskBit(buddy))
+			require.True(t, xnetip.IPNetworkFrom4(left4).IsAdjacentByLowestMaskBit(xnetip.IPNetworkFrom4(buddy)))
+		}
+		left6 := genIPv6Network.Draw(t, "left6")
+		right6 := genIPv6Network.Draw(t, "right6")
+		require.Equal(
+			t,
+			left6.IsAdjacentByLowestMaskBit(right6),
+			xnetip.IPNetworkFrom6(left6).IsAdjacentByLowestMaskBit(xnetip.IPNetworkFrom6(right6)),
+		)
+	})
+}
+
+// verifies that networks of different families never qualify,
+// whatever their masks.
+func Test_IPNetwork_IsAdjacentByLowestMaskBit_CrossFamilyAlwaysFalseProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
+		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		require.False(t, network4.IsAdjacentByLowestMaskBit(network6))
+		require.False(t, network6.IsAdjacentByLowestMaskBit(network4))
+	})
+}
+
+// verifies that the predicate is symmetric and irreflexive, whatever
+// the families of the operands.
+func Test_IPNetwork_IsAdjacentByLowestMaskBit_SymmetryProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPNetwork.Draw(t, "left")
+		right := genIPNetwork.Draw(t, "right")
+		require.Equal(t, left.IsAdjacentByLowestMaskBit(right), right.IsAdjacentByLowestMaskBit(left))
+		require.False(t, left.IsAdjacentByLowestMaskBit(left))
+	})
+}
+
+// verifies that the predicate allocates nothing in either family.
+func Test_IPNetwork_IsAdjacentByLowestMaskBit_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseIPNetwork("10.0.0.0/255.255.0.255")
+	fourBuddy := xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255")
+	six := xnetip.MustParseIPNetwork("::/ffff:ffff::ffff")
+	sixBuddy := xnetip.MustParseIPNetwork("::1/ffff:ffff::ffff")
+	requireNoAllocs(t, func() { okSink = four.IsAdjacentByLowestMaskBit(fourBuddy) })
+	requireNoAllocs(t, func() { okSink = six.IsAdjacentByLowestMaskBit(sixBuddy) })
+}

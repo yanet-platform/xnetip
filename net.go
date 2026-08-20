@@ -379,6 +379,24 @@ func (m IPNetwork) IsAdjacent(other IPNetwork) bool {
 	return m.is4 == other.is4 && m.network.IsAdjacent(other.network)
 }
 
+// IsAdjacentByLowestMaskBit reports whether the two networks share a
+// mask and differ in exactly the lowest set bit of that mask.
+//
+// Networks of different families are never adjacent. Within a family
+// the result equals the corresponding IPv4Network or IPv6Network
+// method.
+func (m IPNetwork) IsAdjacentByLowestMaskBit(other IPNetwork) bool {
+	// The family check must come first: without it an IPv4 network
+	// could count as adjacent to the IPv6 twin of its buddy.
+	//
+	// For two IPv4 networks the 128-bit check of the stored forms is
+	// exact: an equal non-zero IPv4 mask keeps its lowest set bit in
+	// the low 32 mapped bits, and the equal all-zero IPv4 mask maps
+	// to /96, whose isolated bit 32 can never equal the zero
+	// difference of the two equal stored addresses.
+	return m.is4 == other.is4 && m.network.IsAdjacentByLowestMaskBit(other.network)
+}
+
 // Merge returns the single network whose address set is the union of
 // the two inputs, and false when no such network exists.
 //
