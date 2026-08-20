@@ -652,6 +652,215 @@ func BenchmarkIPv4Network_SortFunc_1024(b *testing.B) {
 	}
 }
 
+// verifies that containment over contiguous masks follows the prefix
+// rules.
+//
+// The universe contains everything, a shorter prefix contains its
+// refinements and not the reverse, and a host route contains only
+// itself.
+func Test_IPv4Network_Contains_ContiguousAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		outer xnetip.IPv4Network
+		inner xnetip.IPv4Network
+		want  bool
+	}{
+		{name: "universe contains host route", outer: xnetip.MustParseIPv4Network("0.0.0.0/0"), inner: xnetip.MustParseIPv4Network("127.0.0.1"), want: true},
+		{name: "shorter prefix contains longer", outer: xnetip.MustParseIPv4Network("0.0.0.0/8"), inner: xnetip.MustParseIPv4Network("0.0.0.0/9"), want: true},
+		{name: "longer prefix does not contain shorter", outer: xnetip.MustParseIPv4Network("0.0.0.0/9"), inner: xnetip.MustParseIPv4Network("0.0.0.0/8"), want: false},
+		{name: "host route contains itself", outer: xnetip.MustParseIPv4Network("127.0.0.1"), inner: xnetip.MustParseIPv4Network("127.0.0.1"), want: true},
+		{name: "host route does not contain neighbour", outer: xnetip.MustParseIPv4Network("10.0.0.1/32"), inner: xnetip.MustParseIPv4Network("10.0.0.2/32"), want: false},
+		{name: "nested contiguous", outer: xnetip.MustParseIPv4Network("192.168.0.0/16"), inner: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: true},
+		{name: "nested contiguous reversed", outer: xnetip.MustParseIPv4Network("192.168.1.0/24"), inner: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
+		{name: "disjoint contiguous", outer: xnetip.MustParseIPv4Network("10.0.0.0/8"), inner: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
+		{name: "disjoint contiguous reversed", outer: xnetip.MustParseIPv4Network("192.168.0.0/16"), inner: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: false},
+		{name: "universe contains universe", outer: xnetip.MustParseIPv4Network("0.0.0.0/0"), inner: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: true},
+		{name: "all-ones host contains itself", outer: xnetip.MustParseIPv4Network("255.255.255.255/32"), inner: xnetip.MustParseIPv4Network("255.255.255.255/32"), want: true},
+		{name: "top /31 contains the all-ones host", outer: xnetip.MustParseIPv4Network("255.255.255.254/31"), inner: xnetip.MustParseIPv4Network("255.255.255.255/32"), want: true},
+		{name: "all-ones host does not contain its /31", outer: xnetip.MustParseIPv4Network("255.255.255.255/32"), inner: xnetip.MustParseIPv4Network("255.255.255.254/31"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.outer.Contains(testCase.inner))
+		})
+	}
+}
+
+// verifies that containment over non-contiguous masks needs both the
+// pattern match and the mask-subset relation.
+//
+// The subset relation is bitwise, so a numerically smaller mask is
+// not thereby a subset and the shortcut valid for contiguous masks
+// must not leak in.
+func Test_IPv4Network_Contains_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		outer xnetip.IPv4Network
+		inner xnetip.IPv4Network
+		want  bool
+	}{
+		{name: "pattern 10.*.0.* contains matching host", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseIPv4Network("10.42.0.99/32"), want: true},
+		{name: "pattern mismatch on a constrained octet", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseIPv4Network("10.42.1.99/32"), want: false},
+		{name: "pattern contains narrower pattern", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.0"), inner: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), want: true},
+		{name: "narrower pattern does not contain wider", outer: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), inner: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.0"), want: false},
+		{name: "mask subset fails on disjoint mask bits", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), want: false},
+		{name: "mask subset fails on disjoint mask bits reversed", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), inner: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), want: false},
+		{name: "hole in the middle octets contains refinement", outer: xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255"), inner: xnetip.MustParseIPv4Network("10.5.9.0/255.255.0.255"), want: true},
+		{name: "alternating mask contains its host refinement", outer: xnetip.MustParseIPv4Network("170.85.170.85/170.85.170.85"), inner: xnetip.MustParseIPv4Network("170.85.170.85/32"), want: true},
+		{name: "host does not contain the alternating pattern", outer: xnetip.MustParseIPv4Network("170.85.170.85/32"), inner: xnetip.MustParseIPv4Network("170.85.170.85/170.85.170.85"), want: false},
+		{name: "complementary alternating patterns", outer: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), inner: xnetip.MustParseIPv4Network("0.170.0.170/85.170.85.170"), want: false},
+		{name: "complementary alternating patterns reversed", outer: xnetip.MustParseIPv4Network("0.170.0.170/85.170.85.170"), inner: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), want: false},
+		{name: "numerically smaller mask is not a subset", outer: xnetip.MustParseIPv4Network("0.0.0.0/0.0.255.255"), inner: xnetip.MustParseIPv4Network("0.0.0.0/0.255.0.0"), want: false},
+		{name: "numerically larger mask is not a subset either", outer: xnetip.MustParseIPv4Network("0.0.0.0/0.255.0.0"), inner: xnetip.MustParseIPv4Network("0.0.0.0/0.0.255.255"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.outer.Contains(testCase.inner))
+		})
+	}
+}
+
+// verifies that every network contains itself, whatever the mask shape.
+func Test_IPv4Network_Contains_ReflexiveProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		require.True(t, network.Contains(network))
+	})
+}
+
+// verifies that mutual containment holds exactly for equal networks.
+func Test_IPv4Network_Contains_AntisymmetryProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		mutual := left.Contains(right) && right.Contains(left)
+		require.Equal(t, left == right, mutual)
+	})
+}
+
+// verifies that containment is transitive on random triples.
+func Test_IPv4Network_Contains_TransitivityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := genIPv4Network.Draw(t, "first")
+		second := genIPv4Network.Draw(t, "second")
+		third := genIPv4Network.Draw(t, "third")
+		if first.Contains(second) && second.Contains(third) {
+			require.True(t, first.Contains(third))
+		}
+	})
+}
+
+// verifies that the universe contains every network and is contained
+// only in itself.
+func Test_IPv4Network_Contains_UniverseProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		require.True(t, xnetip.IPv4Network{}.Contains(network))
+		require.Equal(t, network == xnetip.IPv4Network{}, network.Contains(xnetip.IPv4Network{}))
+	})
+}
+
+// verifies that containment equals set inclusion on networks confined
+// to the top octet.
+//
+// Both masks live in the top eight bits, so enumerating the 256
+// patterns there is exhaustive: the outer network contains the inner
+// one exactly when every member of the inner is a member of the outer.
+func Test_IPv4Network_Contains_BruteForceMembershipProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outerAddr := uint32(rapid.IntRange(0, 255).Draw(t, "outer addr"))
+		outerMask := uint32(rapid.IntRange(0, 255).Draw(t, "outer mask"))
+		innerAddr := uint32(rapid.IntRange(0, 255).Draw(t, "inner addr"))
+		innerMask := uint32(rapid.IntRange(0, 255).Draw(t, "inner mask"))
+		outer, err := xnetip.IPv4NetworkFrom(
+			netipAddrFrom4Bits(outerAddr<<24),
+			netipAddrFrom4Bits(outerMask<<24),
+		)
+		require.NoError(t, err)
+		inner, err := xnetip.IPv4NetworkFrom(
+			netipAddrFrom4Bits(innerAddr<<24),
+			netipAddrFrom4Bits(innerMask<<24),
+		)
+		require.NoError(t, err)
+		want := true
+		for x := uint32(0); x <= 255; x++ {
+			memberOfInner := x&innerMask == innerAddr&innerMask
+			memberOfOuter := x&outerMask == outerAddr&outerMask
+			if memberOfInner && !memberOfOuter {
+				want = false
+				break
+			}
+		}
+		require.Equal(t, want, outer.Contains(inner))
+	})
+}
+
+// verifies that on contiguous networks containment agrees with the
+// net/netip rule.
+//
+// The oracle is the prefix pair: the outer prefix covers the inner
+// address and its length does not exceed the inner one.
+func Test_IPv4Network_Contains_MatchesNetipPrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outerPrefix := genIPv4Prefix.Draw(t, "outer").Masked()
+		innerPrefix := genIPv4Prefix.Draw(t, "inner").Masked()
+		outer, ok := xnetip.IPv4NetworkFromPrefix(outerPrefix)
+		require.True(t, ok)
+		inner, ok := xnetip.IPv4NetworkFromPrefix(innerPrefix)
+		require.True(t, ok)
+		want := outerPrefix.Contains(innerPrefix.Addr()) && outerPrefix.Bits() <= innerPrefix.Bits()
+		require.Equal(t, want, outer.Contains(inner))
+	})
+}
+
+// verifies that containing a host route agrees with the net/netip
+// address containment of the same prefix.
+func Test_IPv4Network_Contains_HostRouteMatchesNetipProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outerPrefix := genIPv4Prefix.Draw(t, "outer").Masked()
+		outer, ok := xnetip.IPv4NetworkFromPrefix(outerPrefix)
+		require.True(t, ok)
+		address := genNetipAddr4.Draw(t, "address")
+		host, err := xnetip.IPv4NetworkFromAddr(address)
+		require.NoError(t, err)
+		require.Equal(t, outerPrefix.Contains(address), outer.Contains(host))
+	})
+}
+
+// verifies that the containment check allocates nothing.
+func Test_IPv4Network_Contains_AllocationFree(t *testing.T) {
+	outer := xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255")
+	inner := xnetip.MustParseIPv4Network("10.5.9.0/255.255.0.255")
+	requireNoAllocs(t, func() { okSink = outer.Contains(inner) })
+}
+
+func BenchmarkIPv4Network_Contains_ContiguousTrue(b *testing.B) {
+	outer := xnetip.MustParseIPv4Network("10.0.0.0/8")
+	inner := xnetip.MustParseIPv4Network("10.1.0.0/16")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
+func BenchmarkIPv4Network_Contains_ContiguousFalse(b *testing.B) {
+	outer := xnetip.MustParseIPv4Network("10.0.0.0/8")
+	inner := xnetip.MustParseIPv4Network("192.168.0.0/16")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
+func BenchmarkIPv4Network_Contains_NonContiguous(b *testing.B) {
+	outer := xnetip.MustParseIPv4Network("10.0.0.0/255.0.0.255")
+	inner := xnetip.MustParseIPv4Network("10.5.9.0/255.255.0.255")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
 // verifies that exactly the masks made of leading ones followed by
 // zeros are contiguous, the all-zero and all-ones masks included.
 func Test_IPv4Network_IsContiguous_LeadingOnesRunOnly(t *testing.T) {
