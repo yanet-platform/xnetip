@@ -4914,3 +4914,182 @@ func BenchmarkNetwork4_SupernetFor_1024xNonContiguous(b *testing.B) {
 		networkSink = nets[0].SupernetFor(nets[1:])
 	}
 }
+
+// verifies that the mask is truncated at its first zero bit and the
+// address re-normalized under the leading run.
+func Test_Network4_ToContiguous_TruncatesAtFirstZeroBit(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "two-run mask", input: "192.168.0.1/255.255.0.255", want: "192.168.0.0/16"},
+		{name: "already contiguous", input: "10.0.0.0/8", want: "10.0.0.0/8"},
+		{name: "universe", input: "0.0.0.0/0", want: "0.0.0.0/0"},
+		{name: "host route", input: "10.0.0.1/32", want: "10.0.0.1/32"},
+		{name: "mask with empty leading run", input: "0.0.0.1/0.0.0.255", want: "0.0.0.0/0"},
+		{name: "trailing zero is not a hole", input: "10.0.0.0/255.255.255.254", want: "10.0.0.0/31"},
+		{name: "hole at the half boundary", input: "10.1.2.3/255.254.255.255", want: "10.0.0.0/15"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseNetwork4(testCase.input)
+			require.Equal(t, xnetip.MustParseContiguous4(testCase.want), network.ToContiguous())
+		})
+	}
+}
+
+// verifies that the zero network truncates to the zero wrapper.
+func Test_Network4_ToContiguous_ZeroValue(t *testing.T) {
+	require.Equal(t, xnetip.Contiguous[xnetip.Network4]{}, xnetip.Network4{}.ToContiguous())
+}
+
+// verifies that widening the supernet fixtures keeps the leading run
+// and drops every one bit after the first hole.
+func Test_Network4_ToContiguous_SupernetFixtures(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "hole in the third octet", input: "10.40.100.1/255.255.252.255", want: "10.40.100.0/22"},
+		{name: "hole in the first octet", input: "10.40.100.1/254.255.252.255", want: "10.0.0.0/7"},
+		{name: "zero third octet ends the run", input: "192.168.0.0/255.255.16.0", want: "192.168.0.0/16"},
+		{name: "empty leading run widens to the universe", input: "0.0.0.0/62.255.255.0", want: "0.0.0.0/0"},
+		{name: "sparse low mask bits", input: "10.40.0.0/254.255.0.252", want: "10.0.0.0/7"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseNetwork4(testCase.input)
+			require.Equal(t, xnetip.MustParseContiguous4(testCase.want), network.ToContiguous())
+		})
+	}
+}
+
+// verifies that a non-contiguous mask keeps only its leading run of
+// ones.
+func Test_Network4_ToContiguous_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "alternating mask keeps one bit", input: "170.85.170.85/170.85.170.85", want: "128.0.0.0/1"},
+		{name: "inverse alternating mask keeps nothing", input: "85.170.85.170/85.170.85.170", want: "0.0.0.0/0"},
+		{name: "geo-style mask keeps the first octet", input: "10.0.1.0/255.0.255.0", want: "10.0.0.0/8"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseNetwork4(testCase.input)
+			require.Equal(t, xnetip.MustParseContiguous4(testCase.want), network.ToContiguous())
+		})
+	}
+}
+
+// verifies that the wrapped result of every truncation satisfies the
+// contiguity its type claims, pinning the blind wrap.
+func Test_Network4_ToContiguous_ResultContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		require.True(t, network.ToContiguous().Network().IsContiguous())
+	})
+}
+
+// verifies that truncating an already truncated network changes
+// nothing.
+func Test_Network4_ToContiguous_IdempotentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		block := network.ToContiguous()
+		require.Equal(t, block, block.Network().ToContiguous())
+	})
+}
+
+// verifies that the result's prefix length equals the number of
+// leading one bits of the input mask.
+func Test_Network4_ToContiguous_PrefixIsLeadingOnesProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		prefixLen, ok := network.ToContiguous().Network().PrefixLen()
+		require.True(t, ok)
+		count := 0
+	counting:
+		for _, octet := range network.Mask().As4() {
+			for bit := 7; bit >= 0; bit-- {
+				if octet&(1<<bit) == 0 {
+					break counting
+				}
+				count++
+			}
+		}
+		require.Equal(t, count, prefixLen)
+	})
+}
+
+// verifies that the block always contains the network it widened.
+func Test_Network4_ToContiguous_ContainsOriginalProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		require.True(t, network.ToContiguous().Network().Contains(network))
+	})
+}
+
+// verifies that on contiguous input the widening conversion equals
+// the exact one and changes nothing.
+func Test_Network4_ToContiguous_AgreesWithContiguousFromProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := genContiguous4.Draw(t, "block")
+		require.Equal(t, block, block.Network().ToContiguous())
+		exact, ok := xnetip.ContiguousFrom(block.Network())
+		require.True(t, ok)
+		require.Equal(t, exact, block.Network().ToContiguous())
+	})
+}
+
+// verifies that the truncated network holds no address bit outside
+// its mask.
+func Test_Network4_ToContiguous_ResultNormalizedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		addr, mask := ipv4NetworkBits(network.ToContiguous().Network())
+		require.Equal(t, addr&mask, addr)
+	})
+}
+
+// verifies that the result agrees with the std masked prefix of the
+// input address under the truncated length.
+func Test_Network4_ToContiguous_MatchesNetipMaskedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		block := network.ToContiguous()
+		prefixLen, ok := block.Network().PrefixLen()
+		require.True(t, ok)
+		prefix, ok := block.Network().Prefix()
+		require.True(t, ok)
+		require.Equal(t, netip.PrefixFrom(network.Addr(), prefixLen).Masked(), prefix)
+	})
+}
+
+// verifies that truncation allocates nothing for either mask shape.
+func Test_Network4_ToContiguous_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseNetwork4("192.168.0.0/16")
+	nonContiguous := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
+	requireNoAllocs(t, func() { contiguous4Sink = contiguous.ToContiguous() })
+	requireNoAllocs(t, func() { contiguous4Sink = nonContiguous.ToContiguous() })
+}
+
+func BenchmarkNetwork4_ToContiguous_Contiguous(b *testing.B) {
+	network := xnetip.MustParseNetwork4("192.168.0.0/16")
+	b.ReportAllocs()
+	for b.Loop() {
+		contiguous4Sink = network.ToContiguous()
+	}
+}
+
+func BenchmarkNetwork4_ToContiguous_NonContiguous(b *testing.B) {
+	network := xnetip.MustParseNetwork4("192.168.0.1/255.255.0.255")
+	b.ReportAllocs()
+	for b.Loop() {
+		contiguous4Sink = network.ToContiguous()
+	}
+}
