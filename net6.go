@@ -3,6 +3,7 @@ package xnetip
 import (
 	"net/netip"
 	"strconv"
+	"strings"
 )
 
 // IPv6Network is an IPv6 network: an address and a mask of arbitrary
@@ -94,6 +95,89 @@ func IPv6NetworkFromAddr(addr netip.Addr) (IPv6Network, error) {
 // Pairing an address with it keeps every address bit, so a host route
 // is normalized by construction.
 var ipv6AllBits = ipv6AddrFromBits(^uint64(0), ^uint64(0))
+
+// ParseIPv6Network parses an IPv6 network in CIDR, explicit-mask or
+// bare address notation.
+//
+// Accepted forms are "2001:db8::/32", "2001:db8::/ffff:ffff::" (the
+// mask may be non-contiguous) and "2001:db8::1" (a host route,
+// "/128"). IPv4-mapped addresses such as "::ffff:192.0.2.1" are IPv6
+// here. The address is normalized under the mask. The prefix length
+// after "/" is decimal digits with no sign and no leading zero, at
+// most 128. A zone suffix ("%eth0") anywhere is an error. Errors wrap
+// ErrZone, ErrAddrFamilyMismatch (an IPv4 literal), ErrCIDROverflow,
+// ErrInvalidMask or ErrParse together with the net/netip cause.
+func ParseIPv6Network(s string) (IPv6Network, error) {
+	addrText, suffix, hasSuffix := strings.Cut(s, "/")
+	addr, err := netip.ParseAddr(addrText)
+	if err != nil {
+		return IPv6Network{}, wrapParseError("ParseIPv6Network", s, ErrParse, err)
+	}
+	return parseIPv6NetworkParts("ParseIPv6Network", s, addr, suffix, hasSuffix)
+}
+
+// parseIPv6NetworkParts finishes a network parse whose address part
+// is already parsed.
+//
+// Errors carry the given parser name and echo the full input. The
+// suffix is read as a strict prefix length first and as a colon-form
+// mask second, so a digits-only suffix past the limit is an overflow,
+// never a mask attempt. A missing suffix is a host route.
+func parseIPv6NetworkParts(function, input string, addr netip.Addr, suffix string, hasSuffix bool) (IPv6Network, error) {
+	addrKernel, kernelErr := ipv6ParsedKernel(addr)
+	if kernelErr != nil {
+		return IPv6Network{}, wrapParseError(function, input, kernelErr, nil)
+	}
+	if !hasSuffix {
+		return IPv6Network{addr: addrKernel, mask: ipv6AllBits}, nil
+	}
+	bits, isPrefixForm, ok := parsePrefixLenText(suffix, 128)
+	switch {
+	case ok:
+		return fromBits6(addrKernel, ipv6Addr{uint128MaskFromPrefix(bits)}), nil
+	case isPrefixForm:
+		return IPv6Network{}, wrapParseError(function, input, ErrCIDROverflow, nil)
+	}
+	mask, err := netip.ParseAddr(suffix)
+	if err != nil {
+		return IPv6Network{}, wrapParseError(function, input, ErrInvalidMask, err)
+	}
+	maskKernel, kernelErr := ipv6ParsedKernel(mask)
+	if kernelErr != nil {
+		return IPv6Network{}, wrapParseError(function, input, ErrInvalidMask, kernelErr)
+	}
+	return fromBits6(addrKernel, maskKernel), nil
+}
+
+// ipv6ParsedKernel converts parsed network text to the IPv6 kernel,
+// rejecting what the parsers must not accept.
+//
+// Unlike the checked constructors, which drop a zone silently, parse
+// input carrying a zone is an error: the result is the bare ErrZone or
+// ErrAddrFamilyMismatch sentinel for the caller to wrap under its own
+// position, address or mask.
+func ipv6ParsedKernel(addr netip.Addr) (ipv6Addr, error) {
+	if addr.Zone() != "" {
+		return ipv6Addr{}, ErrZone
+	}
+	kernel, ok := ipv6AddrFromNetip(addr)
+	if !ok {
+		return ipv6Addr{}, ErrAddrFamilyMismatch
+	}
+	return kernel, nil
+}
+
+// MustParseIPv6Network calls ParseIPv6Network and panics on error.
+//
+// It is intended for tests and package-level constants built from
+// literals.
+func MustParseIPv6Network(s string) IPv6Network {
+	network, err := ParseIPv6Network(s)
+	if err != nil {
+		panic(err)
+	}
+	return network
+}
 
 // Addr returns the network address (already normalized by the mask) as
 // an Is6 netip.Addr.
