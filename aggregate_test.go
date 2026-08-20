@@ -797,3 +797,496 @@ func BenchmarkAggregate6_CopyOnly1024(b *testing.B) {
 		intSink = len(networks)
 	}
 }
+
+// verifies that the typed aggregation collapses the reference table
+// into the minimal sorted CIDR cover, element by element and in place.
+func Test_AggregateContiguous_IPv4UnitAndBoundary(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{name: "empty slice", input: []string{}, expected: []string{}},
+		{name: "single block", input: []string{"10.0.0.0/8"}, expected: []string{"10.0.0.0/8"}},
+		{name: "duplicates", input: []string{"10.0.0.0/8", "10.0.0.0/8", "10.0.0.0/8"}, expected: []string{"10.0.0.0/8"}},
+		{name: "containment", input: []string{"10.0.0.0/8", "10.1.0.0/16", "10.1.1.0/24"}, expected: []string{"10.0.0.0/8"}},
+		{name: "single buddy merge", input: []string{"192.168.0.0/24", "192.168.1.0/24"}, expected: []string{"192.168.0.0/23"}},
+		{name: "multi-level cascade", input: []string{"192.168.0.0/24", "192.168.1.0/24", "192.168.2.0/24", "192.168.3.0/24"}, expected: []string{"192.168.0.0/22"}},
+		{name: "non-adjacent blocks survive", input: []string{"192.168.0.0/24", "192.168.3.0/24"}, expected: []string{"192.168.0.0/24", "192.168.3.0/24"}},
+		{name: "non-buddy neighbours the general merge would fuse", input: []string{"10.0.0.0/24", "10.0.2.0/24"}, expected: []string{"10.0.0.0/24", "10.0.2.0/24"}},
+		{name: "already minimal keeps the sorted order", input: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}, expected: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}},
+		{name: "doc example", input: []string{"192.168.0.0/24", "192.168.1.0/24", "10.0.0.0/8", "10.1.0.0/16"}, expected: []string{"10.0.0.0/8", "192.168.0.0/23"}},
+		{name: "mixed containment and merge", input: []string{"10.0.0.0/8", "10.1.0.0/16", "192.168.0.0/24", "192.168.1.0/24"}, expected: []string{"10.0.0.0/8", "192.168.0.0/23"}},
+		{name: "default route absorbs everything", input: []string{"10.0.0.0/8", "0.0.0.0/0", "192.168.1.0/24"}, expected: []string{"0.0.0.0/0"}},
+		{name: "host route buddies merge", input: []string{"10.0.0.0/32", "10.0.0.1/32"}, expected: []string{"10.0.0.0/31"}},
+		{name: "non-adjacent host routes survive", input: []string{"10.0.0.0/32", "10.0.0.2/32"}, expected: []string{"10.0.0.0/32", "10.0.0.2/32"}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			nets := contiguous4FromStrings(testCase.input)
+			result := xnetip.AggregateContiguous(nets)
+			require.Equal(t, contiguous4FromStrings(testCase.expected), result)
+			if len(result) > 0 {
+				require.Same(t, &nets[0], &result[0])
+			}
+		})
+	}
+}
+
+// verifies that the typed aggregation collapses the reference table
+// into the minimal sorted CIDR cover, element by element and in place.
+func Test_AggregateContiguous_IPv6UnitAndBoundary(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{name: "empty slice", input: []string{}, expected: []string{}},
+		{name: "single block", input: []string{"2001:db8::/32"}, expected: []string{"2001:db8::/32"}},
+		{name: "duplicates", input: []string{"2001:db8::/32", "2001:db8::/32", "2001:db8::/32"}, expected: []string{"2001:db8::/32"}},
+		{name: "containment", input: []string{"2001:db8::/32", "2001:db8::/48", "2001:db8:0:1::/64"}, expected: []string{"2001:db8::/32"}},
+		{name: "single buddy merge", input: []string{"2001:db8::/48", "2001:db8:1::/48"}, expected: []string{"2001:db8::/47"}},
+		{name: "multi-level cascade", input: []string{"2001:db8:0:0::/64", "2001:db8:0:1::/64", "2001:db8:0:2::/64", "2001:db8:0:3::/64"}, expected: []string{"2001:db8::/62"}},
+		{name: "cascade across bit 64", input: []string{"2001:db8::/66", "2001:db8:0:0:4000::/66", "2001:db8:0:0:8000::/66", "2001:db8:0:0:c000::/66"}, expected: []string{"2001:db8::/64"}},
+		{name: "non-adjacent blocks survive", input: []string{"2001:db8:0:0::/64", "2001:db8:0:3::/64"}, expected: []string{"2001:db8:0:0::/64", "2001:db8:0:3::/64"}},
+		{name: "non-buddy neighbours the general merge would fuse", input: []string{"2001:db8:0:0::/64", "2001:db8:0:2::/64"}, expected: []string{"2001:db8:0:0::/64", "2001:db8:0:2::/64"}},
+		{name: "already minimal keeps the sorted order", input: []string{"2001:db8::/32", "2001:dba::/32", "fe80::/10"}, expected: []string{"2001:db8::/32", "2001:dba::/32", "fe80::/10"}},
+		{name: "mixed containment and merge", input: []string{"fe80::/10", "fe80::/64", "2001:db8::/48", "2001:db8:1::/48"}, expected: []string{"2001:db8::/47", "fe80::/10"}},
+		{name: "default route absorbs everything", input: []string{"2001:db8::/32", "::/0", "fe80::/10"}, expected: []string{"::/0"}},
+		{name: "host route buddies merge", input: []string{"2001:db8::/128", "2001:db8::1/128"}, expected: []string{"2001:db8::/127"}},
+		{name: "non-adjacent host routes survive", input: []string{"2001:db8::/128", "2001:db8::2/128"}, expected: []string{"2001:db8::/128", "2001:db8::2/128"}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			nets := contiguous6FromStrings(testCase.input)
+			result := xnetip.AggregateContiguous(nets)
+			require.Equal(t, contiguous6FromStrings(testCase.expected), result)
+			if len(result) > 0 {
+				require.Same(t, &nets[0], &result[0])
+			}
+		})
+	}
+}
+
+// verifies the family-agnostic instantiation: IPv4 sorts first and
+// blocks merge or absorb only within their own family.
+//
+// The IPv6 universe must leave IPv4 blocks alone even though the
+// mapped storage form sits inside it as a 128-bit set.
+func Test_AggregateContiguous_DualFamilySpotChecks(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{name: "buddies merge within each family", input: []string{"2001:db8::/48", "10.0.0.0/24", "10.0.1.0/24", "2001:db8:1::/48"}, expected: []string{"10.0.0.0/23", "2001:db8::/47"}},
+		{name: "IPv4 default route absorbs only IPv4", input: []string{"2001:db8::/48", "0.0.0.0/0", "10.0.0.0/24"}, expected: []string{"0.0.0.0/0", "2001:db8::/48"}},
+		{name: "IPv6 universe does not absorb IPv4", input: []string{"::/0", "10.0.0.0/24"}, expected: []string{"10.0.0.0/24", "::/0"}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			nets := make([]xnetip.Contiguous[xnetip.Network], len(testCase.input))
+			for idx, text := range testCase.input {
+				nets[idx] = xnetip.MustParseContiguous(text)
+			}
+			expected := make([]xnetip.Contiguous[xnetip.Network], len(testCase.expected))
+			for idx, text := range testCase.expected {
+				expected[idx] = xnetip.MustParseContiguous(text)
+			}
+			require.Equal(t, expected, xnetip.AggregateContiguous(nets))
+		})
+	}
+}
+
+// verifies that the address union of the minimal cover equals the
+// address union of the clustered input.
+func Test_AggregateContiguous_IPv4PreservesAddressesProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		nets := genClusteredContiguous4.Draw(t, "nets")
+		before := ipv4Union(contiguous4Unwrapped(nets))
+		result := xnetip.AggregateContiguous(nets)
+		require.Equal(t, before, ipv4Union(contiguous4Unwrapped(result)))
+	})
+}
+
+// verifies minimality: no two blocks of the cover are equal, none
+// contains another and no pair merges at the prefix boundary bit.
+func Test_AggregateContiguous_IPv4MinimalProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		result := xnetip.AggregateContiguous(genClusteredContiguous4.Draw(t, "nets"))
+		for left := range result {
+			for right := left + 1; right < len(result); right++ {
+				require.NotEqual(t, result[left], result[right])
+				_, ok := result[left].MergeByLowestMaskBit(result[right])
+				require.False(t, ok)
+				require.False(t, result[left].Contains(result[right]))
+				require.False(t, result[right].Contains(result[left]))
+			}
+		}
+	})
+}
+
+// verifies the cover's shape after the blind rewrap.
+//
+// Every block must stay contiguous under the general mask check, the
+// sequence ascend strictly by Compare and the blocks be pairwise
+// disjoint.
+func Test_AggregateContiguous_IPv4StaysContiguousSortedDisjointProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		result := xnetip.AggregateContiguous(genClusteredContiguous4.Draw(t, "nets"))
+		for idx, block := range result {
+			require.True(t, block.Network().IsContiguous())
+			if idx > 0 {
+				require.Negative(t, result[idx-1].Compare(block))
+			}
+		}
+		for left := range result {
+			for right := left + 1; right < len(result); right++ {
+				_, ok := result[left].Intersection(result[right])
+				require.False(t, ok)
+			}
+		}
+	})
+}
+
+// verifies that the fast top-only cascade matches the naive fixpoint
+// oracle that retries every pair until nothing merges.
+func Test_AggregateContiguous_IPv4MatchesReferenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		nets := genClusteredContiguous4.Draw(t, "nets")
+		expected := aggregateContiguous4Reference(nets)
+		result := xnetip.AggregateContiguous(nets)
+		require.Equal(t, expected, contiguous4Unwrapped(result))
+	})
+}
+
+// verifies that aggregating the minimal cover again returns it
+// unchanged, order included.
+func Test_AggregateContiguous_IPv4IdempotentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := xnetip.AggregateContiguous(genClusteredContiguous4.Draw(t, "nets"))
+		require.Equal(t, first, xnetip.AggregateContiguous(slices.Clone(first)))
+	})
+}
+
+// verifies that the address union of the minimal cover equals the
+// address union of the clustered input.
+func Test_AggregateContiguous_IPv6PreservesAddressesProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		nets := genClusteredContiguous6.Draw(t, "nets")
+		before := ipv6Union(contiguous6Unwrapped(nets))
+		result := xnetip.AggregateContiguous(nets)
+		require.Equal(t, before, ipv6Union(contiguous6Unwrapped(result)))
+	})
+}
+
+// verifies minimality: no two blocks of the cover are equal, none
+// contains another and no pair merges at the prefix boundary bit.
+func Test_AggregateContiguous_IPv6MinimalProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		result := xnetip.AggregateContiguous(genClusteredContiguous6.Draw(t, "nets"))
+		for left := range result {
+			for right := left + 1; right < len(result); right++ {
+				require.NotEqual(t, result[left], result[right])
+				_, ok := result[left].MergeByLowestMaskBit(result[right])
+				require.False(t, ok)
+				require.False(t, result[left].Contains(result[right]))
+				require.False(t, result[right].Contains(result[left]))
+			}
+		}
+	})
+}
+
+// verifies the cover's shape after the blind rewrap.
+//
+// Every block must stay contiguous under the general mask check, the
+// sequence ascend strictly by Compare and the blocks be pairwise
+// disjoint.
+func Test_AggregateContiguous_IPv6StaysContiguousSortedDisjointProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		result := xnetip.AggregateContiguous(genClusteredContiguous6.Draw(t, "nets"))
+		for idx, block := range result {
+			require.True(t, block.Network().IsContiguous())
+			if idx > 0 {
+				require.Negative(t, result[idx-1].Compare(block))
+			}
+		}
+		for left := range result {
+			for right := left + 1; right < len(result); right++ {
+				_, ok := result[left].Intersection(result[right])
+				require.False(t, ok)
+			}
+		}
+	})
+}
+
+// verifies that the fast top-only cascade matches the naive fixpoint
+// oracle that retries every pair until nothing merges.
+func Test_AggregateContiguous_IPv6MatchesReferenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		nets := genClusteredContiguous6.Draw(t, "nets")
+		expected := aggregateContiguous6Reference(nets)
+		result := xnetip.AggregateContiguous(nets)
+		require.Equal(t, expected, contiguous6Unwrapped(result))
+	})
+}
+
+// verifies that aggregating the minimal cover again returns it
+// unchanged, order included.
+func Test_AggregateContiguous_IPv6IdempotentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := xnetip.AggregateContiguous(genClusteredContiguous6.Draw(t, "nets"))
+		require.Equal(t, first, xnetip.AggregateContiguous(slices.Clone(first)))
+	})
+}
+
+// verifies that a range decomposition is already a minimal cover:
+// aggregating it returns it unchanged, order included.
+func Test_AggregateContiguous_RangeCoverIsFixedPointProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := genNetipAddr4.Draw(t, "first")
+		last := genNetipAddr4.Draw(t, "last")
+		if first.Compare(last) > 0 {
+			first, last = last, first
+		}
+		cover := []xnetip.Contiguous[xnetip.Network4]{}
+		for block := range xnetip.RangeToNetworks4(first, last) {
+			cover = append(cover, block)
+		}
+		require.Equal(t, cover, xnetip.AggregateContiguous(slices.Clone(cover)))
+
+		first6 := genNetipAddr6.Draw(t, "first6")
+		last6 := genNetipAddr6.Draw(t, "last6")
+		if first6.Compare(last6) > 0 {
+			first6, last6 = last6, first6
+		}
+		cover6 := []xnetip.Contiguous[xnetip.Network6]{}
+		for block := range xnetip.RangeToNetworks6(first6, last6) {
+			cover6 = append(cover6, block)
+		}
+		require.Equal(t, cover6, xnetip.AggregateContiguous(slices.Clone(cover6)))
+	})
+}
+
+// verifies that the typed aggregation allocates nothing on pre-built
+// slices of either family.
+func Test_AggregateContiguous_AllocationFree(t *testing.T) {
+	template4 := aggregateContiguous4Clustered(t)
+	template6 := aggregateContiguous6Clustered(t)
+	working4 := make([]xnetip.Contiguous[xnetip.Network4], len(template4))
+	working6 := make([]xnetip.Contiguous[xnetip.Network6], len(template6))
+	requireNoAllocs(t, func() {
+		copy(working4, template4)
+		intSink = len(xnetip.AggregateContiguous(working4))
+	})
+	requireNoAllocs(t, func() {
+		copy(working6, template6)
+		intSink = len(xnetip.AggregateContiguous(working6))
+	})
+}
+
+// contiguous4FromStrings parses each element with the panicking
+// parser, returning a non-nil slice so empty fixtures compare equal.
+func contiguous4FromStrings(texts []string) []xnetip.Contiguous[xnetip.Network4] {
+	nets := make([]xnetip.Contiguous[xnetip.Network4], len(texts))
+	for idx, text := range texts {
+		nets[idx] = xnetip.MustParseContiguous4(text)
+	}
+	return nets
+}
+
+// contiguous6FromStrings parses each element with the panicking
+// parser, returning a non-nil slice so empty fixtures compare equal.
+func contiguous6FromStrings(texts []string) []xnetip.Contiguous[xnetip.Network6] {
+	nets := make([]xnetip.Contiguous[xnetip.Network6], len(texts))
+	for idx, text := range texts {
+		nets[idx] = xnetip.MustParseContiguous6(text)
+	}
+	return nets
+}
+
+// contiguous4Unwrapped returns the wrapped networks of the blocks.
+func contiguous4Unwrapped(nets []xnetip.Contiguous[xnetip.Network4]) []xnetip.Network4 {
+	unwrapped := make([]xnetip.Network4, len(nets))
+	for idx, block := range nets {
+		unwrapped[idx] = block.Network()
+	}
+	return unwrapped
+}
+
+// contiguous6Unwrapped returns the wrapped networks of the blocks.
+func contiguous6Unwrapped(nets []xnetip.Contiguous[xnetip.Network6]) []xnetip.Network6 {
+	unwrapped := make([]xnetip.Network6, len(nets))
+	for idx, block := range nets {
+		unwrapped[idx] = block.Network()
+	}
+	return unwrapped
+}
+
+// aggregateContiguous4Reference is the naive fixpoint oracle.
+//
+// It absorbs containment and merges buddies pair by pair until
+// nothing changes, then sorts the survivors.
+func aggregateContiguous4Reference(input []xnetip.Contiguous[xnetip.Network4]) []xnetip.Network4 {
+	nets := contiguous4Unwrapped(input)
+	for changed := true; changed; {
+		changed = false
+	scan:
+		for left := range nets {
+			for right := left + 1; right < len(nets); right++ {
+				if parent, ok := nets[left].MergeByLowestMaskBit(nets[right]); ok {
+					nets[left] = parent
+					nets = slices.Delete(nets, right, right+1)
+					changed = true
+					break scan
+				}
+			}
+		}
+	}
+	slices.SortFunc(nets, xnetip.Network4.Compare)
+	return nets
+}
+
+// aggregateContiguous6Reference is the naive fixpoint oracle.
+//
+// It absorbs containment and merges buddies pair by pair until
+// nothing changes, then sorts the survivors.
+func aggregateContiguous6Reference(input []xnetip.Contiguous[xnetip.Network6]) []xnetip.Network6 {
+	nets := contiguous6Unwrapped(input)
+	for changed := true; changed; {
+		changed = false
+	scan:
+		for left := range nets {
+			for right := left + 1; right < len(nets); right++ {
+				if parent, ok := nets[left].MergeByLowestMaskBit(nets[right]); ok {
+					nets[left] = parent
+					nets = slices.Delete(nets, right, right+1)
+					changed = true
+					break scan
+				}
+			}
+		}
+	}
+	slices.SortFunc(nets, xnetip.Network6.Compare)
+	return nets
+}
+
+// aggregateContiguous4Clustered returns 1024 /30 blocks packed as 64
+// children under each of 16 parent /24 windows, cascading fully.
+func aggregateContiguous4Clustered(t require.TestingT) []xnetip.Contiguous[xnetip.Network4] {
+	nets := make([]xnetip.Contiguous[xnetip.Network4], 1024)
+	for idx := range nets {
+		addr := 0xC0A80000 | uint32(idx>>6)<<8 | uint32(idx&63)<<2
+		block, err := xnetip.ContiguousFromCIDR4(netipAddrFrom4Bits(addr), 30)
+		require.NoError(t, err)
+		nets[idx] = block
+	}
+	return nets
+}
+
+// aggregateContiguous6Clustered returns 1024 /126 blocks packed as 64
+// children under each of 16 parent /120 windows, cascading fully.
+func aggregateContiguous6Clustered(t require.TestingT) []xnetip.Contiguous[xnetip.Network6] {
+	nets := make([]xnetip.Contiguous[xnetip.Network6], 1024)
+	for idx := range nets {
+		low := uint64(idx>>6)<<8 | uint64(idx&63)<<2
+		block, err := xnetip.ContiguousFromCIDR6(netipAddrFrom6Bits(0x20010DB800000000, low), 126)
+		require.NoError(t, err)
+		nets[idx] = block
+	}
+	return nets
+}
+
+// genClusteredContiguous4 draws up to 24 CIDR blocks with prefixes 24
+// through 32 confined to a 4096-address window.
+//
+// The tight window makes containment and buddy cascades frequent
+// while capping each block at 256 addresses, so a whole collection's
+// union stays brute-forceable.
+var genClusteredContiguous4 = rapid.SliceOfN(rapid.Custom(func(t *rapid.T) xnetip.Contiguous[xnetip.Network4] {
+	addr := 0xC0A80000 | rapid.Uint32().Draw(t, "addr")&0x0FFF
+	prefix := rapid.IntRange(24, 32).Draw(t, "prefix")
+	block, err := xnetip.ContiguousFromCIDR4(netipAddrFrom4Bits(addr), prefix)
+	require.NoError(t, err)
+	return block
+}), 0, 24)
+
+// genClusteredContiguous6 draws up to 24 CIDR blocks with prefixes
+// 120 through 128 confined to a 4096-address window.
+//
+// The tight window makes containment and buddy cascades frequent
+// while capping each block at 256 addresses, so a whole collection's
+// union stays brute-forceable.
+var genClusteredContiguous6 = rapid.SliceOfN(rapid.Custom(func(t *rapid.T) xnetip.Contiguous[xnetip.Network6] {
+	low := rapid.Uint64().Draw(t, "addr") & 0x0FFF
+	prefix := rapid.IntRange(120, 128).Draw(t, "prefix")
+	block, err := xnetip.ContiguousFromCIDR6(netipAddrFrom6Bits(0x20010DB800000000, low), prefix)
+	require.NoError(t, err)
+	return block
+}), 0, 24)
+
+func BenchmarkAggregateContiguous_IPv41024Clustered(b *testing.B) {
+	template := aggregateContiguous4Clustered(b)
+	networks := make([]xnetip.Contiguous[xnetip.Network4], len(template))
+	b.ReportAllocs()
+	for b.Loop() {
+		copy(networks, template)
+		intSink = len(xnetip.AggregateContiguous(networks))
+	}
+}
+
+func BenchmarkAggregateContiguous_IPv41024Disjoint(b *testing.B) {
+	template := make([]xnetip.Contiguous[xnetip.Network4], 1024)
+	for idx, network := range aggregate4NeverMerges(b, 1024) {
+		template[idx] = network.ToContiguous()
+	}
+	networks := make([]xnetip.Contiguous[xnetip.Network4], len(template))
+	b.ReportAllocs()
+	for b.Loop() {
+		copy(networks, template)
+		intSink = len(xnetip.AggregateContiguous(networks))
+	}
+}
+
+func BenchmarkAggregateContiguous_IPv61024Clustered(b *testing.B) {
+	template := aggregateContiguous6Clustered(b)
+	networks := make([]xnetip.Contiguous[xnetip.Network6], len(template))
+	b.ReportAllocs()
+	for b.Loop() {
+		copy(networks, template)
+		intSink = len(xnetip.AggregateContiguous(networks))
+	}
+}
+
+func BenchmarkAggregateContiguous_IPv61024Disjoint(b *testing.B) {
+	template := make([]xnetip.Contiguous[xnetip.Network6], 1024)
+	for idx, network := range aggregate6NeverMerges(b, 1024) {
+		template[idx] = network.ToContiguous()
+	}
+	networks := make([]xnetip.Contiguous[xnetip.Network6], len(template))
+	b.ReportAllocs()
+	for b.Loop() {
+		copy(networks, template)
+		intSink = len(xnetip.AggregateContiguous(networks))
+	}
+}
+
+func BenchmarkAggregate4_1024Clustered(b *testing.B) {
+	template := contiguous4Unwrapped(aggregateContiguous4Clustered(b))
+	networks := make([]xnetip.Network4, len(template))
+	b.ReportAllocs()
+	for b.Loop() {
+		copy(networks, template)
+		intSink = len(xnetip.Aggregate4(networks))
+	}
+}
+
+func BenchmarkAggregate6_1024Clustered(b *testing.B) {
+	template := contiguous6Unwrapped(aggregateContiguous6Clustered(b))
+	networks := make([]xnetip.Network6, len(template))
+	b.ReportAllocs()
+	for b.Loop() {
+		copy(networks, template)
+		intSink = len(xnetip.Aggregate6(networks))
+	}
+}
