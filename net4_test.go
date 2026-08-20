@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"net/netip"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -483,4 +484,166 @@ func Test_IPv4NetworkFromAddr_AllocationFree(t *testing.T) {
 	var err error
 	requireNoAllocs(t, func() { networkSink, err = xnetip.IPv4NetworkFromAddr(addr) })
 	require.NoError(t, err)
+}
+
+// verifies that the order is lexicographic on the address first and
+// the mask second, both as unsigned 32-bit integers.
+func Test_IPv4Network_Compare_AddressFirstMaskSecond(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  int
+	}{
+		{name: "address dominates mask", left: mustIPv4Network(t, "10.0.0.0", "255.255.255.255"), right: mustIPv4Network(t, "11.0.0.0", "255.0.0.0"), want: -1},
+		{name: "equal address, mask decides", left: mustIPv4Network(t, "10.0.0.0", "255.255.0.0"), right: mustIPv4Network(t, "10.0.0.0", "255.255.255.0"), want: -1},
+		{name: "equal address, larger mask after", left: mustIPv4Network(t, "10.0.0.0", "255.255.255.0"), right: mustIPv4Network(t, "10.0.0.0", "255.255.0.0"), want: 1},
+		{name: "zero before middle", left: mustIPv4Network(t, "0.0.0.0", "0.0.0.0"), right: mustIPv4Network(t, "10.0.0.0", "255.0.0.0"), want: -1},
+		{name: "middle before max", left: mustIPv4Network(t, "10.0.0.0", "255.0.0.0"), right: mustIPv4Network(t, "255.255.255.255", "255.255.255.255"), want: -1},
+		{name: "zero before max", left: mustIPv4Network(t, "0.0.0.0", "0.0.0.0"), right: mustIPv4Network(t, "255.255.255.255", "255.255.255.255"), want: -1},
+		{name: "antisymmetry on the dominance pair", left: mustIPv4Network(t, "11.0.0.0", "255.0.0.0"), right: mustIPv4Network(t, "10.0.0.0", "255.255.255.255"), want: 1},
+		{name: "top address bit compares unsigned", left: mustIPv4Network(t, "128.0.0.0", "128.0.0.0"), right: mustIPv4Network(t, "127.255.255.255", "255.255.255.255"), want: 1},
+		{name: "same address, non-contiguous mask decides", left: mustIPv4Network(t, "10.0.0.5", "255.0.0.255"), right: mustIPv4Network(t, "10.0.0.5", "255.255.0.255"), want: -1},
+		{name: "alternating masks under one address", left: mustIPv4Network(t, "0.0.0.0", "170.85.170.85"), right: mustIPv4Network(t, "0.0.0.0", "85.170.85.170"), want: 1},
+		{name: "address bit beats any mask", left: mustIPv4Network(t, "10.0.0.4", "255.0.0.255"), right: mustIPv4Network(t, "10.0.0.5", "255.255.255.255"), want: -1},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.Compare(testCase.right))
+		})
+	}
+}
+
+// verifies that equal networks compare as zero and only they do.
+func Test_IPv4Network_Compare_EqualityIsZero(t *testing.T) {
+	left := mustIPv4Network(t, "192.168.1.0", "255.255.255.0")
+	right := mustIPv4Network(t, "192.168.1.0", "255.255.255.0")
+	require.Equal(t, 0, left.Compare(right))
+	require.Equal(t, left, right)
+}
+
+// verifies that sorting a shuffled fixture yields the exact documented
+// order, the contract the aggregation and split inputs rely on.
+func Test_IPv4Network_Compare_SortPinsDocumentedOrder(t *testing.T) {
+	shuffled := []xnetip.IPv4Network{
+		mustIPv4Network(t, "192.168.1.1", "255.255.255.255"),
+		mustIPv4Network(t, "10.1.0.0", "255.255.0.0"),
+		mustIPv4Network(t, "255.255.255.255", "255.255.255.255"),
+		mustIPv4Network(t, "10.0.0.5", "255.255.0.255"),
+		mustIPv4Network(t, "0.0.0.0", "0.0.0.0"),
+		mustIPv4Network(t, "10.0.0.0", "255.255.255.0"),
+		mustIPv4Network(t, "10.0.0.5", "255.0.0.255"),
+		mustIPv4Network(t, "10.0.0.0", "255.0.0.0"),
+	}
+	want := []xnetip.IPv4Network{
+		mustIPv4Network(t, "0.0.0.0", "0.0.0.0"),
+		mustIPv4Network(t, "10.0.0.0", "255.0.0.0"),
+		mustIPv4Network(t, "10.0.0.0", "255.255.255.0"),
+		mustIPv4Network(t, "10.0.0.5", "255.0.0.255"),
+		mustIPv4Network(t, "10.0.0.5", "255.255.0.255"),
+		mustIPv4Network(t, "10.1.0.0", "255.255.0.0"),
+		mustIPv4Network(t, "192.168.1.1", "255.255.255.255"),
+		mustIPv4Network(t, "255.255.255.255", "255.255.255.255"),
+	}
+	slices.SortFunc(shuffled, xnetip.IPv4Network.Compare)
+	require.Equal(t, want, shuffled)
+}
+
+// verifies that the order equals the tuple order of the netip address
+// views, is antisymmetric and is zero exactly on equal values.
+func Test_IPv4Network_Compare_MatchesTupleOrderProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		want := left.Addr().Compare(right.Addr())
+		if want == 0 {
+			want = left.Mask().Compare(right.Mask())
+		}
+		require.Equal(t, want, left.Compare(right))
+		require.Equal(t, -want, right.Compare(left))
+		require.Equal(t, left == right, left.Compare(right) == 0)
+	})
+}
+
+// verifies that the order is transitive on random triples.
+func Test_IPv4Network_Compare_TransitivityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := genIPv4Network.Draw(t, "first")
+		second := genIPv4Network.Draw(t, "second")
+		third := genIPv4Network.Draw(t, "third")
+		if first.Compare(second) <= 0 && second.Compare(third) <= 0 {
+			require.LessOrEqual(t, first.Compare(third), 0)
+		}
+	})
+}
+
+// verifies that sorting a random slice by the order yields a sorted
+// permutation of the input.
+func Test_IPv4Network_Compare_SortFuncProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		networks := rapid.SliceOfN(genIPv4Network, 0, 32).Draw(t, "networks")
+		sorted := slices.Clone(networks)
+		slices.SortFunc(sorted, xnetip.IPv4Network.Compare)
+		require.True(t, slices.IsSortedFunc(sorted, xnetip.IPv4Network.Compare))
+		require.ElementsMatch(t, networks, sorted)
+	})
+}
+
+// verifies that the address-first component agrees with the
+// netip.Addr order whenever the addresses differ.
+func Test_IPv4Network_Compare_MatchesNetipAddrOrder(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		if left.Addr() != right.Addr() {
+			require.Equal(t, left.Addr().Compare(right.Addr()), left.Compare(right))
+		}
+	})
+}
+
+// verifies that comparing allocates nothing.
+func Test_IPv4Network_Compare_AllocationFree(t *testing.T) {
+	left := mustIPv4Network(t, "10.0.0.0", "255.0.0.0")
+	right := mustIPv4Network(t, "10.0.0.0", "255.255.255.0")
+	requireNoAllocs(t, func() { intSink = left.Compare(right) })
+}
+
+func BenchmarkIPv4Network_Compare_MaskDecides(b *testing.B) {
+	left := mustIPv4Network(b, "10.0.0.0", "255.0.0.0")
+	right := mustIPv4Network(b, "10.0.0.0", "255.255.255.0")
+	b.ReportAllocs()
+	for b.Loop() {
+		intSink = left.Compare(right)
+	}
+}
+
+func BenchmarkIPv4Network_Compare_AddressDecides(b *testing.B) {
+	left := mustIPv4Network(b, "10.0.0.0", "255.0.0.0")
+	right := mustIPv4Network(b, "11.0.0.0", "255.255.255.0")
+	b.ReportAllocs()
+	for b.Loop() {
+		intSink = left.Compare(right)
+	}
+}
+
+func BenchmarkIPv4Network_SortFunc_1024(b *testing.B) {
+	// The fixture mirrors the Rust bench recipe: index times Knuth's
+	// multiplicative constant, prefixes spread over /8../32.
+	template := make([]xnetip.IPv4Network, 1024)
+	for idx := range template {
+		bits := uint32(idx) * 2_654_435_761
+		network, err := xnetip.IPv4NetworkFromCIDR(netipAddrFrom4Bits(bits), 8+int(bits%25))
+		if err != nil {
+			b.Fatal(err)
+		}
+		template[idx] = network
+	}
+	networks := make([]xnetip.IPv4Network, len(template))
+	b.ReportAllocs()
+	for b.Loop() {
+		// The 4 KiB fixture refresh stays inside the timed region: a
+		// paused timer would keep the loop from ever finishing.
+		copy(networks, template)
+		slices.SortFunc(networks, xnetip.IPv4Network.Compare)
+	}
 }

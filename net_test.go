@@ -828,41 +828,6 @@ func Test_IPNetworkFrom_AllocationFree(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// mustIPNetwork4 builds the IPNetwork of an Is4 address and mask pair
-// given in string form, stopping the test on any constructor error.
-func mustIPNetwork4(t require.TestingT, addr, mask string) xnetip.IPNetwork {
-	if helper, ok := t.(interface{ Helper() }); ok {
-		helper.Helper()
-	}
-	network, err := xnetip.IPNetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
-	require.NoError(t, err)
-	require.True(t, network.Is4())
-	return network
-}
-
-// mustIPNetwork6 builds the IPNetwork of an Is6 address and mask pair
-// given in string form, stopping the test on any constructor error.
-func mustIPNetwork6(t require.TestingT, addr, mask string) xnetip.IPNetwork {
-	if helper, ok := t.(interface{ Helper() }); ok {
-		helper.Helper()
-	}
-	network, err := xnetip.IPNetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
-	require.NoError(t, err)
-	require.True(t, network.Is6())
-	return network
-}
-
-// mustIPv6Network builds an IPv6Network from an address and mask pair
-// given in string form, stopping the test on any constructor error.
-func mustIPv6Network(t require.TestingT, addr, mask string) xnetip.IPv6Network {
-	if helper, ok := t.(interface{ Helper() }); ok {
-		helper.Helper()
-	}
-	network, err := xnetip.IPv6NetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
-	require.NoError(t, err)
-	return network
-}
-
 // verifies that an IPv4 network embeds as its IPv4-mapped IPv6 image
 // and an IPv6 network passes through unchanged, whatever its shape.
 func Test_IPNetwork_ToIPv6Mapped_EmbedsIntoIPv6Space(t *testing.T) {

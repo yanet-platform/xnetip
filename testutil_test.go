@@ -69,6 +69,52 @@ func (m *failRecorder) Errorf(string, ...any) { m.errors++ }
 
 func (m *failRecorder) FailNow() { m.failedNow = true }
 
+// mustIPv4Network builds an IPv4Network from an address and mask pair
+// given in string form, stopping the test on any constructor error.
+func mustIPv4Network(t require.TestingT, addr, mask string) xnetip.IPv4Network {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	network, err := xnetip.IPv4NetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	require.NoError(t, err)
+	return network
+}
+
+// mustIPv6Network builds an IPv6Network from an address and mask pair
+// given in string form, stopping the test on any constructor error.
+func mustIPv6Network(t require.TestingT, addr, mask string) xnetip.IPv6Network {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	network, err := xnetip.IPv6NetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	require.NoError(t, err)
+	return network
+}
+
+// mustIPNetwork4 builds the IPNetwork of an Is4 address and mask pair
+// given in string form, stopping the test on any constructor error.
+func mustIPNetwork4(t require.TestingT, addr, mask string) xnetip.IPNetwork {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	network, err := xnetip.IPNetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	require.NoError(t, err)
+	require.True(t, network.Is4())
+	return network
+}
+
+// mustIPNetwork6 builds the IPNetwork of an Is6 address and mask pair
+// given in string form, stopping the test on any constructor error.
+func mustIPNetwork6(t require.TestingT, addr, mask string) xnetip.IPNetwork {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	network, err := xnetip.IPNetworkFrom(netip.MustParseAddr(addr), netip.MustParseAddr(mask))
+	require.NoError(t, err)
+	require.True(t, network.Is6())
+	return network
+}
+
 // netipAddrFrom4Bits returns the Is4 netip.Addr whose host-order bit
 // pattern is bits, the integer entry point for tests and generators.
 func netipAddrFrom4Bits(bits uint32) netip.Addr {
@@ -267,6 +313,7 @@ var genIPNetwork = rapid.Custom(func(t *rapid.T) xnetip.IPNetwork {
 // optimise the work under test away.
 var (
 	wordSink      uint32
+	intSink       int
 	bytesSink     []byte
 	networkSink   xnetip.IPv4Network
 	network6Sink  xnetip.IPv6Network
