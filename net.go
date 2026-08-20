@@ -166,6 +166,26 @@ func (m IPNetwork) Mask() netip.Addr {
 	return m.network.mask.Netip()
 }
 
+// Compare returns -1, 0 or +1 as m sorts before, equal to or after
+// other.
+//
+// Every IPv4 network sorts before every IPv6 network, the order
+// netip.Addr.Compare gives across families. Within a family the order
+// is that of IPv4Network.Compare or IPv6Network.Compare: lexicographic
+// on (address, mask). An IPv4-mapped IPv6 network is an IPv6 network
+// and sorts among IPv6 networks, not next to its IPv4 counterpart.
+func (m IPNetwork) Compare(other IPNetwork) int {
+	if m.is4 != other.is4 {
+		if m.is4 {
+			return -1
+		}
+		return 1
+	}
+	// Two IPv4 networks agree on the top 96 stored address and mask
+	// bits, so the 128-bit compare reduces to the 32-bit one.
+	return m.network.Compare(other.network)
+}
+
 // ToIPv6Mapped embeds the network into IPv6 address space.
 //
 // An IPv4 network is returned as its IPv4-mapped IPv6 network (address

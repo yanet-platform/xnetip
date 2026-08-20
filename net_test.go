@@ -3,6 +3,7 @@ package xnetip_test
 import (
 	"encoding/binary"
 	"net/netip"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -1005,4 +1006,151 @@ func Test_IPNetwork_ToCanonical_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { ipNetworkSink = network4.ToCanonical() })
 	requireNoAllocs(t, func() { ipNetworkSink = mapped.ToCanonical() })
 	requireNoAllocs(t, func() { ipNetworkSink = network6.ToCanonical() })
+}
+
+// verifies that every IPv4 network sorts before every IPv6 network
+// and that within a family the concrete lexicographic order applies.
+func Test_IPNetwork_Compare_FamilyFirstThenConcreteOrder(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  int
+	}{
+		{name: "IPv4 max before IPv6 universe", left: mustIPNetwork4(t, "255.255.255.255", "255.255.255.255"), right: mustIPNetwork6(t, "::", "::"), want: -1},
+		{name: "IPv6 universe after IPv4 universe", left: mustIPNetwork6(t, "::", "::"), right: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"), want: 1},
+		{name: "within IPv4 address dominates mask", left: mustIPNetwork4(t, "10.0.0.0", "255.255.255.255"), right: mustIPNetwork4(t, "11.0.0.0", "255.0.0.0"), want: -1},
+		{name: "within IPv4 mask decides", left: mustIPNetwork4(t, "10.0.0.0", "255.255.0.0"), right: mustIPNetwork4(t, "10.0.0.0", "255.255.255.0"), want: -1},
+		{name: "within IPv6 address dominates mask", left: mustIPNetwork6(t, "2001::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), right: mustIPNetwork6(t, "2001:db9::", "ffff:ffff::"), want: -1},
+		{name: "within IPv6 mask decides", left: mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"), right: mustIPNetwork6(t, "2001:db8::", "ffff:ffff:ffff:ffff::"), want: -1},
+		{name: "IPv4-mapped IPv6 sorts after its IPv4 twin", left: mustIPNetwork4(t, "192.168.1.0", "255.255.255.0"), right: mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: -1},
+		{name: "IPv4 non-contiguous mask decides", left: mustIPNetwork4(t, "10.0.0.5", "255.0.0.255"), right: mustIPNetwork4(t, "10.0.0.5", "255.255.0.255"), want: -1},
+		{name: "IPv6 non-contiguous mask decides", left: mustIPNetwork6(t, "2001:db8::5", "ffff:ffff:ff00:ff00:ffff:ffff:ffff:ffff"), right: mustIPNetwork6(t, "2001:db8::5", "ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff"), want: -1},
+		{name: "IPv4 non-contiguous still before any IPv6", left: mustIPNetwork4(t, "255.255.255.255", "170.85.170.85"), right: mustIPNetwork6(t, "::", "::"), want: -1},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.Compare(testCase.right))
+		})
+	}
+}
+
+// verifies that equal networks of either family compare as zero.
+func Test_IPNetwork_Compare_EqualityIsZero(t *testing.T) {
+	require.Equal(t, 0, mustIPNetwork4(t, "192.168.1.0", "255.255.255.0").Compare(mustIPNetwork4(t, "192.168.1.0", "255.255.255.0")))
+	require.Equal(t, 0, mustIPNetwork6(t, "2001:db8::", "ffff:ffff::").Compare(mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")))
+}
+
+// verifies that sorting a mixed fixture yields the family blocks in
+// order, each internally sorted by its concrete order.
+func Test_IPNetwork_Compare_SortPinsFamilyThenOrder(t *testing.T) {
+	shuffled := []xnetip.IPNetwork{
+		mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"),
+		mustIPNetwork4(t, "10.0.0.0", "255.0.0.0"),
+		mustIPNetwork6(t, "::", "::"),
+		mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"),
+		mustIPNetwork4(t, "10.0.0.5", "255.0.0.255"),
+		mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"),
+	}
+	want := []xnetip.IPNetwork{
+		mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"),
+		mustIPNetwork4(t, "10.0.0.0", "255.0.0.0"),
+		mustIPNetwork4(t, "10.0.0.5", "255.0.0.255"),
+		mustIPNetwork6(t, "::", "::"),
+		mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"),
+		mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"),
+	}
+	slices.SortFunc(shuffled, xnetip.IPNetwork.Compare)
+	require.Equal(t, want, shuffled)
+}
+
+// verifies that within a family the lifted order agrees with the
+// concrete type's order, the check behind the stored-form compare.
+func Test_IPNetwork_Compare_AgreesWithConcreteOrdersProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		if rapid.Bool().Draw(t, "is4") {
+			left := genIPv4Network.Draw(t, "left")
+			right := genIPv4Network.Draw(t, "right")
+			require.Equal(t, left.Compare(right), xnetip.IPNetworkFrom4(left).Compare(xnetip.IPNetworkFrom4(right)))
+		} else {
+			left := genIPv6Network.Draw(t, "left")
+			right := genIPv6Network.Draw(t, "right")
+			require.Equal(t, left.Compare(right), xnetip.IPNetworkFrom6(left).Compare(xnetip.IPNetworkFrom6(right)))
+		}
+	})
+}
+
+// verifies the family rule on mixed pairs, antisymmetry, zero exactly
+// on equality and transitivity on random triples.
+func Test_IPNetwork_Compare_TotalOrderProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPNetwork.Draw(t, "left")
+		right := genIPNetwork.Draw(t, "right")
+		third := genIPNetwork.Draw(t, "third")
+		if left.Is4() && right.Is6() {
+			require.Equal(t, -1, left.Compare(right))
+		}
+		if left.Is6() && right.Is4() {
+			require.Equal(t, 1, left.Compare(right))
+		}
+		require.Equal(t, -left.Compare(right), right.Compare(left))
+		require.Equal(t, left == right, left.Compare(right) == 0)
+		if left.Compare(right) <= 0 && right.Compare(third) <= 0 {
+			require.LessOrEqual(t, left.Compare(third), 0)
+		}
+	})
+}
+
+// verifies that sorting a random mixed slice puts every IPv4 network
+// before every IPv6 network with each family block sorted.
+func Test_IPNetwork_Compare_SortFuncProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		networks := rapid.SliceOfN(genIPNetwork, 0, 32).Draw(t, "networks")
+		sorted := slices.Clone(networks)
+		slices.SortFunc(sorted, xnetip.IPNetwork.Compare)
+		require.True(t, slices.IsSortedFunc(sorted, xnetip.IPNetwork.Compare))
+		require.ElementsMatch(t, networks, sorted)
+		seenIPv6 := false
+		for _, network := range sorted {
+			if network.Is6() {
+				seenIPv6 = true
+			} else {
+				require.False(t, seenIPv6, "IPv4 network after an IPv6 one")
+			}
+		}
+	})
+}
+
+// verifies that on host routes the order agrees with netip.Addr's
+// family-first address order.
+func Test_IPNetwork_Compare_MatchesNetipAddrOrderOnHostRoutes(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var left, right netip.Addr
+		if rapid.Bool().Draw(t, "left is4") {
+			left = genNetipAddr4.Draw(t, "left4")
+		} else {
+			left = genNetipAddr6.Draw(t, "left6")
+		}
+		if rapid.Bool().Draw(t, "right is4") {
+			right = genNetipAddr4.Draw(t, "right4")
+		} else {
+			right = genNetipAddr6.Draw(t, "right6")
+		}
+		leftRoute, err := xnetip.IPNetworkFromAddr(left)
+		require.NoError(t, err)
+		rightRoute, err := xnetip.IPNetworkFromAddr(right)
+		require.NoError(t, err)
+		require.Equal(t, left.Compare(right), leftRoute.Compare(rightRoute))
+	})
+}
+
+// verifies that comparing allocates nothing for same-family and
+// mixed-family pairs alike.
+func Test_IPNetwork_Compare_AllocationFree(t *testing.T) {
+	network4 := mustIPNetwork4(t, "10.0.0.0", "255.0.0.0")
+	other4 := mustIPNetwork4(t, "10.0.0.0", "255.255.255.0")
+	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+	requireNoAllocs(t, func() { intSink = network4.Compare(other4) })
+	requireNoAllocs(t, func() { intSink = network6.Compare(network6) })
+	requireNoAllocs(t, func() { intSink = network4.Compare(network6) })
 }
