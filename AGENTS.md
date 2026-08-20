@@ -32,7 +32,7 @@ uint128.go         unexported 128-bit helper {hi, lo uint64}, exported methods, 
 addr4.go addr6.go  unexported address kernels addr4{uint32} addr6{uint128} — the public API speaks netip.Addr
 net4.go net6.go net.go               Network4  Network6  Network{network Network6; is4 bool}
                    a type's whole API lives in its file (constructors, Parse*, formatters, marshalling, set algebra, Addrs, Difference)
-errors.go compact.go             sentinels, Compact[T]
+errors.go compact.go             sentinels, Compact (function over an unexported wrapper)
 range.go aggregate.go binary_split.go   free functions over ranges and slices (RangeToNetworks*, Aggregate*, BinarySplit*), one file each
 *_test.go          mirror of the source file, package xnetip_test; white-box files (package xnetip): uint128_test.go and the kernel suites addr4_test.go, addr6_test.go, errors_test.go
 testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by the type's birth session
@@ -46,7 +46,7 @@ testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by t
 - Networks are always normalized: `addr & mask == addr`. Every constructor enforces it. Zero values are valid: `Network4{}` = `0.0.0.0/0`, `Network6{}` = `::/0`, `Network{}` = `::/0`.
 - `Network` stores IPv4 **IPv4-mapped**: addr `::ffff:a.b.c.d`, mask `ffff:ffff:ffff:ffff:ffff:ffff:M`. Invariant: `is4 ⇒ network.IsIPv4MappedIPv6()`. Every operation delegates to the 128-bit form and stays correct, `PrefixLen()` subtracts 96 for IPv4. Cross-family: relational ops are false, `Intersection`/`Merge` return `ok=false`, `Compare` orders IPv4 before IPv6.
 - Mask semantics, contiguity, `PrefixLen() (int, bool)`, `ToContiguous()` (plain network), `LastAddr()`, adjacency, merge, lowest-mask-bit variants, `SupernetFor`, `Difference` (exactly popcount(m2 &^ m1) pairwise-disjoint networks), host-index iteration order — all exactly as documented in `../netip/src/net.rs`. Differences from Rust are listed in `.roadmap/00-overview.md` ("Deliberate divergences"). The CIDR suffix after `/` is strict (digits only, no leading zeros, no `+`), `%zone` in parse input is an error.
-- Go idioms for Rust traits: `Option<T>` → `(T, bool)`. Parse/construct errors → `error` built from exported sentinels wrapped with `%w` and the input echoed. `Ord` → `Compare(other) int` only. `Display` → `String()` + `AppendTo([]byte) []byte` + `MarshalText`/`UnmarshalText`. Iterators → `iter.Seq` (`Addrs`, `AddrsBackward`, `NumHostBits() int`, `Difference`, `RangeToNetworks4/6`). `fmt::Compact<T>` → generic `Compact[T network]`. Free slice functions are verb-first (`Aggregate4`, `BinarySplit6`).
+- Go idioms for Rust traits: `Option<T>` → `(T, bool)`. Parse/construct errors → `error` built from exported sentinels wrapped with `%w` and the input echoed. `Ord` → `Compare(other) int` only. `Display` → `String()` + `AppendTo([]byte) []byte` + `MarshalText`/`UnmarshalText`. Iterators → `iter.Seq` (`Addrs`, `AddrsBackward`, `NumHostBits() int`, `Difference`, `RangeToNetworks4/6`). `fmt::Compact<T>` → the `Compact` function returning an unexported generic wrapper with `String`/`AppendTo` (type inference at the call site). Free slice functions are verb-first (`Aggregate4`, `BinarySplit6`).
 - Parsing goes through `net/netip` in iteration 1: split at the first `/` ourselves (dotted masks are a supported form), `netip.ParseAddr` for the address and the mask, our own strict prefix-length rule.
 
 ## Hard constraints
