@@ -279,6 +279,33 @@ func (m IPNetwork) Contains(other IPNetwork) bool {
 	return m.is4 == other.is4 && m.network.Contains(other.network)
 }
 
+// Intersection returns the network of addresses common to m and other.
+//
+// Networks of different address families are disjoint and yield
+// ok=false. Within a family the result is the family's Intersection:
+// always a single network, ok=false only when the two disagree on a
+// bit position both masks constrain. Masks may be non-contiguous. The
+// result keeps the family of the inputs, and on ok=false the returned
+// value is the zero IPNetwork.
+func (m IPNetwork) Intersection(other IPNetwork) (IPNetwork, bool) {
+	// The family check must come first: without it the IPv6 universe
+	// would intersect the mapped storage form of every IPv4 network.
+	//
+	// For two IPv4 networks the 128-bit intersection of the stored
+	// forms is exact: mapped storage pins the top 96 address and mask
+	// bits to the same values on both sides, so the disjointness test
+	// reduces to the IPv4 formula on the low 32 bits and the unions
+	// keep the top bits pinned — the result is a valid mapped network.
+	if m.is4 != other.is4 {
+		return IPNetwork{}, false
+	}
+	network, ok := m.network.Intersection(other.network)
+	if !ok {
+		return IPNetwork{}, false
+	}
+	return IPNetwork{network: network, is4: m.is4}, true
+}
+
 // IsContiguous reports whether the mask, in the network's own family,
 // is a CIDR prefix mask: leading one bits followed only by zero bits.
 //
