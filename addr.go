@@ -1,5 +1,7 @@
 package xnetip
 
+import "net/netip"
+
 // IPAddr is an IPv4 or IPv6 address without a zone.
 //
 // The zero value is the IPv6 unspecified address ::. An IPv4 value is
@@ -116,4 +118,40 @@ func (m IPAddr) AppendTo(b []byte) []byte {
 		return v4.AppendTo(b)
 	}
 	return m.addr.AppendTo(b)
+}
+
+// ParseIPAddr parses s as an IPv4 address ("192.0.2.1") or an IPv6
+// address ("2001:db8::1"), the grammar of netip.ParseAddr minus zones.
+//
+// The family comes from the text: dotted decimal is IPv4 and everything
+// with colons is IPv6, so an IPv4-mapped form such as "::ffff:192.0.2.1"
+// stays IPv6 (Is4In6), never unmapped. Text that net/netip rejects wraps
+// ErrParse together with the net/netip error that explains the
+// rejection, a zone suffix ("fe80::1%eth0") wraps ErrZone alone. Every
+// error names the parser and echoes s, so errors.Is works on the
+// sentinels and the message identifies the input.
+func ParseIPAddr(s string) (IPAddr, error) {
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return IPAddr{}, wrapParseError("ParseIPAddr", s, ErrParse, err)
+	}
+	if addr.Zone() != "" {
+		return IPAddr{}, wrapParseError("ParseIPAddr", s, ErrZone, nil)
+	}
+	if addr.Is4() {
+		return IPAddrFrom4(IPv4AddrFrom4(addr.As4())), nil
+	}
+	return IPAddrFrom6(IPv6AddrFrom16(addr.As16())), nil
+}
+
+// MustParseIPAddr calls ParseIPAddr and panics on error.
+//
+// It is intended for tests and package-level variables with hard-coded
+// text, like netip.MustParseAddr.
+func MustParseIPAddr(s string) IPAddr {
+	addr, err := ParseIPAddr(s)
+	if err != nil {
+		panic(err)
+	}
+	return addr
 }

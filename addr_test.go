@@ -375,6 +375,272 @@ func Test_IPAddr_String_AllocatesOnce(t *testing.T) {
 	require.Equal(t, 1, allocs)
 }
 
+// verifies that both families parse from their text with the family
+// taken from the text: dots mean IPv4, colons mean IPv6.
+func Test_ParseIPAddr_AcceptsBothFamilies(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want xnetip.IPAddr
+	}{
+		{name: "bare IPv4", text: "192.168.1.1", want: mustParseIPAddr4(t, "192.168.1.1")},
+		{name: "IPv4 zero", text: "0.0.0.0", want: mustParseIPAddr4(t, "0.0.0.0")},
+		{name: "IPv4 broadcast", text: "255.255.255.255", want: mustParseIPAddr4(t, "255.255.255.255")},
+		{name: "bare IPv6", text: "2001:db8::1", want: mustParseIPAddr6(t, "2001:db8::1")},
+		{name: "IPv6 full form", text: "2001:db8:0:0:0:0:0:1", want: mustParseIPAddr6(t, "2001:db8::1")},
+		{name: "IPv6 unspecified", text: "::", want: xnetip.IPAddr{}},
+		{name: "IPv6 loopback", text: "::1", want: mustParseIPAddr6(t, "::1")},
+		{name: "compression at the end", text: "1:2:3:4:5:6:7::", want: mustParseIPAddr6(t, "1:2:3:4:5:6:7:0")},
+		{name: "compression at the start", text: "::1:2:3:4:5:6:7", want: mustParseIPAddr6(t, "0:1:2:3:4:5:6:7")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			address, err := xnetip.ParseIPAddr(tc.text)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, address)
+		})
+	}
+}
+
+// verifies that the IPv4-mapped text form stays IPv6: the family flag
+// follows the text, not the value range.
+func Test_ParseIPAddr_KeepsMappedTextIPv6(t *testing.T) {
+	address, err := xnetip.ParseIPAddr("::ffff:1.2.3.4")
+	require.NoError(t, err)
+	require.True(t, address.Is6())
+	require.Equal(t, [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4}, address.As16())
+	_, ok := address.IPv4()
+	require.False(t, ok)
+}
+
+// verifies that an embedded IPv4 quad in the last two groups parses as
+// the equivalent hex groups.
+func Test_ParseIPAddr_AcceptsEmbeddedIPv4InLastPosition(t *testing.T) {
+	address, err := xnetip.ParseIPAddr("1:2:3:4:5:6:1.2.3.4")
+	require.NoError(t, err)
+	require.Equal(t, mustParseIPAddr6(t, "1:2:3:4:5:6:102:304"), address)
+}
+
+// verifies that malformed text of either family is rejected with an
+// error wrapping the parse sentinel.
+//
+// The shapes cover the pinned malformed set of the Rust reference:
+// leading-zero octets, octet overflow, wrong group counts, double
+// compression, oversized hex groups, a misplaced embedded quad, network
+// suffixes, whitespace and port-like garbage.
+func Test_ParseIPAddr_RejectsMalformedText(t *testing.T) {
+	malformed := []string{
+		"01.2.3.4", "1.2.3.04", "00.0.0.0",
+		"256.0.0.0", "0.0.0.999",
+		"1.2.3", "1.2.3.4.5", "1..2.3", ".",
+		"1::2::3", ":::", "::1::",
+		"12345::", "1:22222:3::",
+		"1.2.3.4::", "::1.2.3.4:5",
+		"", "hello", "zz", "/", "/24", "10.0.0.1/",
+		"10.0.0.1/24", "2001:db8::1/32",
+		" 10.0.0.1", "10.0.0.1 ", "::1\n",
+		"1.2.3.4:80",
+	}
+	for _, text := range malformed {
+		_, err := xnetip.ParseIPAddr(text)
+		require.ErrorIs(t, err, xnetip.ErrParse, "input %q", text)
+	}
+}
+
+// verifies that a zone suffix is rejected with the zone sentinel alone,
+// even though net/netip accepts it.
+func Test_ParseIPAddr_RejectsZone(t *testing.T) {
+	for _, text := range []string{"fe80::1%eth0", "fe80::1%0"} {
+		_, err := xnetip.ParseIPAddr(text)
+		require.ErrorIs(t, err, xnetip.ErrZone, "input %q", text)
+		require.NotErrorIs(t, err, xnetip.ErrParse, "input %q", text)
+	}
+}
+
+// verifies that a percent sign without an address is a plain parse
+// error, not a zone rejection: net/netip fails before the zone check.
+func Test_ParseIPAddr_PercentWithoutAddressIsParseError(t *testing.T) {
+	_, err := xnetip.ParseIPAddr("%eth0")
+	require.ErrorIs(t, err, xnetip.ErrParse)
+	require.NotErrorIs(t, err, xnetip.ErrZone)
+}
+
+// verifies that the error names the parser and echoes the input.
+func Test_ParseIPAddr_ErrorEchoesInput(t *testing.T) {
+	_, err := xnetip.ParseIPAddr("zz")
+	require.ErrorContains(t, err, "xnetip.ParseIPAddr")
+	require.ErrorContains(t, err, `"zz"`)
+}
+
+// verifies that the must variant panics on invalid text and parses the
+// same values otherwise.
+func Test_MustParseIPAddr_PanicsOnInvalidText(t *testing.T) {
+	require.Panics(t, func() { xnetip.MustParseIPAddr("zz") })
+	require.Equal(t, mustParseIPAddr4(t, "10.0.0.1"), xnetip.MustParseIPAddr("10.0.0.1"))
+}
+
+// verifies that the parser inverts the formatter on every address,
+// family flag included: mapped-as-IPv6 values come back IPv6.
+func Test_ParseIPAddr_RoundTripsString(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		back, err := xnetip.ParseIPAddr(address.String())
+		require.NoError(t, err)
+		require.Equal(t, address, back)
+	})
+}
+
+// verifies that every string net/netip prints for a random zone-free
+// address parses back with the same family and bytes.
+func Test_ParseIPAddr_ParsesEveryNetipString(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var oracle netip.Addr
+		if rapid.Bool().Draw(t, "four") {
+			oracle = netip.AddrFrom4(genIPv4Addr.Draw(t, "addr4").As4())
+		} else {
+			oracle = netip.AddrFrom16(genIPv6Addr.Draw(t, "addr6").As16())
+		}
+		address, err := xnetip.ParseIPAddr(oracle.String())
+		require.NoError(t, err)
+		require.Equal(t, oracle.Is4(), address.Is4())
+		require.Equal(t, oracle.As16(), address.As16())
+	})
+}
+
+// verifies accept/reject parity with net/netip on short strings over the
+// characters of the address grammar plus a few easy-to-confuse extras.
+//
+// Drawing from that alphabet rather than from arbitrary bytes exercises
+// the parity close to the accept boundary.
+func Test_ParseIPAddr_NearMissParityWithNetip(t *testing.T) {
+	alphabet := []byte(".:/%+ x0123456789abcdef")
+	rapid.Check(t, func(t *rapid.T) {
+		text := string(rapid.SliceOfN(rapid.SampledFrom(alphabet), 0, 24).Draw(t, "text"))
+		requireParseIPAddrMatchesNetip(t, text)
+	})
+}
+
+// verifies accept/reject parity with net/netip on the text of a valid
+// address with one byte deleted or replaced by an arbitrary byte.
+func Test_ParseIPAddr_MutationParityWithNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		text := []byte(genIPAddr.Draw(t, "address").String())
+		position := rapid.IntRange(0, len(text)-1).Draw(t, "position")
+		if rapid.Bool().Draw(t, "delete") {
+			text = slices.Delete(text, position, position+1)
+		} else {
+			text[position] = rapid.Byte().Draw(t, "replacement")
+		}
+		requireParseIPAddrMatchesNetip(t, string(text))
+	})
+}
+
+// verifies accept/reject parity and value agreement with net/netip on
+// arbitrary text, seeded with every input of the unit tables.
+func FuzzParseIPAddr(f *testing.F) {
+	seeds := []string{
+		"192.168.1.1", "0.0.0.0", "255.255.255.255", "10.0.0.1", "1.2.3.4",
+		"2001:db8::1", "2001:db8:0:0:0:0:0:1", "::", "::1",
+		"1:2:3:4:5:6:7::", "::1:2:3:4:5:6:7", "1:2:3:4:5:6:1.2.3.4",
+		"::ffff:1.2.3.4", "::ffff:192.0.2.1",
+		"01.2.3.4", "1.2.3.04", "00.0.0.0", "256.0.0.0", "0.0.0.999",
+		"1.2.3", "1.2.3.4.5", "1..2.3", ".",
+		"1::2::3", ":::", "::1::", "12345::", "1:22222:3::",
+		"1.2.3.4::", "::1.2.3.4:5",
+		"", "hello", "zz", "/", "/24", "10.0.0.1/", "10.0.0.1/24", "2001:db8::1/32",
+		" 10.0.0.1", "10.0.0.1 ", "::1\n", "1.2.3.4:80",
+		"fe80::1%eth0", "fe80::1%0", "%eth0",
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, text string) {
+		requireParseIPAddrMatchesNetip(t, text)
+	})
+}
+
+// requireParseIPAddrMatchesNetip asserts that the parser accepts text
+// exactly when net/netip parses it without a zone, value included.
+//
+// On netip success the family and the bytes must agree, and zoned text
+// must be rejected with the zone sentinel.
+func requireParseIPAddrMatchesNetip(t require.TestingT, text string) {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	got, err := xnetip.ParseIPAddr(text)
+	want, wantErr := netip.ParseAddr(text)
+	if wantErr != nil {
+		require.Error(t, err, "input %q", text)
+		return
+	}
+	if want.Zone() != "" {
+		require.ErrorIs(t, err, xnetip.ErrZone, "input %q", text)
+		return
+	}
+	require.NoError(t, err, "input %q", text)
+	require.Equal(t, want.Is4(), got.Is4(), "input %q", text)
+	require.Equal(t, want.As16(), got.As16(), "input %q", text)
+}
+
+// verifies that parsing valid text of either family does not allocate:
+// the error wrapping is the only allocating path.
+func Test_ParseIPAddr_DoesNotAllocate(t *testing.T) {
+	four, six := "192.168.0.1", "2001:db8::1"
+	requireNoAllocs(t, func() {
+		ipAddrSink, errSink = xnetip.ParseIPAddr(four)
+		ipAddrSink, errSink = xnetip.ParseIPAddr(six)
+	})
+}
+
+func BenchmarkParseIPAddr_IPv4Short(b *testing.B) {
+	text := "1.2.3.4"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipAddrSink, errSink = xnetip.ParseIPAddr(text)
+	}
+}
+
+func BenchmarkParseIPAddr_IPv4Long(b *testing.B) {
+	text := "255.255.255.255"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipAddrSink, errSink = xnetip.ParseIPAddr(text)
+	}
+}
+
+func BenchmarkParseIPAddr_IPv6Compressed(b *testing.B) {
+	text := "2001:db8::1"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipAddrSink, errSink = xnetip.ParseIPAddr(text)
+	}
+}
+
+func BenchmarkParseIPAddr_IPv6Full(b *testing.B) {
+	text := "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipAddrSink, errSink = xnetip.ParseIPAddr(text)
+	}
+}
+
+func BenchmarkParseIPAddr_IPv6Mapped(b *testing.B) {
+	text := "::ffff:192.0.2.1"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipAddrSink, errSink = xnetip.ParseIPAddr(text)
+	}
+}
+
+func BenchmarkParseIPAddr_Reject(b *testing.B) {
+	text := "1.2.3.4:80"
+	b.ReportAllocs()
+	for b.Loop() {
+		ipAddrSink, errSink = xnetip.ParseIPAddr(text)
+	}
+}
+
 // mustParseIPAddr4 builds an IPv4 IPAddr from dotted-decimal text.
 func mustParseIPAddr4(t require.TestingT, s string) xnetip.IPAddr {
 	if helper, ok := t.(interface{ Helper() }); ok {
