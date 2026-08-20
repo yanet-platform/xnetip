@@ -1,6 +1,7 @@
 package xnetip
 
 import (
+	"iter"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -235,6 +236,50 @@ func (m IPv6Network) LastAddr() netip.Addr {
 // form and the only count the type offers.
 func (m IPv6Network) NumHostBits() int {
 	return m.mask.bits.Not().OnesCount()
+}
+
+// Addrs returns every address of the network in host-index order.
+//
+// The k host positions (mask bits that are zero) are filled with the
+// successive values 0 through 2^k-1, least-significant host bit
+// first. For a contiguous mask this is ascending numeric order from
+// Addr() to LastAddr(), for a non-contiguous mask the numeric order
+// differs from the iteration order. Every yielded address is an Is6
+// netip.Addr, zone-free. The sequence is re-iterable, allocation-free
+// and stops early when the consumer breaks. The count is exactly
+// 1 << NumHostBits(), which may exceed any integer type.
+func (m IPv6Network) Addrs() iter.Seq[netip.Addr] {
+	return func(yield func(netip.Addr) bool) {
+		base, mask := m.addr.bits, m.mask.bits
+		hostMask := mask.Not()
+		last := base.Or(hostMask)
+		front := base
+		// The walk ends at the address with every host bit set.
+		//
+		// Host patterns never repeat, so that address is reached
+		// exactly once, after all others, and comparing against it
+		// terminates every network including the default route,
+		// whose count would overflow the word.
+		if hostMask.And(hostMask.AddOne()).IsZero() {
+			for {
+				if !yield(ipv6Addr{front}.Netip()) || front == last {
+					return
+				}
+				front = front.AddOne()
+			}
+		}
+		// The non-contiguous step is O(1) for any mask shape.
+		//
+		// Presetting the mask bits to one makes the +1 carry ripple
+		// straight across them, so the increment lands in the next
+		// host position however the host bits are scattered.
+		for {
+			if !yield(ipv6Addr{front}.Netip()) || front == last {
+				return
+			}
+			front = front.Or(mask).AddOne().And(hostMask).Or(base)
+		}
+	}
 }
 
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after

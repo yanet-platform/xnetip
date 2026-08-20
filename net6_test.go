@@ -3477,6 +3477,382 @@ func ipv6NetworkBits(network xnetip.IPv6Network) (addrHi, addrLo, maskHi, maskLo
 	return addrHi, addrLo, maskHi, maskLo
 }
 
+// verifies that a /120 yields its 256 addresses in ascending numeric
+// order, each greater than the previous by exactly one.
+//
+// The suites for this sequence are forward-only: the interleaved
+// front-and-back cases a double-ended cursor would pin have no
+// iter.Seq analogue, so none appear here — the backward walk is a
+// sequence of its own.
+func Test_IPv6Network_Addrs_Slash120AscendsByOne(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/120")
+	expected := netip.MustParseAddr("2a02:6b8:c00::1234:0:0")
+	count := 0
+	for addr := range network.Addrs() {
+		require.Equal(t, expected, addr)
+		expected = expected.Next()
+		count++
+	}
+	require.Equal(t, 256, count)
+}
+
+// verifies that a host route yields exactly its single address.
+func Test_IPv6Network_Addrs_HostRouteSingle(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("::1/128")
+	collected := slices.Collect(network.Addrs())
+	require.Equal(t, []netip.Addr{netip.MustParseAddr("::1")}, collected)
+}
+
+// verifies that the default route starts at the unspecified address
+// and steps to its successor: the head of the 2^128-item sequence.
+func Test_IPv6Network_Addrs_UniverseHead(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("::/0")
+	head := collectHead(network.Addrs(), 2)
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("::"),
+		netip.MustParseAddr("::1"),
+	}, head)
+}
+
+// verifies that a non-contiguous sequence starts at the network
+// address, ends at the last address and never repeats an item.
+func Test_IPv6Network_Addrs_NonContiguousFirstAndLast(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff")
+	collected := slices.Collect(network.Addrs())
+	require.Len(t, collected, 256)
+	require.Equal(t, network.Addr(), collected[0])
+	require.Equal(t, network.LastAddr(), collected[255])
+	seen := map[netip.Addr]bool{}
+	for _, addr := range collected {
+		require.False(t, seen[addr], "address repeated: %v", addr)
+		seen[addr] = true
+	}
+}
+
+// verifies the head of a 96-host-bit network against the host-index
+// oracle.
+//
+// The host run spans positions 16 through 111, far beyond what a
+// drain can cover, so only the first three items are probed.
+func Test_IPv6Network_Addrs_WideHeadOnly(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("2001::1/ffff::ffff")
+	head := collectHead(network.Addrs(), 3)
+	require.Equal(t, []netip.Addr{
+		ipv6AddrAtHostIndexReference(network, 0),
+		ipv6AddrAtHostIndexReference(network, 1),
+		ipv6AddrAtHostIndexReference(network, 2),
+	}, head)
+	require.Equal(t, network.Addr(), head[0])
+}
+
+// verifies that stepping out of a fully drained low host run carries
+// across bit 64 into the high half.
+//
+// The mask frees positions 0 through 15 and position 64, so item
+// 65536 must flip the high half's lowest bit and clear the low run
+// in one step.
+func Test_IPv6Network_Addrs_CarryAcrossBit64(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ffff:fffe:ffff:ffff:ffff:0000")
+	head := collectHead(network.Addrs(), 65538)
+	require.Len(t, head, 65538)
+	require.Equal(t, netip.MustParseAddr("2001:db8::"), head[0])
+	require.Equal(t, netip.MustParseAddr("2001:db8::ffff"), head[65535])
+	require.Equal(t, netip.MustParseAddr("2001:db8:0:1::"), head[65536])
+	require.Equal(t, netip.MustParseAddr("2001:db8:0:1::1"), head[65537])
+}
+
+// verifies that breaking out of the loop stops the sequence after
+// exactly the consumed items.
+func Test_IPv6Network_Addrs_EarlyBreakStops(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/120")
+	consumed := 0
+	for range network.Addrs() {
+		consumed++
+		if consumed == 3 {
+			break
+		}
+	}
+	require.Equal(t, 3, consumed)
+}
+
+// verifies that one sequence value can be ranged twice and yields the
+// same addresses on both passes.
+func Test_IPv6Network_Addrs_ReIterable(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff")
+	sequence := network.Addrs()
+	first := slices.Collect(sequence)
+	second := slices.Collect(sequence)
+	require.Equal(t, first, second)
+}
+
+// verifies that a mask freeing the third group's low byte yields, as
+// a set, the grid of addresses ranging over exactly that byte.
+func Test_IPv6Network_Addrs_NonContiguousGrid(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("2a02:6b8:c00::1/ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff")
+	expected := make([]netip.Addr, 0, 256)
+	for value := range 256 {
+		expected = append(expected, netipAddrFrom6Bits(
+			0x2a02_06b8_0000_0000|uint64(0x0c00|value)<<16,
+			1,
+		))
+	}
+	actual := slices.Collect(network.Addrs())
+	slices.SortFunc(expected, netip.Addr.Compare)
+	slices.SortFunc(actual, netip.Addr.Compare)
+	require.Equal(t, expected, actual)
+}
+
+// verifies the exact forward order of a two-run host mask.
+//
+// The host bits sit at positions 12 through 15 and 80 through 83, so
+// index bits 0 through 3 fill the lower run and index bits 4 through
+// 7 the upper one.
+func Test_IPv6Network_Addrs_NonContiguousPinnedTwoRunOrder(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("2001:db8::1/ffff:ffff:fff0:ffff:ffff:ffff:ffff:0fff")
+	expected := make([]netip.Addr, 0, 256)
+	for value := range 256 {
+		expected = append(expected, netipAddrFrom6Bits(
+			0x2001_0db8_0000_0000|uint64(value>>4)<<16,
+			uint64(1|(value&0xf)<<12),
+		))
+	}
+	require.Equal(t, expected, slices.Collect(network.Addrs()))
+}
+
+// verifies the order of four host bits in a non-contiguous position:
+// the sequence steps through the second-lowest nibble alone.
+func Test_IPv6Network_Addrs_FourHostBitsAboveLowestNibble(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff0f")
+	expected := make([]netip.Addr, 0, 16)
+	for value := range 16 {
+		expected = append(expected, netipAddrFrom6Bits(0x2001_0db8_0000_0000, uint64(value)<<4))
+	}
+	require.Equal(t, expected, slices.Collect(network.Addrs()))
+}
+
+// verifies on the alternating mask that the two lowest host bits fill
+// first: indices 0 through 3 map to host patterns 0, 1, 4, 5.
+func Test_IPv6Network_Addrs_AlternatingMask(t *testing.T) {
+	network := xnetip.MustParseIPv6Network("::/aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa")
+	head := collectHead(network.Addrs(), 4)
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("::"),
+		netip.MustParseAddr("::1"),
+		netip.MustParseAddr("::4"),
+		netip.MustParseAddr("::5"),
+	}, head)
+}
+
+// verifies that the head of the sequence matches the host-index
+// oracle.
+//
+// The address at index k is the network address with k deposited
+// into the mask's zero bits, least significant first.
+func Test_IPv6Network_Addrs_HeadMatchesHostIndexOracleProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		take := uint64(32)
+		if hostBits := network.NumHostBits(); hostBits < 6 {
+			take = uint64(1) << hostBits
+		}
+		index := uint64(0)
+		for addr := range network.Addrs() {
+			require.Equal(t, ipv6AddrAtHostIndexReference(network, index), addr)
+			index++
+			if index == take {
+				break
+			}
+		}
+		require.Equal(t, take, index)
+	})
+}
+
+// ipv6AddrAtHostIndexReference returns the address the sequence must
+// yield at the given host index.
+//
+// That address is the network address with the index deposited into
+// the mask's zero bits, least significant first, computed by an
+// obviously correct walk over all 128 bit positions.
+func ipv6AddrAtHostIndexReference(network xnetip.IPv6Network, index uint64) netip.Addr {
+	addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(network)
+	var depositedHi, depositedLo uint64
+	for position := range 128 {
+		var hostBit bool
+		if position < 64 {
+			hostBit = maskLo>>position&1 == 0
+		} else {
+			hostBit = maskHi>>(position-64)&1 == 0
+		}
+		if !hostBit {
+			continue
+		}
+		if index&1 == 1 {
+			if position < 64 {
+				depositedLo |= uint64(1) << position
+			} else {
+				depositedHi |= uint64(1) << (position - 64)
+			}
+		}
+		index >>= 1
+	}
+	return netipAddrFrom6Bits(addrHi|depositedHi, addrLo|depositedLo)
+}
+
+// verifies on bounded spaces that the yielded count is exactly two to
+// the number of host bits.
+func Test_IPv6Network_Addrs_CountMatchesHostBitsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := drawBoundedIPv6Network(t, 16)
+		count := 0
+		for range network.Addrs() {
+			count++
+		}
+		require.Equal(t, 1<<network.NumHostBits(), count)
+	})
+}
+
+// drawBoundedIPv6Network draws a network whose mask clears at most
+// maxHostBits chosen positions.
+//
+// The bounded host space keeps a full drain of the membership cheap
+// enough for a property test, while the cleared positions still range
+// over the whole word, the half boundary included.
+func drawBoundedIPv6Network(t *rapid.T, maxHostBits int) xnetip.IPv6Network {
+	hostBits := rapid.IntRange(0, maxHostBits).Draw(t, "host bits")
+	positions := rapid.SliceOfNDistinct(rapid.IntRange(0, 127), hostBits, hostBits, rapid.ID).Draw(t, "host positions")
+	maskHi, maskLo := ^uint64(0), ^uint64(0)
+	for _, position := range positions {
+		if position < 64 {
+			maskLo &^= uint64(1) << position
+		} else {
+			maskHi &^= uint64(1) << (position - 64)
+		}
+	}
+	network, err := xnetip.IPv6NetworkFrom(genNetipAddr6.Draw(t, "addr"), netipAddrFrom6Bits(maskHi, maskLo))
+	require.NoError(t, err)
+	return network
+}
+
+// verifies on bounded spaces that every yielded address is a member
+// of the network by the bit test and that no address repeats.
+func Test_IPv6Network_Addrs_MembershipAndUniquenessProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := drawBoundedIPv6Network(t, 12)
+		addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(network)
+		seen := map[netip.Addr]bool{}
+		for addr := range network.Addrs() {
+			addrBytes := addr.As16()
+			memberHi := binary.BigEndian.Uint64(addrBytes[:8])
+			memberLo := binary.BigEndian.Uint64(addrBytes[8:])
+			require.Equal(t, addrHi, memberHi&maskHi)
+			require.Equal(t, addrLo, memberLo&maskLo)
+			require.False(t, seen[addr], "address repeated")
+			seen[addr] = true
+		}
+		require.Len(t, seen, 1<<network.NumHostBits())
+	})
+}
+
+// verifies that a contiguous network's sequence ascends strictly from
+// the network address to the last address.
+func Test_IPv6Network_Addrs_ContiguousAscendsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefixBits := rapid.IntRange(112, 128).Draw(t, "bits")
+		network, err := xnetip.IPv6NetworkFromCIDR(genNetipAddr6.Draw(t, "addr"), prefixBits)
+		require.NoError(t, err)
+		previous, started := netip.Addr{}, false
+		for addr := range network.Addrs() {
+			if started {
+				require.Equal(t, 1, addr.Compare(previous), "sequence not strictly ascending")
+			} else {
+				require.Equal(t, network.Addr(), addr)
+				started = true
+			}
+			previous = addr
+		}
+		require.True(t, started)
+		require.Equal(t, network.LastAddr(), previous)
+	})
+}
+
+// verifies that mapping an IPv4 network preserves its sequence.
+//
+// The mapped network must yield the IPv4-mapped form of every IPv4
+// address in the same order, which pins the same control flow in
+// both families.
+func Test_IPv6Network_Addrs_MatchesMappedIPv4SequenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := drawBoundedIPv4Network(t, 12)
+		expected := []netip.Addr{}
+		for addr := range network.Addrs() {
+			expected = append(expected, netip.AddrFrom16(addr.As16()))
+		}
+		require.Equal(t, expected, slices.Collect(network.ToIPv6Mapped().Addrs()))
+	})
+}
+
+// verifies against net/netip that a contiguous sequence equals
+// repeated successor steps from the network address onward.
+func Test_IPv6Network_Addrs_MatchesNetipNextDifferential(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefixBits := rapid.IntRange(116, 128).Draw(t, "bits")
+		network, err := xnetip.IPv6NetworkFromCIDR(genNetipAddr6.Draw(t, "addr"), prefixBits)
+		require.NoError(t, err)
+		expected := network.Addr()
+		for addr := range network.Addrs() {
+			require.Equal(t, expected, addr)
+			expected = expected.Next()
+		}
+	})
+}
+
+// verifies that a full drain of the sequence performs no allocation,
+// whatever the mask's shape.
+func Test_IPv6Network_Addrs_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/120")
+	nonContiguous := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff")
+	requireNoAllocs(t, func() {
+		for addr := range contiguous.Addrs() {
+			addrSink = addr
+		}
+	})
+	requireNoAllocs(t, func() {
+		for addr := range nonContiguous.Addrs() {
+			addrSink = addr
+		}
+	})
+}
+
+func BenchmarkIPv6Network_Addrs_Slash120(b *testing.B) {
+	network := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/120")
+	b.ReportAllocs()
+	for b.Loop() {
+		for addr := range network.Addrs() {
+			addrSink = addr
+		}
+	}
+}
+
+func BenchmarkIPv6Network_Addrs_Slash112(b *testing.B) {
+	network := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/112")
+	b.ReportAllocs()
+	for b.Loop() {
+		for addr := range network.Addrs() {
+			addrSink = addr
+		}
+	}
+}
+
+func BenchmarkIPv6Network_Addrs_NonContiguous8HostBits(b *testing.B) {
+	network := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff")
+	b.ReportAllocs()
+	for b.Loop() {
+		for addr := range network.Addrs() {
+			addrSink = addr
+		}
+	}
+}
+
 // mergeReferenceIPv6 is the simple merge oracle.
 //
 // Equal networks merge to themselves, equal-mask single-bit siblings
