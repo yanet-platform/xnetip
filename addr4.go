@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"net/netip"
 )
 
@@ -61,6 +62,87 @@ func (m IPv4Addr) Bits() uint32 {
 // takes a netip.Addr, and converting it back always succeeds.
 func (m IPv4Addr) Netip() netip.Addr {
 	return netip.AddrFrom4(m.As4())
+}
+
+// IsUnspecified reports whether the address is 0.0.0.0.
+func (m IPv4Addr) IsUnspecified() bool {
+	return m.bits == 0
+}
+
+// IsLoopback reports whether the address is in 127.0.0.0/8.
+func (m IPv4Addr) IsLoopback() bool {
+	return m.bits>>24 == 127
+}
+
+// IsPrivate reports whether the address is in one of the RFC 1918 ranges
+// 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16.
+//
+// A private address still counts as global unicast, exactly as in
+// net/netip.
+func (m IPv4Addr) IsPrivate() bool {
+	octet0, octet1 := uint8(m.bits>>24), uint8(m.bits>>16)
+	return octet0 == 10 ||
+		(octet0 == 172 && octet1&0xf0 == 16) ||
+		(octet0 == 192 && octet1 == 168)
+}
+
+// IsMulticast reports whether the address is in 224.0.0.0/4.
+func (m IPv4Addr) IsMulticast() bool {
+	return m.bits>>28 == 0xe
+}
+
+// IsLinkLocalUnicast reports whether the address is in 169.254.0.0/16.
+func (m IPv4Addr) IsLinkLocalUnicast() bool {
+	return m.bits>>16 == 169<<8|254
+}
+
+// IsLinkLocalMulticast reports whether the address is in 224.0.0.0/24.
+func (m IPv4Addr) IsLinkLocalMulticast() bool {
+	return m.bits>>8 == 224<<16
+}
+
+// IsGlobalUnicast reports whether the address is global unicast in the
+// sense of net/netip and package net.
+//
+// It is false for 0.0.0.0 and 255.255.255.255, and otherwise true unless
+// the address is loopback, multicast or link-local unicast. Private
+// RFC 1918 addresses count as global unicast, exactly as in net/netip.
+func (m IPv4Addr) IsGlobalUnicast() bool {
+	if m.bits == 0 || m.bits == math.MaxUint32 {
+		return false
+	}
+	return !m.IsLoopback() && !m.IsMulticast() && !m.IsLinkLocalUnicast()
+}
+
+// Next returns the address one above m, in the numeric order of Compare.
+//
+// The second result is false when m is 255.255.255.255, which has no next
+// address. Unlike netip.Addr.Next, the end is reported with the comma-ok
+// form rather than an invalid address, because every IPv4Addr value is a
+// real address.
+func (m IPv4Addr) Next() (IPv4Addr, bool) {
+	if m.bits == math.MaxUint32 {
+		return IPv4Addr{}, false
+	}
+	return IPv4Addr{m.bits + 1}, true
+}
+
+// Prev returns the address one below m, in the numeric order of Compare.
+//
+// The second result is false when m is 0.0.0.0, which has no previous
+// address. Unlike netip.Addr.Prev, the end is reported with the comma-ok
+// form rather than an invalid address, because every IPv4Addr value is a
+// real address.
+func (m IPv4Addr) Prev() (IPv4Addr, bool) {
+	if m.bits == 0 {
+		return IPv4Addr{}, false
+	}
+	return IPv4Addr{m.bits - 1}, true
+}
+
+// BitLen returns 32, the number of bits in an IPv4 address.
+func (m IPv4Addr) BitLen() int {
+	return 32
 }
 
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after other.

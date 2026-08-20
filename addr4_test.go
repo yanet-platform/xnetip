@@ -225,6 +225,265 @@ func Test_IPv4Addr_Netip_DoesNotAllocate(t *testing.T) {
 	requireNoAllocs(t, func() { netipAddrSink = address.Netip() })
 }
 
+// verifies that only the all-zero address is unspecified, and that it is
+// not global unicast.
+func Test_IPv4Addr_IsUnspecified_OnlyAllZeros(t *testing.T) {
+	unspecified := xnetip.MustParseIPv4Addr("0.0.0.0")
+	require.True(t, unspecified.IsUnspecified())
+	require.False(t, unspecified.IsGlobalUnicast())
+	require.False(t, xnetip.MustParseIPv4Addr("0.0.0.1").IsUnspecified())
+	require.False(t, xnetip.MustParseIPv4Addr("255.255.255.255").IsUnspecified())
+}
+
+// verifies that loopback is exactly the 127.0.0.0/8 range and that its
+// members are not global unicast.
+func Test_IPv4Addr_IsLoopback_Matches127Slash8(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+		want bool
+	}{
+		{name: "canonical loopback", addr: "127.0.0.1", want: true},
+		{name: "range start", addr: "127.0.0.0", want: true},
+		{name: "range end", addr: "127.255.255.255", want: true},
+		{name: "just below the range", addr: "126.255.255.255", want: false},
+		{name: "just above the range", addr: "128.0.0.0", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			address := xnetip.MustParseIPv4Addr(tc.addr)
+			require.Equal(t, tc.want, address.IsLoopback())
+			if tc.want {
+				require.False(t, address.IsGlobalUnicast())
+			}
+		})
+	}
+}
+
+// verifies that private is exactly the three RFC 1918 ranges and that
+// private addresses still count as global unicast, as in net/netip.
+func Test_IPv4Addr_IsPrivate_MatchesRFC1918Ranges(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+		want bool
+	}{
+		{name: "10/8 member", addr: "10.0.0.1", want: true},
+		{name: "172.16/12 start", addr: "172.16.0.1", want: true},
+		{name: "172.16/12 end", addr: "172.31.255.255", want: true},
+		{name: "192.168/16 end", addr: "192.168.255.255", want: true},
+		{name: "just below 172.16/12", addr: "172.15.255.255", want: false},
+		{name: "just above 172.16/12", addr: "172.32.0.0", want: false},
+		{name: "just above 192.168/16", addr: "192.169.0.0", want: false},
+		{name: "just above 10/8", addr: "11.0.0.0", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			address := xnetip.MustParseIPv4Addr(tc.addr)
+			require.Equal(t, tc.want, address.IsPrivate())
+			if tc.want {
+				require.True(t, address.IsGlobalUnicast())
+			}
+		})
+	}
+}
+
+// verifies that multicast is exactly the 224.0.0.0/4 range.
+func Test_IPv4Addr_IsMulticast_Matches224Slash4(t *testing.T) {
+	require.True(t, xnetip.MustParseIPv4Addr("224.0.0.0").IsMulticast())
+	require.True(t, xnetip.MustParseIPv4Addr("239.255.255.255").IsMulticast())
+	require.False(t, xnetip.MustParseIPv4Addr("223.255.255.255").IsMulticast())
+	require.False(t, xnetip.MustParseIPv4Addr("240.0.0.0").IsMulticast())
+}
+
+// verifies that link-local multicast is exactly the 224.0.0.0/24 range,
+// a subset of multicast.
+func Test_IPv4Addr_IsLinkLocalMulticast_Matches224_0_0Slash24(t *testing.T) {
+	for _, text := range []string{"224.0.0.0", "224.0.0.1", "224.0.0.255"} {
+		address := xnetip.MustParseIPv4Addr(text)
+		require.True(t, address.IsLinkLocalMulticast(), text)
+		require.True(t, address.IsMulticast(), text)
+	}
+	require.False(t, xnetip.MustParseIPv4Addr("224.0.1.0").IsLinkLocalMulticast())
+	require.False(t, xnetip.MustParseIPv4Addr("223.255.255.255").IsLinkLocalMulticast())
+}
+
+// verifies that link-local unicast is exactly the 169.254.0.0/16 range
+// and that its members are not global unicast.
+func Test_IPv4Addr_IsLinkLocalUnicast_Matches169_254Slash16(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+		want bool
+	}{
+		{name: "range start", addr: "169.254.0.1", want: true},
+		{name: "range end", addr: "169.254.255.255", want: true},
+		{name: "just below the range", addr: "169.253.255.255", want: false},
+		{name: "just above the range", addr: "169.255.0.0", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			address := xnetip.MustParseIPv4Addr(tc.addr)
+			require.Equal(t, tc.want, address.IsLinkLocalUnicast())
+			if tc.want {
+				require.False(t, address.IsGlobalUnicast())
+			}
+		})
+	}
+}
+
+// verifies that global unicast excludes the special ranges and includes
+// plain public addresses with every other predicate false.
+//
+// The excluded ranges are the unspecified address, the broadcast
+// address, loopback, multicast and link-local unicast.
+func Test_IPv4Addr_IsGlobalUnicast_ExcludesSpecialRanges(t *testing.T) {
+	for _, text := range []string{"0.0.0.0", "255.255.255.255", "127.0.0.1", "169.254.0.1", "224.0.0.1"} {
+		require.False(t, xnetip.MustParseIPv4Addr(text).IsGlobalUnicast(), text)
+	}
+	for _, text := range []string{"8.8.8.8", "1.0.0.1"} {
+		address := xnetip.MustParseIPv4Addr(text)
+		require.True(t, address.IsGlobalUnicast(), text)
+		require.False(t, address.IsUnspecified(), text)
+		require.False(t, address.IsLoopback(), text)
+		require.False(t, address.IsPrivate(), text)
+		require.False(t, address.IsMulticast(), text)
+		require.False(t, address.IsLinkLocalUnicast(), text)
+		require.False(t, address.IsLinkLocalMulticast(), text)
+	}
+}
+
+// verifies that the increment carries across octet boundaries.
+func Test_IPv4Addr_Next_CarriesAcrossOctets(t *testing.T) {
+	next, ok := xnetip.MustParseIPv4Addr("10.0.0.255").Next()
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv4Addr("10.0.1.0"), next)
+}
+
+// verifies that the address above the broadcast address does not exist
+// and is reported with the zero value and false, not by wrapping.
+func Test_IPv4Addr_Next_FailsAtBroadcast(t *testing.T) {
+	next, ok := xnetip.MustParseIPv4Addr("255.255.255.255").Next()
+	require.False(t, ok)
+	require.Equal(t, xnetip.IPv4Addr{}, next)
+}
+
+// verifies that the decrement borrows across octet boundaries.
+func Test_IPv4Addr_Prev_BorrowsAcrossOctets(t *testing.T) {
+	prev, ok := xnetip.MustParseIPv4Addr("10.0.1.0").Prev()
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv4Addr("10.0.0.255"), prev)
+}
+
+// verifies that the address below the unspecified address does not exist
+// and is reported with the zero value and false, not by wrapping.
+func Test_IPv4Addr_Prev_FailsAtZero(t *testing.T) {
+	prev, ok := xnetip.MustParseIPv4Addr("0.0.0.0").Prev()
+	require.False(t, ok)
+	require.Equal(t, xnetip.IPv4Addr{}, prev)
+}
+
+// verifies that the bit length is the constant 32 for every address.
+func Test_IPv4Addr_BitLen_Is32(t *testing.T) {
+	require.Equal(t, 32, xnetip.IPv4Addr{}.BitLen())
+	rapid.Check(t, func(t *rapid.T) {
+		require.Equal(t, 32, genIPv4Addr.Draw(t, "address").BitLen())
+	})
+}
+
+// verifies that every predicate agrees with net/netip on every address.
+//
+// The octets are drawn boundary-heavy: each classification range starts
+// or ends on one of the sampled octet values, so the generator hits both
+// sides of every range boundary instead of relying on uniform luck.
+func Test_IPv4Addr_Predicates_MatchNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genBoundaryHeavyIPv4Addr(t)
+		oracle := netip.AddrFrom4(address.As4())
+		require.Equal(t, oracle.IsUnspecified(), address.IsUnspecified())
+		require.Equal(t, oracle.IsLoopback(), address.IsLoopback())
+		require.Equal(t, oracle.IsPrivate(), address.IsPrivate())
+		require.Equal(t, oracle.IsMulticast(), address.IsMulticast())
+		require.Equal(t, oracle.IsLinkLocalUnicast(), address.IsLinkLocalUnicast())
+		require.Equal(t, oracle.IsLinkLocalMulticast(), address.IsLinkLocalMulticast())
+		require.Equal(t, oracle.IsGlobalUnicast(), address.IsGlobalUnicast())
+	})
+}
+
+// verifies that the increment agrees with net/netip: it exists exactly
+// when netip's next address is valid and then holds the same octets.
+func Test_IPv4Addr_Next_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genBoundaryHeavyIPv4Addr(t)
+		next, ok := address.Next()
+		oracle := netip.AddrFrom4(address.As4()).Next()
+		require.Equal(t, oracle.IsValid(), ok)
+		if ok {
+			require.Equal(t, oracle.As4(), next.As4())
+		}
+	})
+}
+
+// verifies that the decrement agrees with net/netip: it exists exactly
+// when netip's previous address is valid and then holds the same octets.
+func Test_IPv4Addr_Prev_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genBoundaryHeavyIPv4Addr(t)
+		prev, ok := address.Prev()
+		oracle := netip.AddrFrom4(address.As4()).Prev()
+		require.Equal(t, oracle.IsValid(), ok)
+		if ok {
+			require.Equal(t, oracle.As4(), prev.As4())
+		}
+	})
+}
+
+// verifies that the decrement undoes the increment whenever the
+// increment exists.
+func Test_IPv4Addr_Next_ThenPrev_RoundTrips(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		next, ok := address.Next()
+		if !ok {
+			t.Skip("no next address")
+		}
+		prev, ok := next.Prev()
+		require.True(t, ok)
+		require.Equal(t, address, prev)
+	})
+}
+
+// verifies that the predicates, the increment and the decrement do not
+// allocate.
+func Test_IPv4Addr_Predicates_DoNotAllocate(t *testing.T) {
+	address := xnetip.MustParseIPv4Addr("192.168.0.1")
+	requireNoAllocs(t, func() {
+		boolSink = address.IsUnspecified()
+		boolSink = address.IsLoopback()
+		boolSink = address.IsPrivate()
+		boolSink = address.IsMulticast()
+		boolSink = address.IsLinkLocalUnicast()
+		boolSink = address.IsLinkLocalMulticast()
+		boolSink = address.IsGlobalUnicast()
+		ipv4AddrSink, boolSink = address.Next()
+		ipv4AddrSink, boolSink = address.Prev()
+		intSink = address.BitLen()
+	})
+}
+
+// genBoundaryHeavyIPv4Addr draws an address whose octets favour the
+// classification range boundaries, mixing in uniform octets.
+func genBoundaryHeavyIPv4Addr(t *rapid.T) xnetip.IPv4Addr {
+	boundaryOctets := []byte{0, 1, 9, 10, 11, 15, 16, 31, 32, 126, 127, 128, 168, 169, 170, 172, 192, 223, 224, 239, 240, 254, 255}
+	octet := rapid.OneOf(rapid.SampledFrom(boundaryOctets), rapid.Byte())
+	return xnetip.IPv4AddrFrom4([4]byte{
+		octet.Draw(t, "octet0"),
+		octet.Draw(t, "octet1"),
+		octet.Draw(t, "octet2"),
+		octet.Draw(t, "octet3"),
+	})
+}
+
 // verifies that compare is the numeric order of the 32-bit pattern.
 //
 // The first octet dominates, lower octets break ties, the top bit is not
