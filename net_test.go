@@ -3391,6 +3391,192 @@ func Test_Network_Addrs_AllocationFree(t *testing.T) {
 	})
 }
 
+// verifies that a wrapped IPv4 network yields its addresses in
+// reverse host-index order with every item in the IPv4 family.
+func Test_Network_AddrsBackward_IPv4FamilyAndReverseOrder(t *testing.T) {
+	network := xnetip.MustParseNetwork("10.0.0.0/30")
+	collected := slices.Collect(network.AddrsBackward())
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("10.0.0.3"),
+		netip.MustParseAddr("10.0.0.2"),
+		netip.MustParseAddr("10.0.0.1"),
+		netip.MustParseAddr("10.0.0.0"),
+	}, collected)
+	for _, addr := range collected {
+		require.True(t, addr.Is4())
+	}
+}
+
+// verifies that a wrapped IPv6 network yields its addresses in
+// reverse host-index order with every item in the IPv6 family.
+func Test_Network_AddrsBackward_IPv6FamilyAndReverseOrder(t *testing.T) {
+	network := xnetip.MustParseNetwork("2001:db8::/126")
+	collected := slices.Collect(network.AddrsBackward())
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("2001:db8::3"),
+		netip.MustParseAddr("2001:db8::2"),
+		netip.MustParseAddr("2001:db8::1"),
+		netip.MustParseAddr("2001:db8::"),
+	}, collected)
+	for _, addr := range collected {
+		require.True(t, addr.Is6())
+	}
+}
+
+// verifies that an IPv4 host route yields exactly its single address.
+func Test_Network_AddrsBackward_IPv4HostRouteSingle(t *testing.T) {
+	network := xnetip.MustParseNetwork("1.2.3.4/32")
+	collected := slices.Collect(network.AddrsBackward())
+	require.Equal(t, []netip.Addr{netip.MustParseAddr("1.2.3.4")}, collected)
+	require.True(t, collected[0].Is4())
+}
+
+// verifies that an IPv4-mapped IPv6 network stays IPv6: its items
+// keep the mapped 16-byte form and never unmap to the IPv4 family.
+func Test_Network_AddrsBackward_MappedIPv6StaysIPv6(t *testing.T) {
+	network := xnetip.MustParseNetwork("::ffff:1.2.3.4/126")
+	require.True(t, network.Is6())
+	collected := slices.Collect(network.AddrsBackward())
+	require.Len(t, collected, 4)
+	require.Equal(t, netip.MustParseAddr("::ffff:1.2.3.7"), collected[0])
+	for _, addr := range collected {
+		require.True(t, addr.Is6())
+		require.False(t, addr.Is4())
+	}
+}
+
+// verifies that the IPv4 default route starts at the all-ones
+// address and steps to its predecessor, in the IPv4 family.
+func Test_Network_AddrsBackward_IPv4UniverseHead(t *testing.T) {
+	network := xnetip.MustParseNetwork("0.0.0.0/0")
+	head := collectHead(network.AddrsBackward(), 2)
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("255.255.255.255"),
+		netip.MustParseAddr("255.255.255.254"),
+	}, head)
+}
+
+// verifies that breaking out of the loop stops the sequence after
+// exactly the consumed items.
+func Test_Network_AddrsBackward_EarlyBreakStops(t *testing.T) {
+	network := xnetip.MustParseNetwork("2001:db8::/120")
+	consumed := 0
+	for range network.AddrsBackward() {
+		consumed++
+		if consumed == 3 {
+			break
+		}
+	}
+	require.Equal(t, 3, consumed)
+}
+
+// verifies through the wrapper that the IPv4 four-bit hole steps
+// the third octet down by sixteen, in Is4 items.
+func Test_Network_AddrsBackward_IPv4NonContiguousPinnedReverseOrder(t *testing.T) {
+	network := xnetip.MustParseNetwork("10.0.0.1/255.255.15.255")
+	expected := make([]netip.Addr, 0, 16)
+	for value := range 16 {
+		expected = append(expected, netip.AddrFrom4([4]byte{10, 0, byte(16 * (15 - value)), 1}))
+	}
+	require.Equal(t, expected, slices.Collect(network.AddrsBackward()))
+}
+
+// verifies the pinned IPv6 two-run reverse order through the wrapper.
+//
+// The host bits sit at positions 12 through 15 and 80 through 83, so
+// descending host indices drain the upper run's value first and step
+// the lower run down within each of its values, exactly as in the
+// concrete IPv6 sequence.
+func Test_Network_AddrsBackward_IPv6NonContiguousTwoRunReverseOrder(t *testing.T) {
+	network := xnetip.MustParseNetwork("2001:db8::1/ffff:ffff:fff0:ffff:ffff:ffff:ffff:0fff")
+	expected := make([]netip.Addr, 0, 256)
+	for value := range 256 {
+		index := 255 - value
+		expected = append(expected, netipAddrFrom6Bits(
+			0x2001_0db8_0000_0000|uint64(index>>4)<<16,
+			uint64(1|(index&0xf)<<12),
+		))
+	}
+	require.Equal(t, expected, slices.Collect(network.AddrsBackward()))
+}
+
+// verifies on bounded spaces that the backward sequence is exactly
+// the reverse of the forward one, in either family.
+func Test_Network_AddrsBackward_ExactReverseOfAddrsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var network xnetip.Network
+		if rapid.Bool().Draw(t, "is4") {
+			network = xnetip.NetworkFrom4(drawBoundedNetwork4(t, 14))
+		} else {
+			network = xnetip.NetworkFrom6(drawBoundedNetwork6(t, 14))
+		}
+		expected := slices.Collect(network.Addrs())
+		slices.Reverse(expected)
+		require.Equal(t, expected, slices.Collect(network.AddrsBackward()))
+	})
+}
+
+// verifies that the wrapper's backward sequence equals the concrete
+// type's backward sequence element by element, for either family.
+func Test_Network_AddrsBackward_DelegatesToFamilyProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		if rapid.Bool().Draw(t, "is4") {
+			network := drawBoundedNetwork4(t, 14)
+			require.Equal(
+				t,
+				slices.Collect(network.AddrsBackward()),
+				slices.Collect(xnetip.NetworkFrom4(network).AddrsBackward()),
+			)
+		} else {
+			network := drawBoundedNetwork6(t, 14)
+			require.Equal(
+				t,
+				slices.Collect(network.AddrsBackward()),
+				slices.Collect(xnetip.NetworkFrom6(network).AddrsBackward()),
+			)
+		}
+	})
+}
+
+// verifies that every yielded address carries the network's own
+// address family, probing the head of unbounded draws.
+func Test_Network_AddrsBackward_FamilyMatchesNetworkProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork.Draw(t, "network")
+		for _, addr := range collectHead(network.AddrsBackward(), 8) {
+			require.Equal(t, network.Is4(), addr.Is4())
+			require.Equal(t, network.Is6(), addr.Is6())
+		}
+	})
+}
+
+// verifies that the first yielded address is the last address for
+// every generated network.
+func Test_Network_AddrsBackward_FirstIsLastAddrProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork.Draw(t, "network")
+		head := collectHead(network.AddrsBackward(), 1)
+		require.Equal(t, []netip.Addr{network.LastAddr()}, head)
+	})
+}
+
+// verifies that a full drain of the backward sequence performs no
+// allocation in either family.
+func Test_Network_AddrsBackward_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseNetwork("192.168.1.0/24")
+	six := xnetip.MustParseNetwork("2a02:6b8:c00::1234:0:0/120")
+	requireNoAllocs(t, func() {
+		for addr := range four.AddrsBackward() {
+			addrSink = addr
+		}
+	})
+	requireNoAllocs(t, func() {
+		for addr := range six.AddrsBackward() {
+			addrSink = addr
+		}
+	})
+}
+
 // verifies that merging works within a family, never across families,
 // and keeps the family of its inputs.
 func Test_Network_Merge_FamiliesAndBoundary(t *testing.T) {

@@ -299,6 +299,37 @@ func (m Network) Addrs() iter.Seq[netip.Addr] {
 	}
 }
 
+// AddrsBackward returns every address of the network in reverse
+// host-index order, each carrying the network's address family.
+//
+// It yields exactly the addresses of Addrs in the opposite order:
+// Is4 netip.Addr values for an IPv4 network, Is6 for an IPv6 one,
+// zone-free either way. The walk starts at LastAddr(), and for a
+// contiguous mask it is descending numeric order down to Addr().
+// The sequence is re-iterable, allocation-free and stops early when
+// the consumer breaks. The number of addresses is exactly
+// 1 << NumHostBits().
+func (m Network) AddrsBackward() iter.Seq[netip.Addr] {
+	// The dispatch lives inside a single returned closure so a range
+	// over it stays a direct call in both families.
+	return func(yield func(netip.Addr) bool) {
+		// An IPv4 network must unwrap before iterating.
+		//
+		// The stored IPv4-mapped form would yield addresses of the
+		// wrong family. The mapped-storage invariant makes the low
+		// 32 stored bits the IPv4 network, already normalized.
+		if m.is4 {
+			network := Network4{
+				addr: addr4FromBits(uint32(m.network.addr.bits.lo)),
+				mask: addr4FromBits(uint32(m.network.mask.bits.lo)),
+			}
+			network.AddrsBackward()(yield)
+			return
+		}
+		m.network.AddrsBackward()(yield)
+	}
+}
+
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
 // other.
 //
