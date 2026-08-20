@@ -1286,6 +1286,75 @@ func BenchmarkIPv4Network_Intersects_NonContiguous(b *testing.B) {
 	}
 }
 
+// verifies that disjointness holds exactly for networks sharing no
+// address.
+//
+// No network is disjoint from itself or from the universe, and two
+// host routes are disjoint exactly when they differ.
+func Test_IPv4Network_IsDisjoint_ContiguousAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  bool
+	}{
+		{name: "overlapping contiguous", left: xnetip.MustParseIPv4Network("192.168.0.0/16"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: false},
+		{name: "overlapping contiguous reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
+		{name: "disjoint contiguous", left: xnetip.MustParseIPv4Network("192.168.0.0/16"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: true},
+		{name: "self", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: false},
+		{name: "unspecified with anything", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("203.0.113.0/24"), want: false},
+		{name: "different host routes", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.2/32"), want: true},
+		{name: "equal host routes", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsDisjoint(testCase.right))
+		})
+	}
+}
+
+// verifies that disjointness of non-contiguous networks needs a
+// doubly constrained bit that differs.
+//
+// Masks sharing no set bit are never disjoint, whatever the
+// addresses.
+func Test_IPv4Network_IsDisjoint_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  bool
+	}{
+		{name: "pattern disjoint from block", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("11.0.0.0/255.0.0.0"), want: true},
+		{name: "pattern overlapping block", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0"), want: false},
+		{name: "alternating masks", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("0.170.0.170/85.170.85.170"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsDisjoint(testCase.right))
+		})
+	}
+}
+
+// verifies that disjointness is the exact complement of intersection,
+// symmetric, and never holds for a network against itself.
+func Test_IPv4Network_IsDisjoint_ComplementOfIntersectsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		require.Equal(t, !left.Intersects(right), left.IsDisjoint(right))
+		require.Equal(t, left.IsDisjoint(right), right.IsDisjoint(left))
+		require.False(t, left.IsDisjoint(left))
+	})
+}
+
+// verifies that the predicate allocates nothing.
+func Test_IPv4Network_IsDisjoint_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255")
+	right := xnetip.MustParseIPv4Network("11.0.0.0/255.0.0.0")
+	requireNoAllocs(t, func() { okSink = left.IsDisjoint(right) })
+}
+
 // verifies that exactly the masks made of leading ones followed by
 // zeros are contiguous, the all-zero and all-ones masks included.
 func Test_IPv4Network_IsContiguous_LeadingOnesRunOnly(t *testing.T) {
