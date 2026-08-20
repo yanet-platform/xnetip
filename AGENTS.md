@@ -30,7 +30,7 @@ CI (GitHub Actions, `.github/workflows/ci.yml`) runs `go test -race`, vet, gofum
 ```
 uint128.go         unexported 128-bit helper {hi, lo uint64}, exported methods, unexported constructors — every IPv6 bit trick goes through it
 addr4.go addr6.go  unexported address kernels ipv4Addr{uint32} ipv6Addr{uint128} — the public API speaks netip.Addr
-network4.go network6.go network.go   IPv4Network  IPv6Network  IPNetwork{network IPv6Network; is4 bool}
+net4.go net6.go net.go               IPv4Network  IPv6Network  IPNetwork{network IPv6Network; is4 bool}
                    a type's whole API lives in its file (constructors, Parse*, formatters, marshalling, set algebra, Addrs, Difference)
 errors.go compact.go             sentinels, Compact[T]
 range.go aggregate.go binary_split.go   free functions over ranges and slices (RangeToNetworks*, Aggregate*, BinarySplit*), one file each
