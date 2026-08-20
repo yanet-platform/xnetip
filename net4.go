@@ -131,13 +131,13 @@ func (m IPv4Network) IsContiguous() bool {
 	return mask|(mask-1) == ^uint32(0)
 }
 
-// Prefix returns the prefix length of the mask when the mask is
+// PrefixLen returns the prefix length of the mask when the mask is
 // contiguous.
 //
 // The prefix is the number of leading one bits, 0 through 32. The
 // second result is false for a non-contiguous mask, in which case no
 // prefix length describes the network and the first result is 0.
-func (m IPv4Network) Prefix() (int, bool) {
+func (m IPv4Network) PrefixLen() (int, bool) {
 	if !m.IsContiguous() {
 		return 0, false
 	}

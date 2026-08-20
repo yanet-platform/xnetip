@@ -130,7 +130,7 @@ func (m IPv6Network) IsContiguous() bool {
 	return m.mask.bits.IsContiguousMask()
 }
 
-// Prefix returns the prefix length of the mask when the mask is
+// PrefixLen returns the prefix length of the mask when the mask is
 // contiguous.
 //
 // The prefix is the number of leading one bits, 0 through 128. The
@@ -138,7 +138,7 @@ func (m IPv6Network) IsContiguous() bool {
 // prefix length describes the network and the first result is 0. An
 // IPv4-mapped network reports its 128-bit length: the image of an
 // IPv4 /24 is a /120 here.
-func (m IPv6Network) Prefix() (int, bool) {
+func (m IPv6Network) PrefixLen() (int, bool) {
 	if !m.IsContiguous() {
 		return 0, false
 	}

@@ -208,7 +208,7 @@ func (m IPNetwork) IsContiguous() bool {
 // above its 32 family bits.
 const ipv4MappedPrefixBits = 96
 
-// Prefix returns the family-native prefix length when the mask is
+// PrefixLen returns the family-native prefix length when the mask is
 // contiguous.
 //
 // For an IPv4 network the prefix is 0 through 32, for an IPv6 network
@@ -218,8 +218,8 @@ const ipv4MappedPrefixBits = 96
 // IPv4 network carries the 96 mapped-range bits as leading ones above
 // its 32 family bits, so the family length is the 128-bit length of
 // the stored form minus that width.
-func (m IPNetwork) Prefix() (int, bool) {
-	prefix, ok := m.network.Prefix()
+func (m IPNetwork) PrefixLen() (int, bool) {
+	prefix, ok := m.network.PrefixLen()
 	if ok && m.is4 {
 		return prefix - ipv4MappedPrefixBits, true
 	}
