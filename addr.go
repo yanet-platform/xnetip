@@ -120,6 +120,33 @@ func (m IPAddr) AppendTo(b []byte) []byte {
 	return m.addr.AppendTo(b)
 }
 
+// MarshalText implements encoding.TextMarshaler.
+//
+// The text is exactly String(): the per-family form, mapped addresses
+// as "::ffff:a.b.c.d". The error is always nil, and the single
+// allocation is the returned slice, sized upfront for the longest form.
+// The zero value marshals as "::", not as empty text, because it is a
+// real address.
+func (m IPAddr) MarshalText() ([]byte, error) {
+	return m.AppendTo(make([]byte, 0, len("ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255"))), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+//
+// The text must be accepted by ParseIPAddr, so a zone suffix is
+// rejected, and on error the receiver is left untouched. Unlike
+// netip.Addr, empty text is an error rather than the zero value,
+// because the zero IPAddr is the valid address :: and an absent field
+// must not silently decode into it.
+func (m *IPAddr) UnmarshalText(text []byte) error {
+	address, err := ParseIPAddr(string(text))
+	if err != nil {
+		return err
+	}
+	*m = address
+	return nil
+}
+
 // ParseIPAddr parses s as an IPv4 address ("192.0.2.1") or an IPv6
 // address ("2001:db8::1"), the grammar of netip.ParseAddr minus zones.
 //

@@ -1,6 +1,7 @@
 package xnetip_test
 
 import (
+	"encoding/json"
 	"net/netip"
 	"slices"
 	"testing"
@@ -639,6 +640,175 @@ func BenchmarkParseIPAddr_Reject(b *testing.B) {
 	for b.Loop() {
 		ipAddrSink, errSink = xnetip.ParseIPAddr(text)
 	}
+}
+
+// verifies that marshalling emits exactly the string form for both
+// families and the mapped special case.
+func Test_IPAddr_MarshalText_EmitsStringForm(t *testing.T) {
+	cases := []struct {
+		name string
+		addr xnetip.IPAddr
+		want string
+	}{
+		{name: "IPv4", addr: mustParseIPAddr4(t, "192.168.1.0"), want: "192.168.1.0"},
+		{name: "IPv6", addr: mustParseIPAddr6(t, "2001:db8::"), want: "2001:db8::"},
+		{name: "mapped stored as IPv6", addr: mustParseIPAddr6(t, "::ffff:1.2.3.4"), want: "::ffff:1.2.3.4"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.addr.MarshalText()
+			require.NoError(t, err)
+			require.Equal(t, tc.want, string(got))
+		})
+	}
+}
+
+// verifies that the zero value marshals as its address text, not as
+// empty text, because it is the real address ::.
+func Test_IPAddr_MarshalText_ZeroValueIsUnspecified(t *testing.T) {
+	got, err := xnetip.IPAddr{}.MarshalText()
+	require.NoError(t, err)
+	require.Equal(t, "::", string(got))
+}
+
+// verifies that unmarshalling accepts what the parser accepts, family
+// flag included.
+func Test_IPAddr_UnmarshalText_AcceptsValidText(t *testing.T) {
+	var address xnetip.IPAddr
+	require.NoError(t, address.UnmarshalText([]byte("10.0.0.1")))
+	require.Equal(t, mustParseIPAddr4(t, "10.0.0.1"), address)
+	require.NoError(t, address.UnmarshalText([]byte("::1")))
+	require.Equal(t, mustParseIPAddr6(t, "::1"), address)
+	require.NoError(t, address.UnmarshalText([]byte("::ffff:1.2.3.4")))
+	require.True(t, address.Is6())
+}
+
+// verifies that empty text is an error and leaves the receiver
+// untouched: an absent value must not silently decode into ::.
+func Test_IPAddr_UnmarshalText_RejectsEmptyText(t *testing.T) {
+	address := mustParseIPAddr4(t, "10.0.0.1")
+	require.Error(t, address.UnmarshalText([]byte("")))
+	require.Equal(t, mustParseIPAddr4(t, "10.0.0.1"), address)
+}
+
+// verifies that garbage is rejected and the receiver is left untouched.
+func Test_IPAddr_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
+	address := mustParseIPAddr6(t, "2001:db8::1")
+	require.Error(t, address.UnmarshalText([]byte("zz")))
+	require.Equal(t, mustParseIPAddr6(t, "2001:db8::1"), address)
+}
+
+// verifies that a zone suffix is rejected with the zone sentinel.
+func Test_IPAddr_UnmarshalText_RejectsZone(t *testing.T) {
+	var address xnetip.IPAddr
+	require.ErrorIs(t, address.UnmarshalText([]byte("fe80::1%eth0")), xnetip.ErrZone)
+}
+
+// verifies that a struct field of the type round-trips through JSON as
+// its address text.
+func Test_IPAddr_MarshalText_JSONRoundTripsStructField(t *testing.T) {
+	type payload struct{ A xnetip.IPAddr }
+	original := payload{A: mustParseIPAddr4(t, "1.2.3.4")}
+	encoded, err := json.Marshal(original)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"A":"1.2.3.4"}`, string(encoded))
+	var decoded payload
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, original, decoded)
+}
+
+// verifies that the type works as a JSON map key through the text
+// interfaces.
+func Test_IPAddr_MarshalText_JSONRoundTripsMapKey(t *testing.T) {
+	original := map[xnetip.IPAddr]int{mustParseIPAddr6(t, "::1"): 1}
+	encoded, err := json.Marshal(original)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"::1":1}`, string(encoded))
+	var decoded map[xnetip.IPAddr]int
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, original, decoded)
+}
+
+// verifies that a JSON null leaves the field untouched without an
+// error, the encoding/json contract for text unmarshalers.
+func Test_IPAddr_UnmarshalText_JSONNullKeepsField(t *testing.T) {
+	type payload struct{ A xnetip.IPAddr }
+	decoded := payload{A: mustParseIPAddr4(t, "1.2.3.4")}
+	require.NoError(t, json.Unmarshal([]byte(`{"A":null}`), &decoded))
+	require.Equal(t, mustParseIPAddr4(t, "1.2.3.4"), decoded.A)
+}
+
+// verifies that the marshalled text equals the string form on every
+// address.
+func Test_IPAddr_MarshalText_AgreesWithString(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		text, err := address.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, address.String(), string(text))
+	})
+}
+
+// verifies that unmarshalling the marshalled text restores every
+// address, family flag included.
+func Test_IPAddr_MarshalText_RoundTripsThroughUnmarshal(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		text, err := address.MarshalText()
+		require.NoError(t, err)
+		var decoded xnetip.IPAddr
+		require.NoError(t, decoded.UnmarshalText(text))
+		require.Equal(t, address, decoded)
+	})
+}
+
+// verifies that a JSON slice of addresses round-trips as the identity.
+func Test_IPAddr_MarshalText_JSONRoundTripsSlice(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addrs := rapid.SliceOfN(genIPAddr, 0, 8).Draw(t, "addrs")
+		encoded, err := json.Marshal(addrs)
+		require.NoError(t, err)
+		var decoded []xnetip.IPAddr
+		require.NoError(t, json.Unmarshal(encoded, &decoded))
+		if len(addrs) == 0 {
+			require.Empty(t, decoded)
+			return
+		}
+		require.Equal(t, addrs, decoded)
+	})
+}
+
+// verifies that the marshalled text agrees with net/netip for every
+// address.
+//
+// The netip oracle is built from the family and the bytes, so it is
+// always a valid address and never hits netip's empty-text zero case.
+func Test_IPAddr_MarshalText_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		want, wantErr := toNetipAddr(address).MarshalText()
+		require.NoError(t, wantErr)
+		got, err := address.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+}
+
+// verifies that marshalling allocates exactly once, for the returned
+// text itself, even in the longest form.
+func Test_IPAddr_MarshalText_AllocatesOnce(t *testing.T) {
+	address := mustParseIPAddr6(t, "ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255")
+	allocs := int(testing.AllocsPerRun(100, func() { bytesSink, errSink = address.MarshalText() }))
+	require.Equal(t, 1, allocs)
+}
+
+// verifies that the unmarshal success path allocates at most once, for
+// the string conversion of the input bytes.
+func Test_IPAddr_UnmarshalText_AllocatesAtMostOnce(t *testing.T) {
+	text := []byte("2001:db8::1")
+	var address xnetip.IPAddr
+	allocs := int(testing.AllocsPerRun(100, func() { errSink = address.UnmarshalText(text) }))
+	require.LessOrEqual(t, allocs, 1)
 }
 
 // mustParseIPAddr4 builds an IPv4 IPAddr from dotted-decimal text.
