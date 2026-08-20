@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/netip"
@@ -620,6 +621,193 @@ func BenchmarkIPv6Addr_StringExpanded(b *testing.B) {
 	for b.Loop() {
 		stringSink = address.StringExpanded()
 	}
+}
+
+// verifies that the marshalled text is exactly the canonical string form
+// of the address, with a nil error.
+func Test_IPv6Addr_MarshalText_EmitsStringForm(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("2001:db8::1")
+	got, err := address.MarshalText()
+	require.NoError(t, err)
+	require.Equal(t, []byte("2001:db8::1"), got)
+}
+
+// verifies that the zero value marshals as the unspecified address rather
+// than as empty text, because the zero value is a real address.
+func Test_IPv6Addr_MarshalText_ZeroValueIsUnspecified(t *testing.T) {
+	var zero xnetip.IPv6Addr
+	got, err := zero.MarshalText()
+	require.NoError(t, err)
+	require.Equal(t, "::", string(got))
+}
+
+// verifies that an IPv4-mapped address marshals in its dotted-quad text
+// form, staying an IPv6 value rather than unmapping.
+func Test_IPv6Addr_MarshalText_MappedStaysMapped(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("::ffff:1.2.3.4")
+	got, err := address.MarshalText()
+	require.NoError(t, err)
+	require.Equal(t, "::ffff:1.2.3.4", string(got))
+}
+
+// verifies that the appending marshal form writes the text after the
+// buffer's existing content rather than overwriting it.
+func Test_IPv6Addr_AppendText_AppendsAfterExistingContent(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("2001:db8::1")
+	got, err := address.AppendText([]byte("x="))
+	require.NoError(t, err)
+	require.Equal(t, "x=2001:db8::1", string(got))
+}
+
+// verifies that unmarshalling accepts what the parser accepts and stores
+// the parsed address into the receiver, mapped text staying its 16 bytes.
+func Test_IPv6Addr_UnmarshalText_AcceptsValidText(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  xnetip.IPv6Addr
+	}{
+		{name: "compressed address", input: "2001:db8::1", want: xnetip.MustParseIPv6Addr("2001:db8::1")},
+		{name: "uppercase mapped address stays mapped", input: "::FFFF:1.2.3.4", want: xnetip.MustParseIPv6Addr("::ffff:1.2.3.4")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var address xnetip.IPv6Addr
+			require.NoError(t, address.UnmarshalText([]byte(tc.input)))
+			require.Equal(t, tc.want, address)
+		})
+	}
+}
+
+// verifies that empty text is a parse error and leaves the receiver
+// untouched.
+//
+// This diverges from net/netip on purpose: there the zero value marks an
+// invalid address, here it is the valid unspecified address, so empty
+// text must not silently decode into it.
+func Test_IPv6Addr_UnmarshalText_RejectsEmptyText(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("2001:db8::1")
+	err := address.UnmarshalText([]byte(""))
+	require.ErrorIs(t, err, xnetip.ErrParse)
+	require.Equal(t, xnetip.MustParseIPv6Addr("2001:db8::1"), address)
+}
+
+// verifies that text carrying a zone suffix fails unmarshalling with the
+// zone sentinel and leaves the receiver untouched.
+func Test_IPv6Addr_UnmarshalText_RejectsZone(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("2001:db8::1")
+	err := address.UnmarshalText([]byte("fe80::1%eth0"))
+	require.ErrorIs(t, err, xnetip.ErrZone)
+	require.Equal(t, xnetip.MustParseIPv6Addr("2001:db8::1"), address)
+}
+
+// verifies that dotted-decimal IPv4 text fails unmarshalling as a family
+// mismatch and leaves the receiver untouched.
+func Test_IPv6Addr_UnmarshalText_RejectsIPv4Text(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("2001:db8::1")
+	err := address.UnmarshalText([]byte("1.2.3.4"))
+	require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+	require.Equal(t, xnetip.MustParseIPv6Addr("2001:db8::1"), address)
+}
+
+// verifies that text the parser rejects fails unmarshalling and leaves
+// the receiver untouched, whatever the reason for the rejection.
+func Test_IPv6Addr_UnmarshalText_RejectsInvalidText(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "double compression", input: "1::2::3"},
+		{name: "leading space", input: " ::1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			address := xnetip.MustParseIPv6Addr("2001:db8::1")
+			require.Error(t, address.UnmarshalText([]byte(tc.input)))
+			require.Equal(t, xnetip.MustParseIPv6Addr("2001:db8::1"), address)
+		})
+	}
+}
+
+// verifies that a failed unmarshal does not clobber a previously stored
+// address.
+func Test_IPv6Addr_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("2001:db8::1")
+	require.Error(t, address.UnmarshalText([]byte("x")))
+	require.Equal(t, xnetip.MustParseIPv6Addr("2001:db8::1"), address)
+}
+
+// verifies that a struct field of the address type round-trips through
+// JSON as a quoted canonical string.
+func Test_IPv6Addr_MarshalText_JSONRoundTripsStructField(t *testing.T) {
+	type record struct{ A xnetip.IPv6Addr }
+	original := record{A: xnetip.MustParseIPv6Addr("2001:db8::1")}
+	encoded, err := json.Marshal(original)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"A":"2001:db8::1"}`, string(encoded))
+	var decoded record
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, original, decoded)
+}
+
+// verifies that a JSON number does not decode into the address type,
+// which accepts text only.
+func Test_IPv6Addr_UnmarshalText_JSONRejectsNumber(t *testing.T) {
+	var decoded struct{ A xnetip.IPv6Addr }
+	require.Error(t, json.Unmarshal([]byte(`{"A":1}`), &decoded))
+}
+
+// verifies that unmarshalling the marshalled text yields the address
+// back, for every address including the mapped shapes.
+func Test_IPv6Addr_MarshalText_RoundTripsThroughUnmarshal(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		text, err := address.MarshalText()
+		require.NoError(t, err)
+		var decoded xnetip.IPv6Addr
+		require.NoError(t, decoded.UnmarshalText(text))
+		require.Equal(t, address, decoded)
+	})
+}
+
+// verifies that the marshalled text and the string form agree on every
+// address.
+func Test_IPv6Addr_MarshalText_AgreesWithString(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		text, err := address.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, address.String(), string(text))
+	})
+}
+
+// verifies that the marshalled text is byte for byte what net/netip
+// marshals for the same 16 bytes.
+func Test_IPv6Addr_MarshalText_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv6Addr.Draw(t, "address")
+		want, wantErr := netip.AddrFrom16(address.As16()).MarshalText()
+		require.NoError(t, wantErr)
+		got, err := address.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+}
+
+// verifies that marshalling allocates exactly once, for the returned
+// text itself, even in the longest all-groups form.
+func Test_IPv6Addr_MarshalText_AllocatesOnce(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+	allocs := int(testing.AllocsPerRun(100, func() { bytesSink, errSink = address.MarshalText() }))
+	require.Equal(t, 1, allocs)
+}
+
+// verifies that the appending marshal form into a buffer with enough
+// capacity does not allocate.
+func Test_IPv6Addr_AppendText_DoesNotAllocate(t *testing.T) {
+	address := xnetip.MustParseIPv6Addr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+	buffer := make([]byte, 0, 64)
+	requireNoAllocs(t, func() { bytesSink, errSink = address.AppendText(buffer[:0]) })
 }
 
 // verifies that the eight-group form parses to the address it spells,
