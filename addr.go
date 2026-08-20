@@ -104,6 +104,172 @@ func (m IPAddr) Netip() netip.Addr {
 	return m.addr.Netip()
 }
 
+// IsUnspecified reports whether the address is the unspecified address
+// of its family, 0.0.0.0 or ::.
+//
+// The IPv4-mapped ::ffff:0.0.0.0 kept in the IPv6 family is a different
+// 128-bit value and is not unspecified, as in net/netip.
+func (m IPAddr) IsUnspecified() bool {
+	if v4, ok := m.IPv4(); ok {
+		return v4.IsUnspecified()
+	}
+	return m.addr.IsUnspecified()
+}
+
+// IsLoopback reports whether the address is loopback, in 127.0.0.0/8
+// for IPv4 and ::1 for IPv6.
+//
+// An IPv4-mapped address is judged by its IPv4 part, the net/netip
+// rule.
+func (m IPAddr) IsLoopback() bool {
+	if v4, ok := m.IPv4(); ok {
+		return v4.IsLoopback()
+	}
+	return m.addr.IsLoopback()
+}
+
+// IsPrivate reports whether the address is private, RFC 1918 for IPv4
+// and fc00::/7 (RFC 4193) for IPv6.
+//
+// An IPv4-mapped address is judged by its IPv4 part. A private address
+// still counts as global unicast, exactly as in net/netip.
+func (m IPAddr) IsPrivate() bool {
+	if v4, ok := m.IPv4(); ok {
+		return v4.IsPrivate()
+	}
+	return m.addr.IsPrivate()
+}
+
+// IsMulticast reports whether the address is multicast, in 224.0.0.0/4
+// for IPv4 and ff00::/8 for IPv6.
+//
+// An IPv4-mapped address is judged by its IPv4 part, the net/netip
+// rule.
+func (m IPAddr) IsMulticast() bool {
+	if v4, ok := m.IPv4(); ok {
+		return v4.IsMulticast()
+	}
+	return m.addr.IsMulticast()
+}
+
+// IsLinkLocalUnicast reports whether the address is link-local
+// unicast, in 169.254.0.0/16 for IPv4 and fe80::/10 for IPv6.
+//
+// An IPv4-mapped address is judged by its IPv4 part, the net/netip
+// rule.
+func (m IPAddr) IsLinkLocalUnicast() bool {
+	if v4, ok := m.IPv4(); ok {
+		return v4.IsLinkLocalUnicast()
+	}
+	return m.addr.IsLinkLocalUnicast()
+}
+
+// IsLinkLocalMulticast reports whether the address is link-local
+// multicast, 224.0.0.0/24 for IPv4 and scope 2 for IPv6.
+//
+// An IPv4-mapped address is judged by its IPv4 part, the net/netip
+// rule.
+func (m IPAddr) IsLinkLocalMulticast() bool {
+	if v4, ok := m.IPv4(); ok {
+		return v4.IsLinkLocalMulticast()
+	}
+	return m.addr.IsLinkLocalMulticast()
+}
+
+// IsInterfaceLocalMulticast reports whether the address is an
+// interface-local multicast address (scope 1 in the first group).
+//
+// The scope is an IPv6-only concept, so it is false for every IPv4
+// address and for every IPv4-mapped address, as in net/netip.
+func (m IPAddr) IsInterfaceLocalMulticast() bool {
+	if m.is4 {
+		return false
+	}
+	return m.addr.IsInterfaceLocalMulticast()
+}
+
+// IsGlobalUnicast reports whether the address is global unicast in the
+// sense of net/netip and package net.
+//
+// It is false for the unspecified, loopback, multicast and link-local
+// unicast addresses of either family, and for the IPv4 broadcast
+// address 255.255.255.255. An IPv4-mapped address is judged by its IPv4
+// part. Private addresses count as global unicast, exactly as in
+// net/netip.
+func (m IPAddr) IsGlobalUnicast() bool {
+	if v4, ok := m.IPv4(); ok {
+		return v4.IsGlobalUnicast()
+	}
+	return m.addr.IsGlobalUnicast()
+}
+
+// Is4In6 reports whether the address is an IPv6 address in the
+// IPv4-mapped range ::ffff:0:0/96.
+//
+// It is false for an IPv4 address even though its storage is mapped:
+// only a value built as IPv6 can be 4in6, as in net/netip.
+func (m IPAddr) Is4In6() bool {
+	return !m.is4 && m.addr.Is4In6()
+}
+
+// Unmap returns the IPv4 address embedded in an IPv4-mapped IPv6
+// address, and every other address unchanged.
+//
+// It collapses the mapped form into the IPv4 family, so the result is
+// never 4in6 and unmapping is idempotent. It is the family-agnostic
+// counterpart of netip.Addr.Unmap and the exact behaviour of Rust's
+// IpAddr::to_canonical.
+func (m IPAddr) Unmap() IPAddr {
+	if !m.Is4In6() {
+		return m
+	}
+	v4, _ := m.addr.ToIPv4Mapped()
+	return IPAddrFrom4(v4)
+}
+
+// Next returns the address one above m within its family.
+//
+// The second result is false at the top of the family, 255.255.255.255
+// or ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff: an IPv4 increment never
+// crosses into IPv6. Unlike netip.Addr.Next, the end is reported with
+// the comma-ok form rather than an invalid address, because every
+// IPAddr value is a real address.
+func (m IPAddr) Next() (IPAddr, bool) {
+	if v4, ok := m.IPv4(); ok {
+		next, ok := v4.Next()
+		if !ok {
+			return IPAddr{}, false
+		}
+		return IPAddrFrom4(next), true
+	}
+	next, ok := m.addr.Next()
+	if !ok {
+		return IPAddr{}, false
+	}
+	return IPAddrFrom6(next), true
+}
+
+// Prev returns the address one below m within its family.
+//
+// The second result is false at the bottom of the family, 0.0.0.0 or
+// ::. Unlike netip.Addr.Prev, the end is reported with the comma-ok
+// form rather than an invalid address, because every IPAddr value is a
+// real address.
+func (m IPAddr) Prev() (IPAddr, bool) {
+	if v4, ok := m.IPv4(); ok {
+		prev, ok := v4.Prev()
+		if !ok {
+			return IPAddr{}, false
+		}
+		return IPAddrFrom4(prev), true
+	}
+	prev, ok := m.addr.Prev()
+	if !ok {
+		return IPAddr{}, false
+	}
+	return IPAddrFrom6(prev), true
+}
+
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
 // other.
 //

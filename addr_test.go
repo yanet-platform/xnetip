@@ -975,3 +975,251 @@ func Test_IPAddr_Construction_DoesNotAllocate(t *testing.T) {
 	})
 	_ = octets
 }
+
+// verifies that the IPv4 loopback address is loopback and, like every
+// loopback address, not global unicast.
+func Test_IPAddr_IsLoopback_IPv4Loopback(t *testing.T) {
+	address := mustParseIPAddr4(t, "127.0.0.1")
+	require.True(t, address.IsLoopback())
+	require.False(t, address.IsGlobalUnicast())
+}
+
+// verifies that the IPv6 loopback address is loopback.
+func Test_IPAddr_IsLoopback_IPv6Loopback(t *testing.T) {
+	require.True(t, mustParseIPAddr6(t, "::1").IsLoopback())
+}
+
+// verifies that a mapped loopback kept in the IPv6 family is classified
+// by its embedded IPv4 part while staying IPv6, the net/netip rule.
+func Test_IPAddr_IsLoopback_MappedLoopbackStaysIPv6(t *testing.T) {
+	address := mustParseIPAddr6(t, "::ffff:127.0.0.1")
+	require.True(t, address.IsLoopback())
+	require.True(t, address.Is4In6())
+	require.False(t, address.Is4())
+}
+
+// verifies that an IPv4 value is not 4in6 even though its storage is
+// mapped.
+func Test_IPAddr_Is4In6_FalseForIPv4Value(t *testing.T) {
+	require.False(t, mustParseIPAddr4(t, "1.2.3.4").Is4In6())
+}
+
+// verifies that private addresses of both families and a mapped private
+// address all report private.
+func Test_IPAddr_IsPrivate_BothFamiliesAndMapped(t *testing.T) {
+	require.True(t, mustParseIPAddr4(t, "10.0.0.1").IsPrivate())
+	require.True(t, mustParseIPAddr6(t, "fc00::1").IsPrivate())
+	require.True(t, mustParseIPAddr6(t, "::ffff:192.168.0.1").IsPrivate())
+}
+
+// verifies that multicast addresses of both families report multicast.
+func Test_IPAddr_IsMulticast_BothFamilies(t *testing.T) {
+	require.True(t, mustParseIPAddr4(t, "224.0.0.1").IsMulticast())
+	require.True(t, mustParseIPAddr6(t, "ff02::1").IsMulticast())
+}
+
+// verifies that interface-local multicast is IPv6-only: true for scope
+// 1, false for an IPv4 value and for a mapped IPv4 multicast address.
+func Test_IPAddr_IsInterfaceLocalMulticast_IPv6Only(t *testing.T) {
+	require.True(t, mustParseIPAddr6(t, "ff01::1").IsInterfaceLocalMulticast())
+	require.False(t, mustParseIPAddr4(t, "224.0.0.1").IsInterfaceLocalMulticast())
+	require.False(t, mustParseIPAddr6(t, "::ffff:224.0.0.1").IsInterfaceLocalMulticast())
+}
+
+// verifies that link-local unicast addresses of both families report
+// link-local unicast.
+func Test_IPAddr_IsLinkLocalUnicast_BothFamilies(t *testing.T) {
+	require.True(t, mustParseIPAddr4(t, "169.254.1.1").IsLinkLocalUnicast())
+	require.True(t, mustParseIPAddr6(t, "fe80::1").IsLinkLocalUnicast())
+}
+
+// verifies that the unspecified address of each family reports
+// unspecified, the zero value being the IPv6 one.
+func Test_IPAddr_IsUnspecified_BothFamilies(t *testing.T) {
+	require.True(t, mustParseIPAddr4(t, "0.0.0.0").IsUnspecified())
+	require.True(t, xnetip.IPAddr{}.IsUnspecified())
+}
+
+// verifies that the mapped zero address kept in the IPv6 family is not
+// unspecified: it is a different 128-bit value than ::.
+func Test_IPAddr_IsUnspecified_MappedZeroIsNot(t *testing.T) {
+	require.False(t, mustParseIPAddr6(t, "::ffff:0.0.0.0").IsUnspecified())
+}
+
+// verifies that ordinary public addresses of both families report
+// global unicast.
+func Test_IPAddr_IsGlobalUnicast_BothFamilies(t *testing.T) {
+	require.True(t, mustParseIPAddr4(t, "8.8.8.8").IsGlobalUnicast())
+	require.True(t, mustParseIPAddr6(t, "2001:db8::1").IsGlobalUnicast())
+}
+
+// verifies that unmapping an IPv4-mapped address collapses it into the
+// IPv4 family with the embedded octets.
+func Test_IPAddr_Unmap_CollapsesMappedToIPv4(t *testing.T) {
+	unmapped := mustParseIPAddr6(t, "::ffff:192.0.2.1").Unmap()
+	require.Equal(t, mustParseIPAddr4(t, "192.0.2.1"), unmapped)
+	require.True(t, unmapped.Is4())
+}
+
+// verifies that unmapping an IPv4 value returns it unchanged.
+func Test_IPAddr_Unmap_IPv4Unchanged(t *testing.T) {
+	address := mustParseIPAddr4(t, "192.168.0.0")
+	require.Equal(t, address, address.Unmap())
+}
+
+// verifies that unmapping a plain IPv6 address returns it unchanged.
+func Test_IPAddr_Unmap_PlainIPv6Unchanged(t *testing.T) {
+	address := mustParseIPAddr6(t, "2001:db8::")
+	require.Equal(t, address, address.Unmap())
+}
+
+// verifies that the deprecated IPv4-compatible form is not mapped and
+// passes through unmapping unchanged.
+func Test_IPAddr_Unmap_IPv4CompatibleUnchanged(t *testing.T) {
+	address := mustParseIPAddr6(t, "::c00a:2ff")
+	require.Equal(t, address, address.Unmap())
+}
+
+// verifies that unmapping is idempotent on a mapped address.
+func Test_IPAddr_Unmap_Idempotent(t *testing.T) {
+	once := mustParseIPAddr6(t, "::ffff:1.2.3.4").Unmap()
+	require.Equal(t, once, once.Unmap())
+}
+
+// verifies that the IPv4 increment carries across an octet boundary and
+// fails at the top of the IPv4 family instead of crossing into IPv6.
+func Test_IPAddr_Next_IPv4CarriesAndStopsAtTop(t *testing.T) {
+	next, ok := mustParseIPAddr4(t, "10.0.0.255").Next()
+	require.True(t, ok)
+	require.Equal(t, mustParseIPAddr4(t, "10.0.1.0"), next)
+	_, ok = mustParseIPAddr4(t, "255.255.255.255").Next()
+	require.False(t, ok)
+}
+
+// verifies that the IPv6 increment carries across the 64-bit half
+// boundary and fails at the all-ones address.
+func Test_IPAddr_Next_IPv6CarriesAndStopsAtTop(t *testing.T) {
+	next, ok := mustParseIPAddr6(t, "::ffff:ffff:ffff:ffff").Next()
+	require.True(t, ok)
+	require.Equal(t, mustParseIPAddr6(t, "0:0:0:1::"), next)
+	_, ok = mustParseIPAddr6(t, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").Next()
+	require.False(t, ok)
+}
+
+// verifies that the decrement fails at the bottom of each family.
+func Test_IPAddr_Prev_FailsAtFamilyBottoms(t *testing.T) {
+	_, ok := mustParseIPAddr4(t, "0.0.0.0").Prev()
+	require.False(t, ok)
+	_, ok = xnetip.IPAddr{}.Prev()
+	require.False(t, ok)
+}
+
+// verifies that the increment of an IPv4 value stays IPv4.
+func Test_IPAddr_Next_KeepsFamily(t *testing.T) {
+	next, ok := mustParseIPAddr4(t, "1.2.3.4").Next()
+	require.True(t, ok)
+	require.True(t, next.Is4())
+}
+
+// verifies that every predicate agrees with net/netip on every address.
+//
+// The generator mixes both families with mapped-as-IPv6 values, so the
+// differential suite exercises the family switch and the mapped branch,
+// not only uniform luck.
+func Test_IPAddr_Predicates_MatchNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		oracle := toNetipAddr(address)
+		require.Equal(t, oracle.IsUnspecified(), address.IsUnspecified())
+		require.Equal(t, oracle.Is4In6(), address.Is4In6())
+		require.Equal(t, oracle.IsLoopback(), address.IsLoopback())
+		require.Equal(t, oracle.IsPrivate(), address.IsPrivate())
+		require.Equal(t, oracle.IsMulticast(), address.IsMulticast())
+		require.Equal(t, oracle.IsLinkLocalUnicast(), address.IsLinkLocalUnicast())
+		require.Equal(t, oracle.IsLinkLocalMulticast(), address.IsLinkLocalMulticast())
+		require.Equal(t, oracle.IsInterfaceLocalMulticast(), address.IsInterfaceLocalMulticast())
+		require.Equal(t, oracle.IsGlobalUnicast(), address.IsGlobalUnicast())
+	})
+}
+
+// verifies that unmapping agrees with net/netip in family and bytes on
+// every address, is idempotent, and never leaves a mapped result.
+func Test_IPAddr_Unmap_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		unmapped := address.Unmap()
+		oracle := toNetipAddr(address).Unmap()
+		require.Equal(t, oracle.Is4(), unmapped.Is4())
+		require.Equal(t, oracle.As16(), unmapped.As16())
+		require.Equal(t, unmapped, unmapped.Unmap())
+		require.False(t, unmapped.Is4In6())
+		if address.Is4() {
+			require.Equal(t, address, unmapped)
+		}
+	})
+}
+
+// verifies that the increment agrees with net/netip: it exists exactly
+// when netip's next address is valid, with the same family and bytes.
+func Test_IPAddr_Next_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		next, ok := address.Next()
+		oracle := toNetipAddr(address).Next()
+		require.Equal(t, oracle.IsValid(), ok)
+		if ok {
+			require.Equal(t, oracle.Is4(), next.Is4())
+			require.Equal(t, oracle.As16(), next.As16())
+		}
+	})
+}
+
+// verifies that the decrement agrees with net/netip: it exists exactly
+// when netip's previous address is valid, with the same family and bytes.
+func Test_IPAddr_Prev_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		prev, ok := address.Prev()
+		oracle := toNetipAddr(address).Prev()
+		require.Equal(t, oracle.IsValid(), ok)
+		if ok {
+			require.Equal(t, oracle.Is4(), prev.Is4())
+			require.Equal(t, oracle.As16(), prev.As16())
+		}
+	})
+}
+
+// verifies that the decrement undoes the increment whenever the
+// increment exists.
+func Test_IPAddr_Next_ThenPrev_RoundTrips(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		next, ok := address.Next()
+		if !ok {
+			t.Skip("no next address")
+		}
+		prev, ok := next.Prev()
+		require.True(t, ok)
+		require.Equal(t, address, prev)
+	})
+}
+
+// verifies that the predicates, the unmapping, the increment and the
+// decrement do not allocate.
+func Test_IPAddr_Predicates_DoNotAllocate(t *testing.T) {
+	address := mustParseIPAddr6(t, "::ffff:192.0.2.1")
+	requireNoAllocs(t, func() {
+		boolSink = address.IsUnspecified()
+		boolSink = address.IsLoopback()
+		boolSink = address.IsPrivate()
+		boolSink = address.IsMulticast()
+		boolSink = address.IsLinkLocalUnicast()
+		boolSink = address.IsLinkLocalMulticast()
+		boolSink = address.IsInterfaceLocalMulticast()
+		boolSink = address.IsGlobalUnicast()
+		boolSink = address.Is4In6()
+		ipAddrSink = address.Unmap()
+		ipAddrSink, boolSink = address.Next()
+		ipAddrSink, boolSink = address.Prev()
+	})
+}
