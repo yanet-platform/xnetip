@@ -200,6 +200,17 @@ func parsePrefixLenText(text string, limit int) (bits int, isPrefixForm, ok bool
 	return value, true, true
 }
 
+// parseText parses CIDR-block text for the generic contiguous
+// wrapper, exactly as ParseContiguous4 does, its error labels included.
+//
+// The receiver is a zero-value dispatch token: a generic method
+// cannot name a per-family function, so the constraint carries this
+// route instead.
+func (Network4) parseText(s string) (Network4, error) {
+	block, err := ParseContiguous4(s)
+	return block.Network(), err
+}
+
 // MustParseNetwork4 calls ParseNetwork4 and panics on error.
 //
 // It is intended for tests and package-level constants built from

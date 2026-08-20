@@ -190,6 +190,17 @@ func ipv6ParsedKernel(addr netip.Addr) (addr6, error) {
 	return kernel, nil
 }
 
+// parseText parses CIDR-block text for the generic contiguous
+// wrapper, exactly as ParseContiguous6 does, its error labels included.
+//
+// The receiver is a zero-value dispatch token: a generic method
+// cannot name a per-family function, so the constraint carries this
+// route instead.
+func (Network6) parseText(s string) (Network6, error) {
+	block, err := ParseContiguous6(s)
+	return block.Network(), err
+}
+
 // MustParseNetwork6 calls ParseNetwork6 and panics on error.
 //
 // It is intended for tests and package-level constants built from

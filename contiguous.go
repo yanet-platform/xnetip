@@ -167,6 +167,63 @@ func (m Contiguous[T]) Compare(other Contiguous[T]) int {
 	return m.network.Compare(other.network)
 }
 
+// String returns the text form of the block, always an address and
+// a prefix length ("10.0.0.0/8", "2001:db8::/32").
+//
+// An explicit mask never appears: a contiguous mask always has a
+// prefix length, so the prefix branch of the network format is the
+// only reachable one. A Network instantiation prints in its own
+// family. The output parses back with the matching ParseContiguous
+// function.
+func (m Contiguous[T]) String() string {
+	// The buffer covers the longest form of any instantiation, so
+	// the string conversion is the only allocation.
+	//
+	// A generic method cannot size the buffer per family (see
+	// Network6.String for the widest form), and the overshoot is
+	// stack space.
+	var buffer [91]byte
+	return string(m.AppendTo(buffer[:0]))
+}
+
+// AppendTo appends the text form of the block to b and returns the
+// extended buffer.
+//
+// The format is exactly the wrapped network's, and by the contiguity
+// invariant the suffix is always a prefix length, never an explicit
+// mask. The output parses back with the matching ParseContiguous
+// function.
+func (m Contiguous[T]) AppendTo(b []byte) []byte {
+	return m.network.AppendTo(b)
+}
+
+// MarshalText implements encoding.TextMarshaler.
+//
+// The text is the String form of the block: an address, "/" and a
+// prefix length. It never fails and allocates only the returned
+// slice.
+func (m Contiguous[T]) MarshalText() ([]byte, error) {
+	return m.AppendTo(make([]byte, 0, len("ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255/128"))), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+//
+// The text must be accepted by the family's ParseContiguous
+// function, so a valid network with a non-contiguous mask wraps
+// ErrNonContiguousMask. Empty text wraps ErrEmptyInput (the zero
+// wrapper is a valid block). The receiver is untouched on any error.
+func (m *Contiguous[T]) UnmarshalText(text []byte) error {
+	if len(text) == 0 {
+		return wrapParseError("Contiguous.UnmarshalText", "", ErrEmptyInput, nil)
+	}
+	network, err := m.network.parseText(string(text))
+	if err != nil {
+		return err
+	}
+	*m = Contiguous[T]{network: network}
+	return nil
+}
+
 // network is the constraint the generic adapters and wrappers range
 // over: the three network types plus the self-typed operations they share.
 //
@@ -187,4 +244,8 @@ type network[T any] interface {
 
 	// AppendTo is the concrete type's own text-form appender.
 	AppendTo([]byte) []byte
+
+	// parseText is the concrete type's route to its ParseContiguous
+	// function, called on a zero value as a dispatch token.
+	parseText(string) (T, error)
 }

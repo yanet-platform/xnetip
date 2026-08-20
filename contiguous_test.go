@@ -1,6 +1,7 @@
 package xnetip_test
 
 import (
+	"encoding/json"
 	"errors"
 	"net/netip"
 	"strconv"
@@ -734,4 +735,230 @@ func BenchmarkParseContiguous6_Reject(b *testing.B) {
 	for b.Loop() {
 		contiguous6Sink, errSink = xnetip.ParseContiguous6("2001::/ffff:0:ffff::")
 	}
+}
+
+// verifies that a block prints as address and prefix length even
+// when it was built from explicit-mask text.
+func Test_Contiguous_String_AlwaysPrefixForm(t *testing.T) {
+	require.Equal(t, "10.0.0.0/8", xnetip.MustParseContiguous4("10.0.0.0/255.0.0.0").String())
+	require.Equal(t, "2001:db8::/32", xnetip.MustParseContiguous6("2001:db8::/ffff:ffff::").String())
+	require.Equal(t, "2001:db8::/32", xnetip.MustParseContiguous6("2001:db8::/32").String())
+	require.Equal(t, "10.0.0.0/8", xnetip.MustParseContiguous("10.0.0.0/255.0.0.0").String())
+}
+
+// verifies that a family-agnostic block prints in its own family,
+// the IPv4-mapped IPv6 form staying IPv6.
+func Test_Contiguous_String_DualPrintsFamily(t *testing.T) {
+	require.Equal(t, "10.0.0.0/8", xnetip.MustParseContiguous("10.0.0.0/8").String())
+	require.Equal(t, "::ffff:10.0.0.0/104", xnetip.MustParseContiguous("::ffff:10.0.0.0/104").String())
+}
+
+// verifies that the zero wrapper of every instantiation prints its
+// universe block.
+func Test_Contiguous_String_ZeroValues(t *testing.T) {
+	require.Equal(t, "0.0.0.0/0", xnetip.Contiguous[xnetip.Network4]{}.String())
+	require.Equal(t, "::/0", xnetip.Contiguous[xnetip.Network6]{}.String())
+	require.Equal(t, "::/0", xnetip.Contiguous[xnetip.Network]{}.String())
+}
+
+// verifies that a host route keeps its full-length suffix.
+func Test_Contiguous_String_HostRoutesKeepSuffix(t *testing.T) {
+	require.Equal(t, "10.0.0.1/32", xnetip.MustParseContiguous4("10.0.0.1").String())
+	require.Equal(t, "2001:db8::1/128", xnetip.MustParseContiguous6("2001:db8::1").String())
+}
+
+// verifies that the marshalled text equals the String form on all
+// three instantiations.
+func Test_Contiguous_MarshalText_EqualsString(t *testing.T) {
+	block4 := xnetip.MustParseContiguous4("192.168.0.0/16")
+	text4, err := block4.MarshalText()
+	require.NoError(t, err)
+	require.Equal(t, block4.String(), string(text4))
+	block6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	text6, err := block6.MarshalText()
+	require.NoError(t, err)
+	require.Equal(t, block6.String(), string(text6))
+	block := xnetip.MustParseContiguous("::ffff:10.0.0.0/104")
+	text, err := block.MarshalText()
+	require.NoError(t, err)
+	require.Equal(t, block.String(), string(text))
+}
+
+// verifies that unmarshalling the marshalled text recovers the block
+// on all three instantiations.
+func Test_Contiguous_UnmarshalText_RoundTrip(t *testing.T) {
+	block4 := xnetip.MustParseContiguous4("192.168.0.0/16")
+	text4, err := block4.MarshalText()
+	require.NoError(t, err)
+	var decoded4 xnetip.Contiguous[xnetip.Network4]
+	require.NoError(t, decoded4.UnmarshalText(text4))
+	require.Equal(t, block4, decoded4)
+	block6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	text6, err := block6.MarshalText()
+	require.NoError(t, err)
+	var decoded6 xnetip.Contiguous[xnetip.Network6]
+	require.NoError(t, decoded6.UnmarshalText(text6))
+	require.Equal(t, block6, decoded6)
+	block := xnetip.MustParseContiguous("::ffff:10.0.0.0/104")
+	text, err := block.MarshalText()
+	require.NoError(t, err)
+	var decoded xnetip.Contiguous[xnetip.Network]
+	require.NoError(t, decoded.UnmarshalText(text))
+	require.Equal(t, block, decoded)
+}
+
+// verifies that empty text is rejected with the empty-input sentinel
+// and the receiver keeps its value.
+func Test_Contiguous_UnmarshalText_EmptyKeepsReceiver(t *testing.T) {
+	block4 := xnetip.MustParseContiguous4("10.0.0.0/8")
+	require.ErrorIs(t, block4.UnmarshalText(nil), xnetip.ErrEmptyInput)
+	require.Equal(t, xnetip.MustParseContiguous4("10.0.0.0/8"), block4)
+	block6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	require.ErrorIs(t, block6.UnmarshalText([]byte{}), xnetip.ErrEmptyInput)
+	require.Equal(t, xnetip.MustParseContiguous6("2001:db8::/32"), block6)
+	block := xnetip.MustParseContiguous("10.0.0.0/8")
+	require.ErrorIs(t, block.UnmarshalText(nil), xnetip.ErrEmptyInput)
+	require.Equal(t, xnetip.MustParseContiguous("10.0.0.0/8"), block)
+}
+
+// verifies that a valid network with a non-contiguous mask is
+// rejected with the dedicated sentinel, the receiver untouched.
+func Test_Contiguous_UnmarshalText_NonContiguousKeepsReceiver(t *testing.T) {
+	block4 := xnetip.MustParseContiguous4("10.0.0.0/8")
+	require.ErrorIs(t, block4.UnmarshalText([]byte("10.0.0.0/255.0.255.0")), xnetip.ErrNonContiguousMask)
+	require.Equal(t, xnetip.MustParseContiguous4("10.0.0.0/8"), block4)
+	block6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	require.ErrorIs(t, block6.UnmarshalText([]byte("2001::/ffff:0:ffff::")), xnetip.ErrNonContiguousMask)
+	require.Equal(t, xnetip.MustParseContiguous6("2001:db8::/32"), block6)
+	block := xnetip.MustParseContiguous("10.0.0.0/8")
+	require.ErrorIs(t, block.UnmarshalText([]byte("2001::/ffff:0:ffff::")), xnetip.ErrNonContiguousMask)
+	require.Equal(t, xnetip.MustParseContiguous("10.0.0.0/8"), block)
+}
+
+// verifies that the suffix after "/" is always a decimal prefix
+// length within the family's bit width, never a second address.
+func Test_Contiguous_String_NoExplicitMaskProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		requireSuffixIsPrefixLen := func(text string, limit int) {
+			_, suffix, found := strings.Cut(text, "/")
+			require.True(t, found, text)
+			bits, err := strconv.Atoi(suffix)
+			require.NoError(t, err, text)
+			require.GreaterOrEqual(t, bits, 0, text)
+			require.LessOrEqual(t, bits, limit, text)
+		}
+		requireSuffixIsPrefixLen(genContiguous4.Draw(t, "block4").String(), 32)
+		requireSuffixIsPrefixLen(genContiguous6.Draw(t, "block6").String(), 128)
+		block := genContiguous.Draw(t, "block")
+		limit := 128
+		if block.Network().Is4() {
+			limit = 32
+		}
+		requireSuffixIsPrefixLen(block.String(), limit)
+	})
+}
+
+// verifies that the wrapper's text is exactly the wrapped network's
+// on all three instantiations.
+func Test_Contiguous_String_EqualsInnerProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block4 := genContiguous4.Draw(t, "block4")
+		require.Equal(t, block4.Network().String(), block4.String())
+		block6 := genContiguous6.Draw(t, "block6")
+		require.Equal(t, block6.Network().String(), block6.String())
+		block := genContiguous.Draw(t, "block")
+		require.Equal(t, block.Network().String(), block.String())
+	})
+}
+
+// verifies that parsing and unmarshalling the printed block recovers
+// it exactly on all three instantiations.
+func Test_Contiguous_String_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block4 := genContiguous4.Draw(t, "block4")
+		parsed4, err := xnetip.ParseContiguous4(block4.String())
+		require.NoError(t, err)
+		require.Equal(t, block4, parsed4)
+		var decoded4 xnetip.Contiguous[xnetip.Network4]
+		require.NoError(t, decoded4.UnmarshalText([]byte(block4.String())))
+		require.Equal(t, block4, decoded4)
+		block6 := genContiguous6.Draw(t, "block6")
+		parsed6, err := xnetip.ParseContiguous6(block6.String())
+		require.NoError(t, err)
+		require.Equal(t, block6, parsed6)
+		var decoded6 xnetip.Contiguous[xnetip.Network6]
+		require.NoError(t, decoded6.UnmarshalText([]byte(block6.String())))
+		require.Equal(t, block6, decoded6)
+		block := genContiguous.Draw(t, "block")
+		parsed, err := xnetip.ParseContiguous(block.String())
+		require.NoError(t, err)
+		require.Equal(t, block, parsed)
+		var decoded xnetip.Contiguous[xnetip.Network]
+		require.NoError(t, decoded.UnmarshalText([]byte(block.String())))
+		require.Equal(t, block, decoded)
+	})
+}
+
+// verifies that a slice of blocks survives a JSON round trip in all
+// three instantiations.
+func Test_Contiguous_MarshalText_JSONRoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		value4 := rapid.SliceOfN(genContiguous4, 0, 8).Draw(t, "blocks4")
+		encoded4, err := json.Marshal(value4)
+		require.NoError(t, err)
+		var decoded4 []xnetip.Contiguous[xnetip.Network4]
+		require.NoError(t, json.Unmarshal(encoded4, &decoded4))
+		if len(value4) == 0 {
+			require.Empty(t, decoded4)
+		} else {
+			require.Equal(t, value4, decoded4)
+		}
+		value6 := rapid.SliceOfN(genContiguous6, 0, 8).Draw(t, "blocks6")
+		encoded6, err := json.Marshal(value6)
+		require.NoError(t, err)
+		var decoded6 []xnetip.Contiguous[xnetip.Network6]
+		require.NoError(t, json.Unmarshal(encoded6, &decoded6))
+		if len(value6) == 0 {
+			require.Empty(t, decoded6)
+		} else {
+			require.Equal(t, value6, decoded6)
+		}
+		value := rapid.SliceOfN(genContiguous, 0, 8).Draw(t, "blocks")
+		encoded, err := json.Marshal(value)
+		require.NoError(t, err)
+		var decoded []xnetip.Contiguous[xnetip.Network]
+		require.NoError(t, json.Unmarshal(encoded, &decoded))
+		if len(value) == 0 {
+			require.Empty(t, decoded)
+		} else {
+			require.Equal(t, value, decoded)
+		}
+	})
+}
+
+// verifies that the printed block equals the std masked prefix text
+// of the same address and length, for both concrete families.
+func Test_Contiguous_String_MatchesNetipPrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block4 := genContiguous4.Draw(t, "block4")
+		bits4, ok := block4.Network().PrefixLen()
+		require.True(t, ok)
+		require.Equal(t, netip.PrefixFrom(block4.Network().Addr(), bits4).Masked().String(), block4.String())
+		block6 := genContiguous6.Draw(t, "block6")
+		bits6, ok := block6.Network().PrefixLen()
+		require.True(t, ok)
+		require.Equal(t, netip.PrefixFrom(block6.Network().Addr(), bits6).Masked().String(), block6.String())
+	})
+}
+
+// verifies that appending into a preallocated buffer allocates
+// nothing in all three instantiations.
+func Test_Contiguous_AppendTo_AllocationFree(t *testing.T) {
+	block4 := xnetip.MustParseContiguous4("192.168.0.0/16")
+	block6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	block := xnetip.MustParseContiguous("::ffff:10.0.0.0/104")
+	buffer := make([]byte, 0, 64)
+	requireNoAllocs(t, func() { bytesSink = block4.AppendTo(buffer[:0]) })
+	requireNoAllocs(t, func() { bytesSink = block6.AppendTo(buffer[:0]) })
+	requireNoAllocs(t, func() { bytesSink = block.AppendTo(buffer[:0]) })
 }

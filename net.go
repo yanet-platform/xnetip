@@ -173,6 +173,17 @@ func ParseNetwork(s string) (Network, error) {
 	return NetworkFrom6(network), nil
 }
 
+// parseText parses CIDR-block text for the generic contiguous
+// wrapper, exactly as ParseContiguous does, its error labels included.
+//
+// The receiver is a zero-value dispatch token: a generic method
+// cannot name a per-family function, so the constraint carries this
+// route instead.
+func (Network) parseText(s string) (Network, error) {
+	block, err := ParseContiguous(s)
+	return block.Network(), err
+}
+
 // MustParseNetwork calls ParseNetwork and panics on error.
 //
 // It is intended for tests and package-level constants built from
