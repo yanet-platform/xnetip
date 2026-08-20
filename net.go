@@ -258,6 +258,19 @@ func (m IPNetwork) LastAddr() netip.Addr {
 	return ipv6Addr{last}.Netip()
 }
 
+// NumHostBits returns the number of host bits, the zero bits of the
+// mask, in the network's address family.
+//
+// An IPv4 network reports a value in 0 through 32, an IPv6 network in
+// 0 through 128. The network holds exactly 2 to the power of this
+// value addresses. Both families are answered by the stored 128-bit
+// mask without a branch: the mapped mask of an IPv4 network pins its
+// top 96 bits as ones, so they contribute no host bits and the
+// whole-word count is the family count.
+func (m IPNetwork) NumHostBits() int {
+	return m.network.NumHostBits()
+}
+
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
 // other.
 //

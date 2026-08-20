@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"math/bits"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -3119,4 +3120,97 @@ func Test_IPNetwork_LastAddr_AllocationFree(t *testing.T) {
 	six := xnetip.MustParseIPNetwork("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
 	requireNoAllocs(t, func() { addrSink = four.LastAddr() })
 	requireNoAllocs(t, func() { addrSink = six.LastAddr() })
+}
+
+// verifies that the count is family-native: the mapped storage of an
+// IPv4 network contributes no host bits above its 32 family bits.
+func Test_IPNetwork_NumHostBits_FamilyNativeCount(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+		want    int
+	}{
+		{name: "IPv4 default route frees 32 bits", network: xnetip.MustParseIPNetwork("0.0.0.0/0"), want: 32},
+		{name: "IPv4 /24", network: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: 8},
+		{name: "IPv4 host route", network: xnetip.MustParseIPNetwork("10.0.0.1"), want: 0},
+		{name: "IPv6 default route frees 128 bits", network: xnetip.MustParseIPNetwork("::/0"), want: 128},
+		{name: "IPv6 /64", network: xnetip.MustParseIPNetwork("2001:db8::/64"), want: 64},
+		{name: "IPv6 host route", network: xnetip.MustParseIPNetwork("2a02:6b8::1"), want: 0},
+		{name: "mapped /96 stays IPv6 and frees 32 bits", network: xnetip.MustParseIPNetwork("::ffff:0.0.0.0/96"), want: 32},
+		{name: "zero value is the IPv6 default route", network: xnetip.IPNetwork{}, want: 128},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.NumHostBits())
+		})
+	}
+}
+
+// verifies that host bits are counted wherever the mask leaves them
+// in either family, not only in a trailing run.
+func Test_IPNetwork_NumHostBits_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+		want    int
+	}{
+		{name: "IPv4 two-run mask", network: mustIPNetwork4(t, "10.0.0.0", "255.0.255.0"), want: 16},
+		{name: "IPv6 two-run mask", network: mustIPNetwork6(t, "2a02:6b8:c00::1234:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: 56},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.NumHostBits())
+		})
+	}
+}
+
+// verifies that a wrapped IPv4 network answers exactly what the
+// concrete type answers, and that the stored 128-bit count equals it.
+//
+// The second check pins the encoding invariant the delegation relies
+// on: the mapped mask's top 96 bits are ones and contribute nothing,
+// so the whole-word count of the stored form is the IPv4 count.
+func Test_IPNetwork_NumHostBits_MatchesIPv4Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		wrapped := xnetip.IPNetworkFrom4(network)
+		require.Equal(t, network.NumHostBits(), wrapped.NumHostBits())
+		storedMaskBytes := wrapped.ToIPv6Mapped().Mask().As16()
+		storedHostBits := 0
+		for _, maskByte := range storedMaskBytes {
+			storedHostBits += bits.OnesCount8(^maskByte)
+		}
+		require.Equal(t, storedHostBits, wrapped.NumHostBits())
+	})
+}
+
+// verifies that a wrapped IPv6 network answers exactly what the
+// concrete type answers.
+func Test_IPNetwork_NumHostBits_MatchesIPv6Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		require.Equal(t, network.NumHostBits(), xnetip.IPNetworkFrom6(network).NumHostBits())
+	})
+}
+
+// verifies that the count stays inside the family's word width.
+func Test_IPNetwork_NumHostBits_WithinFamilyRangeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		width := 128
+		if network.Is4() {
+			width = 32
+		}
+		require.GreaterOrEqual(t, network.NumHostBits(), 0)
+		require.LessOrEqual(t, network.NumHostBits(), width)
+	})
+}
+
+// verifies that the count is computed without allocating in either
+// family, whatever the mask's shape.
+func Test_IPNetwork_NumHostBits_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0")
+	six := xnetip.MustParseIPNetwork("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
+	requireNoAllocs(t, func() { intSink = four.NumHostBits() })
+	requireNoAllocs(t, func() { intSink = six.NumHostBits() })
 }
