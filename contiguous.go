@@ -167,6 +167,31 @@ func (m Contiguous[T]) Compare(other Contiguous[T]) int {
 	return m.network.Compare(other.network)
 }
 
+// PrefixLen returns the prefix length of the block, total by the
+// contiguity invariant.
+//
+// The length is 0 through 32 for an IPv4 block, 0 through 128 for
+// an IPv6 one, family-native for a Network instantiation.
+func (m Contiguous[T]) PrefixLen() int {
+	// The wrapped mask is a leading run of ones by the type
+	// invariant, so the inner comma-ok cannot answer false.
+	prefix, _ := m.network.PrefixLen()
+	return prefix
+}
+
+// Prefix returns the block as a netip.Prefix, total by the
+// contiguity invariant.
+//
+// The prefix is always valid, already masked and in the block's own
+// family: an IPv4 block of the Network instantiation yields an Is4
+// prefix, never the mapped storage form.
+func (m Contiguous[T]) Prefix() netip.Prefix {
+	// The wrapped mask is a leading run of ones by the type
+	// invariant, so the inner comma-ok cannot answer false.
+	prefix, _ := m.network.Prefix()
+	return prefix
+}
+
 // String returns the text form of the block, always an address and
 // a prefix length ("10.0.0.0/8", "2001:db8::/32").
 //
@@ -244,6 +269,12 @@ type network[T any] interface {
 
 	// AppendTo is the concrete type's own text-form appender.
 	AppendTo([]byte) []byte
+
+	// PrefixLen is the concrete type's own comma-ok prefix length.
+	PrefixLen() (int, bool)
+
+	// Prefix is the concrete type's own comma-ok netip.Prefix view.
+	Prefix() (netip.Prefix, bool)
 
 	// parseText is the concrete type's route to its ParseContiguous
 	// function, called on a zero value as a dispatch token.

@@ -295,6 +295,146 @@ func Test_Contiguous_OperationsAllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { intSink = other.Compare(contiguousSink) })
 }
 
+// verifies that the total prefix length equals the block's CIDR
+// length in both concrete families.
+func Test_Contiguous_PrefixLen_PlainBlocks(t *testing.T) {
+	require.Equal(t, 8, xnetip.MustParseContiguous4("10.0.0.0/8").PrefixLen())
+	require.Equal(t, 32, xnetip.MustParseContiguous6("2001:db8::/32").PrefixLen())
+}
+
+// verifies that the boundary prefix lengths are reported exactly,
+// the zero wrappers reporting the universe length zero.
+func Test_Contiguous_PrefixLen_Boundaries(t *testing.T) {
+	require.Equal(t, 0, xnetip.MustParseContiguous4("0.0.0.0/0").PrefixLen())
+	require.Equal(t, 32, xnetip.MustParseContiguous4("255.255.255.255/32").PrefixLen())
+	require.Equal(t, 0, xnetip.MustParseContiguous6("::/0").PrefixLen())
+	require.Equal(t, 128, xnetip.MustParseContiguous6("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128").PrefixLen())
+	require.Equal(t, 0, xnetip.Contiguous[xnetip.Network4]{}.PrefixLen())
+	require.Equal(t, 0, xnetip.Contiguous[xnetip.Network6]{}.PrefixLen())
+	require.Equal(t, 0, xnetip.Contiguous[xnetip.Network]{}.PrefixLen())
+}
+
+// verifies that an IPv4 block of the dual instantiation reports the
+// family-native length and an unmapped Is4 prefix.
+func Test_Contiguous_PrefixLen_DualIsFamilyNative(t *testing.T) {
+	block := xnetip.MustParseContiguous("10.20.0.0/16")
+	require.Equal(t, 16, block.PrefixLen())
+	require.True(t, block.Prefix().Addr().Is4())
+	require.Equal(t, netip.MustParsePrefix("10.20.0.0/16"), block.Prefix())
+}
+
+// verifies that the total prefix view equals the netip form of the
+// block in both concrete families.
+func Test_Contiguous_Prefix_PlainBlocks(t *testing.T) {
+	require.Equal(t, netip.MustParsePrefix("10.0.0.0/8"), xnetip.MustParseContiguous4("10.0.0.0/8").Prefix())
+	require.Equal(t, netip.MustParsePrefix("2001:db8::/32"), xnetip.MustParseContiguous6("2001:db8::/32").Prefix())
+}
+
+// verifies that an IPv4-mapped IPv6 block of the dual instantiation
+// stays IPv6: the 128-bit length and an Is6 prefix.
+func Test_Contiguous_Prefix_DualMappedStaysIPv6(t *testing.T) {
+	block := xnetip.MustParseContiguous("::ffff:10.0.0.0/104")
+	require.Equal(t, 104, block.PrefixLen())
+	prefix := block.Prefix()
+	require.False(t, prefix.Addr().Is4())
+	require.True(t, prefix.Addr().Is4In6())
+	require.Equal(t, 104, prefix.Bits())
+}
+
+// verifies that the prefix view is already masked for every fixture
+// shape: the wrapped address carries no host bits.
+func Test_Contiguous_Prefix_AlreadyMasked(t *testing.T) {
+	for _, text := range []string{"10.0.0.0/8", "192.168.1.128/25", "8.8.8.8/32"} {
+		prefix := xnetip.MustParseContiguous4(text).Prefix()
+		require.Equal(t, prefix.Masked(), prefix, text)
+	}
+	for _, text := range []string{"2001:db8::/32", "2001:db8:0:0:8000::/65", "::1/128"} {
+		prefix := xnetip.MustParseContiguous6(text).Prefix()
+		require.Equal(t, prefix.Masked(), prefix, text)
+	}
+}
+
+// verifies that the total accessors equal the inner comma-ok values
+// with ok always true, in all three instantiations.
+func Test_Contiguous_PrefixLen_MatchesInnerProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block4 := genContiguous4.Draw(t, "block4")
+		innerLen4, ok := block4.Network().PrefixLen()
+		require.True(t, ok)
+		require.Equal(t, innerLen4, block4.PrefixLen())
+		innerPrefix4, ok := block4.Network().Prefix()
+		require.True(t, ok)
+		require.Equal(t, innerPrefix4, block4.Prefix())
+		block6 := genContiguous6.Draw(t, "block6")
+		innerLen6, ok := block6.Network().PrefixLen()
+		require.True(t, ok)
+		require.Equal(t, innerLen6, block6.PrefixLen())
+		innerPrefix6, ok := block6.Network().Prefix()
+		require.True(t, ok)
+		require.Equal(t, innerPrefix6, block6.Prefix())
+		block := genContiguous.Draw(t, "block")
+		innerLen, ok := block.Network().PrefixLen()
+		require.True(t, ok)
+		require.Equal(t, innerLen, block.PrefixLen())
+		innerPrefix, ok := block.Network().Prefix()
+		require.True(t, ok)
+		require.Equal(t, innerPrefix, block.Prefix())
+	})
+}
+
+// verifies that the prefix length equals the leading-ones count of
+// the wrapped mask, counted bit by bit.
+func Test_Contiguous_PrefixLen_LeadingOnesOracleProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block4 := genContiguous4.Draw(t, "block4")
+		_, mask4 := ipv4NetworkBits(block4.Network())
+		count4 := 0
+		for count4 < 32 && mask4&(1<<(31-count4)) != 0 {
+			count4++
+		}
+		require.Equal(t, count4, block4.PrefixLen())
+		block6 := genContiguous6.Draw(t, "block6")
+		_, _, maskHi, maskLo := ipv6NetworkBits(block6.Network())
+		count6 := 0
+		for count6 < 64 && maskHi&(1<<(63-count6)) != 0 {
+			count6++
+		}
+		if count6 == 64 {
+			for count6 < 128 && maskLo&(1<<(127-count6)) != 0 {
+				count6++
+			}
+		}
+		require.Equal(t, count6, block6.PrefixLen())
+	})
+}
+
+// verifies that rebuilding the prefix from the block's address and
+// total length lands on the prefix view, netip doing the masking.
+func Test_Contiguous_Prefix_RebuildRoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block4 := genContiguous4.Draw(t, "block4")
+		require.Equal(t, netip.PrefixFrom(block4.Network().Addr(), block4.PrefixLen()).Masked(), block4.Prefix())
+		block6 := genContiguous6.Draw(t, "block6")
+		require.Equal(t, netip.PrefixFrom(block6.Network().Addr(), block6.PrefixLen()).Masked(), block6.Prefix())
+		block := genContiguous.Draw(t, "block")
+		require.Equal(t, netip.PrefixFrom(block.Network().Addr(), block.PrefixLen()).Masked(), block.Prefix())
+	})
+}
+
+// verifies that both total prefix accessors allocate nothing in all
+// three instantiations.
+func Test_Contiguous_PrefixLen_AllocationFree(t *testing.T) {
+	block4 := xnetip.MustParseContiguous4("10.0.0.0/8")
+	block6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	block := xnetip.MustParseContiguous("10.0.0.0/8")
+	requireNoAllocs(t, func() { intSink = block4.PrefixLen() })
+	requireNoAllocs(t, func() { prefixSink = block4.Prefix() })
+	requireNoAllocs(t, func() { intSink = block6.PrefixLen() })
+	requireNoAllocs(t, func() { prefixSink = block6.Prefix() })
+	requireNoAllocs(t, func() { intSink = block.PrefixLen() })
+	requireNoAllocs(t, func() { prefixSink = block.Prefix() })
+}
+
 // verifies that every contiguous IPv4 form parses to the exactly
 // wrapped network: prefix, dotted mask and bare address notation.
 func Test_ParseContiguous4_AcceptsContiguousForms(t *testing.T) {
