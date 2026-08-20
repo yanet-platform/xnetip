@@ -91,3 +91,29 @@ func (m IPAddr) Compare(other IPAddr) int {
 	}
 	return m.addr.Compare(other.addr)
 }
+
+// String returns the text form of the address: dotted decimal for IPv4,
+// RFC 5952 for IPv6, "::ffff:a.b.c.d" for an IPv4-mapped IPv6 address.
+//
+// The forms are the per-family ones of IPv4Addr.String and
+// IPv6Addr.String, so an IPv4 value prints without the mapping prefix
+// while a mapped value kept IPv6 prints with it — the text alone
+// recovers the family. It allocates once, for the result.
+func (m IPAddr) String() string {
+	if v4, ok := m.IPv4(); ok {
+		return v4.String()
+	}
+	return m.addr.String()
+}
+
+// AppendTo appends the text form of the address to b and returns the
+// extended buffer.
+//
+// It is the allocation-free path behind String and MarshalText: with
+// enough capacity in b (45 bytes suffice) it performs no allocation.
+func (m IPAddr) AppendTo(b []byte) []byte {
+	if v4, ok := m.IPv4(); ok {
+		return v4.AppendTo(b)
+	}
+	return m.addr.AppendTo(b)
+}

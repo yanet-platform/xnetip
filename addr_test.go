@@ -309,6 +309,72 @@ func Test_IPAddr_Compare_DoesNotAllocate(t *testing.T) {
 	requireNoAllocs(t, func() { intSink = left.Compare(right) })
 }
 
+// verifies the text of both families and the mapped special case, the
+// contract of netip.Addr.String minus the invalid and zone cases.
+func Test_IPAddr_String_FormatsBothFamilies(t *testing.T) {
+	cases := []struct {
+		name string
+		addr xnetip.IPAddr
+		want string
+	}{
+		{name: "IPv4 network address", addr: mustParseIPAddr4(t, "192.168.1.0"), want: "192.168.1.0"},
+		{name: "IPv4 non-contiguous mask value", addr: mustParseIPAddr4(t, "255.255.0.255"), want: "255.255.0.255"},
+		{name: "IPv4 prints without mapping prefix", addr: mustParseIPAddr4(t, "1.2.3.4"), want: "1.2.3.4"},
+		{name: "IPv6 compressed", addr: mustParseIPAddr6(t, "2001:db8::"), want: "2001:db8::"},
+		{name: "IPv6 mask value", addr: mustParseIPAddr6(t, "ffff:ffff::"), want: "ffff:ffff::"},
+		{name: "zero value", addr: xnetip.IPAddr{}, want: "::"},
+		{name: "loopback", addr: mustParseIPAddr6(t, "::1"), want: "::1"},
+		{name: "mapped stored as IPv6", addr: mustParseIPAddr6(t, "::ffff:1.2.3.4"), want: "::ffff:1.2.3.4"},
+		{name: "all ones IPv6 has no compression", addr: mustParseIPAddr6(t, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.addr.String())
+		})
+	}
+}
+
+// verifies that the text form is appended after the buffer's existing
+// content.
+func Test_IPAddr_AppendTo_AppendsAfterExistingContent(t *testing.T) {
+	buffer := mustParseIPAddr4(t, "10.0.0.1").AppendTo([]byte("x="))
+	require.Equal(t, "x=10.0.0.1", string(buffer))
+}
+
+// verifies that the appending form and the string form agree on every
+// address.
+func Test_IPAddr_AppendTo_AgreesWithString(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		require.Equal(t, address.String(), string(address.AppendTo(nil)))
+	})
+}
+
+// verifies that the text agrees with net/netip for every address, the
+// oracle that fixes the mapped form and the compression rules.
+func Test_IPAddr_String_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		require.Equal(t, toNetipAddr(address).String(), address.String())
+	})
+}
+
+// verifies that appending into a buffer with enough capacity does not
+// allocate.
+func Test_IPAddr_AppendTo_DoesNotAllocate(t *testing.T) {
+	address := mustParseIPAddr6(t, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+	buffer := make([]byte, 0, 64)
+	requireNoAllocs(t, func() { bytesSink = address.AppendTo(buffer[:0]) })
+}
+
+// verifies that the string form allocates exactly once, for the result
+// itself, so a regression to a second allocation is visible.
+func Test_IPAddr_String_AllocatesOnce(t *testing.T) {
+	address := mustParseIPAddr6(t, "2001:db8::1")
+	allocs := int(testing.AllocsPerRun(100, func() { stringSink = address.String() }))
+	require.Equal(t, 1, allocs)
+}
+
 // mustParseIPAddr4 builds an IPv4 IPAddr from dotted-decimal text.
 func mustParseIPAddr4(t require.TestingT, s string) xnetip.IPAddr {
 	if helper, ok := t.(interface{ Helper() }); ok {
