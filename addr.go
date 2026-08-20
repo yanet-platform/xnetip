@@ -28,6 +28,25 @@ func IPAddrFrom6(a IPv6Addr) IPAddr {
 	return IPAddr{addr: a}
 }
 
+// IPAddrFromNetip converts a netip.Addr to an IPAddr, dropping any
+// zone.
+//
+// An IPv4 netip.Addr becomes an IPv4 IPAddr, everything else —
+// including an IPv4-mapped IPv6 address — stays IPv6, so the family
+// flag follows netip's. A zone is discarded silently, as by the
+// per-family conversions. The invalid zero netip.Addr converts to the
+// zero IPAddr (::), a lossy mapping of an invalid input onto a valid
+// value — check IsValid on the netip side first when that matters.
+func IPAddrFromNetip(a netip.Addr) IPAddr {
+	if v4, ok := IPv4AddrFromNetip(a); ok {
+		return IPAddrFrom4(v4)
+	}
+	if v6, ok := IPv6AddrFromNetip(a); ok {
+		return IPAddrFrom6(v6)
+	}
+	return IPAddr{}
+}
+
 // Is4 reports whether the address is IPv4. It is false for an
 // IPv4-mapped IPv6 address.
 func (m IPAddr) Is4() bool {
@@ -71,6 +90,18 @@ func (m IPAddr) BitLen() int {
 		return 32
 	}
 	return 128
+}
+
+// Netip returns the address as a zone-free netip.Addr: Is4 for IPv4
+// values, Is6 otherwise.
+//
+// The view is always valid, a mapped value kept IPv6 comes back Is4In6
+// and never unmapped, and IPAddrFromNetip restores m from it.
+func (m IPAddr) Netip() netip.Addr {
+	if v4, ok := m.IPv4(); ok {
+		return v4.Netip()
+	}
+	return m.addr.Netip()
 }
 
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after

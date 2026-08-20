@@ -160,6 +160,129 @@ func Test_IPAddr_As16_MatchesNetip(t *testing.T) {
 	})
 }
 
+// verifies that an IPv4 netip address converts to an IPv4 value.
+func Test_IPAddrFromNetip_ConvertsIPv4(t *testing.T) {
+	address := xnetip.IPAddrFromNetip(netip.MustParseAddr("10.0.0.1"))
+	require.Equal(t, mustParseIPAddr4(t, "10.0.0.1"), address)
+	require.True(t, address.Is4())
+}
+
+// verifies that an IPv6 netip address converts to an IPv6 value.
+func Test_IPAddrFromNetip_ConvertsIPv6(t *testing.T) {
+	address := xnetip.IPAddrFromNetip(netip.MustParseAddr("2001:db8::1"))
+	require.Equal(t, mustParseIPAddr6(t, "2001:db8::1"), address)
+	require.True(t, address.Is6())
+}
+
+// verifies that an IPv4-mapped netip address stays IPv6: the conversion
+// follows the netip family, never the value range.
+func Test_IPAddrFromNetip_Keeps4In6IPv6(t *testing.T) {
+	address := xnetip.IPAddrFromNetip(netip.MustParseAddr("::ffff:10.0.0.1"))
+	require.True(t, address.Is6())
+	_, ok := address.IPv4()
+	require.False(t, ok)
+	require.Equal(t, mustParseIPAddr6(t, "::ffff:10.0.0.1"), address)
+}
+
+// verifies that a zone is dropped silently: the address converts to its
+// bytes and the zone is gone, because addresses here are zone-free.
+func Test_IPAddrFromNetip_DropsZone(t *testing.T) {
+	address := xnetip.IPAddrFromNetip(netip.MustParseAddr("fe80::1%eth0"))
+	require.Equal(t, mustParseIPAddr6(t, "fe80::1"), address)
+}
+
+// verifies that the invalid zero netip address maps onto the zero value
+// ::, the documented lossy corner of the total conversion.
+func Test_IPAddrFromNetip_MapsInvalidToZeroValue(t *testing.T) {
+	require.Equal(t, xnetip.IPAddr{}, xnetip.IPAddrFromNetip(netip.Addr{}))
+}
+
+// verifies that the netip view of an IPv4 value is the 4-byte netip
+// form, not the mapped 16-byte one.
+func Test_IPAddr_Netip_IsIPv4ForIPv4(t *testing.T) {
+	view := mustParseIPAddr4(t, "10.0.0.1").Netip()
+	require.Equal(t, netip.MustParseAddr("10.0.0.1"), view)
+	require.True(t, view.Is4())
+}
+
+// verifies that the netip view of an IPv6 value is valid and zone-free.
+func Test_IPAddr_Netip_IsIPv6WithoutZone(t *testing.T) {
+	view := mustParseIPAddr6(t, "2001:db8::1").Netip()
+	require.Equal(t, netip.MustParseAddr("2001:db8::1"), view)
+	require.True(t, view.IsValid())
+	require.Empty(t, view.Zone())
+}
+
+// verifies that the netip view of a mapped value kept IPv6 stays in the
+// mapped form: the 4in6 range, not the IPv4 family.
+func Test_IPAddr_Netip_KeepsMappedForm(t *testing.T) {
+	view := mustParseIPAddr6(t, "::ffff:1.2.3.4").Netip()
+	require.True(t, view.Is4In6())
+	require.False(t, view.Is4())
+}
+
+// verifies that the zero value converts to the valid IPv6 unspecified
+// netip address.
+func Test_IPAddr_Netip_ZeroValueIsIPv6Unspecified(t *testing.T) {
+	view := xnetip.IPAddr{}.Netip()
+	require.Equal(t, netip.IPv6Unspecified(), view)
+	require.True(t, view.IsValid())
+}
+
+// verifies that a zoned netip address round-trips to its zone-free
+// twin.
+func Test_IPAddrFromNetip_RoundTripsZonedToZoneFree(t *testing.T) {
+	zoned := netip.MustParseAddr("fe80::1%eth0")
+	require.Equal(t, zoned.WithZone(""), xnetip.IPAddrFromNetip(zoned).Netip())
+}
+
+// verifies that converting the netip view back yields the address, for
+// every address, family flag included.
+func Test_IPAddrFromNetip_RoundTripsThroughNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		require.Equal(t, address, xnetip.IPAddrFromNetip(address.Netip()))
+	})
+}
+
+// verifies that every valid netip address round-trips to its zone-free
+// twin with the family preserved.
+func Test_IPAddrFromNetip_RoundTripsEveryValidNetipAddr(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var oracle netip.Addr
+		if rapid.Bool().Draw(t, "four") {
+			oracle = netip.AddrFrom4(genIPv4Addr.Draw(t, "addr4").As4())
+		} else {
+			oracle = netip.AddrFrom16(genIPv6Addr.Draw(t, "addr6").As16())
+			if rapid.Bool().Draw(t, "zoned") {
+				oracle = oracle.WithZone("eth0")
+			}
+		}
+		address := xnetip.IPAddrFromNetip(oracle)
+		require.Equal(t, oracle.Is4(), address.Is4())
+		require.Equal(t, oracle.WithZone(""), address.Netip())
+	})
+}
+
+// verifies that the netip view prints exactly what the address prints,
+// tying the family switch of the formatter to the std one.
+func Test_IPAddr_Netip_AgreesWithStringForm(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		require.Equal(t, address.String(), address.Netip().String())
+	})
+}
+
+// verifies that the conversions do not allocate in either direction.
+func Test_IPAddrFromNetip_DoesNotAllocate(t *testing.T) {
+	peer := netip.MustParseAddr("2001:db8::1")
+	address := mustParseIPAddr4(t, "10.0.0.1")
+	requireNoAllocs(t, func() {
+		ipAddrSink = xnetip.IPAddrFromNetip(peer)
+		netipAddrSink = address.Netip()
+	})
+}
+
 // verifies that every IPv4 address sorts before every IPv6 address,
 // even where the numeric values would order the other way.
 func Test_IPAddr_Compare_IPv4BeforeIPv6(t *testing.T) {
