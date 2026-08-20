@@ -2776,3 +2776,94 @@ func Test_IPv4Network_LastAddr_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { addrSink = contiguous.LastAddr() })
 	requireNoAllocs(t, func() { addrSink = nonContiguous.LastAddr() })
 }
+
+// verifies that a contiguous network reports its mask's zero bits,
+// the complement of the prefix length.
+func Test_IPv4Network_NumHostBits_ContiguousComplementsPrefix(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+		want    int
+	}{
+		{name: "default route frees the whole word", network: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: 32},
+		{name: "/8", network: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: 24},
+		{name: "/24", network: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: 8},
+		{name: "/31", network: xnetip.MustParseIPv4Network("10.0.0.0/31"), want: 1},
+		{name: "host route holds one address", network: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: 0},
+		{name: "zero value is the default route", network: xnetip.IPv4Network{}, want: 32},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.NumHostBits())
+		})
+	}
+}
+
+// verifies that host bits are counted wherever the mask leaves them,
+// not only in a trailing run.
+func Test_IPv4Network_NumHostBits_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+		want    int
+	}{
+		{name: "hole in the second octet", network: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), want: 16},
+		{name: "hole in the third octet", network: xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255"), want: 8},
+		{name: "alternating mask frees every other bit", network: xnetip.MustParseIPv4Network("0.0.0.0/170.170.170.170"), want: 16},
+		{name: "single host bit in the middle", network: xnetip.MustParseIPv4Network("10.0.0.0/255.255.255.254"), want: 1},
+		{name: "mask with one set bit", network: xnetip.MustParseIPv4Network("0.0.0.0/128.0.0.0"), want: 31},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.NumHostBits())
+		})
+	}
+}
+
+// verifies that the count agrees with a brute bit loop over the mask.
+func Test_IPv4Network_NumHostBits_MatchesBitLoopProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		maskBytes := network.Mask().As4()
+		mask := binary.BigEndian.Uint32(maskBytes[:])
+		want := 0
+		for idx := range 32 {
+			if mask>>idx&1 == 0 {
+				want++
+			}
+		}
+		require.Equal(t, want, network.NumHostBits())
+	})
+}
+
+// verifies that a contiguous network's host-bit count complements its
+// prefix length to the word width.
+func Test_IPv4Network_NumHostBits_ComplementsPrefixLenProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		prefix, ok := network.PrefixLen()
+		if !ok {
+			return
+		}
+		require.Equal(t, 32-prefix, network.NumHostBits())
+	})
+}
+
+// verifies that the count is zero exactly on the all-ones mask and
+// the full width exactly on the zero mask.
+func Test_IPv4Network_NumHostBits_ExtremesMatchMaskProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		require.Equal(t, network.Mask() == netipAddrFrom4Bits(^uint32(0)), network.NumHostBits() == 0)
+		require.Equal(t, network.Mask() == netipAddrFrom4Bits(0), network.NumHostBits() == 32)
+	})
+}
+
+// verifies that the count is computed without allocating, whatever
+// the mask's shape.
+func Test_IPv4Network_NumHostBits_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseIPv4Network("192.168.1.0/24")
+	nonContiguous := xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")
+	requireNoAllocs(t, func() { intSink = contiguous.NumHostBits() })
+	requireNoAllocs(t, func() { intSink = nonContiguous.NumHostBits() })
+}

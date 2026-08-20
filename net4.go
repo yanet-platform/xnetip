@@ -234,6 +234,18 @@ func (m IPv4Network) LastAddr() netip.Addr {
 	return ipv4AddrFromBits(m.addr.Bits() | ^m.mask.Bits()).Netip()
 }
 
+// NumHostBits returns the number of host bits, the zero bits of the
+// mask.
+//
+// The network holds exactly 2 to the power of this value addresses,
+// in any position the mask leaves free, so the count is carried
+// exactly for every network including the default route. There is no
+// separate address count: 2 to the 32 does not fit a uint32 and 2 to
+// the 128 fits no integer, the exponent is the lossless form.
+func (m IPv4Network) NumHostBits() int {
+	return bits.OnesCount32(^m.mask.Bits())
+}
+
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
 // other.
 //
