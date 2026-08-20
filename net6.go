@@ -212,6 +212,19 @@ func (m IPv6Network) Mask() netip.Addr {
 	return m.mask.Netip()
 }
 
+// LastAddr returns the greatest address in this network.
+//
+// For a contiguous network this is the last address of the CIDR
+// block. For a non-contiguous mask it is the network address with
+// every host bit set: masking that back yields the network address,
+// so it is a member, and no member can set a bit the mask clears
+// beyond all of them, so none is greater. Host bits need not form a
+// trailing run for either fact to hold. The result is an Is6
+// netip.Addr, zone-free.
+func (m IPv6Network) LastAddr() netip.Addr {
+	return ipv6Addr{m.addr.bits.Or(m.mask.bits.Not())}.Netip()
+}
+
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
 // other.
 //

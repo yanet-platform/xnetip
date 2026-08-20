@@ -3109,3 +3109,134 @@ func Test_IPv6Network_Prefix_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { prefixSink, okSink = contiguous.Prefix() })
 	requireNoAllocs(t, func() { prefixSink, okSink = nonContiguous.Prefix() })
 }
+
+// verifies that the greatest member of a contiguous network is the
+// last address of its CIDR block, half-boundary lengths included.
+func Test_IPv6Network_LastAddr_ContiguousBlockEnd(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    netip.Addr
+	}{
+		{name: "/96 fills the low 32 bits", network: xnetip.MustParseIPv6Network("2001:db8:1::/96"), want: netip.MustParseAddr("2001:db8:1::ffff:ffff")},
+		{name: "/40 fills across a group", network: xnetip.MustParseIPv6Network("2a02:6b8:c00::/40"), want: netip.MustParseAddr("2a02:6b8:cff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "/32 fills six groups", network: xnetip.MustParseIPv6Network("2a02:6b8::/32"), want: netip.MustParseAddr("2a02:6b8:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "host route is its own last address", network: xnetip.MustParseIPv6Network("2001:db8::1/128"), want: netip.MustParseAddr("2001:db8::1")},
+		{name: "default route ends at all ones", network: xnetip.MustParseIPv6Network("::/0"), want: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "/64 fills exactly the low half", network: xnetip.MustParseIPv6Network("2a02:6b8::/64"), want: netip.MustParseAddr("2a02:6b8::ffff:ffff:ffff:ffff")},
+		{name: "/63 crosses the half boundary", network: xnetip.MustParseIPv6Network("2001:db8::/63"), want: netip.MustParseAddr("2001:db8:0:1:ffff:ffff:ffff:ffff")},
+		{name: "/65 starts below the half boundary", network: xnetip.MustParseIPv6Network("2001:db8::/65"), want: netip.MustParseAddr("2001:db8:0:0:7fff:ffff:ffff:ffff")},
+		{name: "zero value is the default route", network: xnetip.IPv6Network{}, want: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.LastAddr())
+		})
+	}
+}
+
+// verifies that a non-contiguous mask sets every host bit wherever the
+// mask leaves a hole, in either half and at the half boundary.
+func Test_IPv6Network_LastAddr_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    netip.Addr
+	}{
+		{name: "two-run mask fills both holes", network: mustIPv6Network(t, "2a02:6b8:c00::1234:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: netip.MustParseAddr("2a02:6b8:cff:ffff:0:1234:ffff:ffff")},
+		{name: "alternating mask fills the odd bits", network: mustIPv6Network(t, "::", "aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa"), want: netip.MustParseAddr("5555:5555:5555:5555:5555:5555:5555:5555")},
+		{name: "single host bit at the half boundary", network: mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff"), want: netip.MustParseAddr("2001:db8:0:1::")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.LastAddr())
+		})
+	}
+}
+
+// verifies that the result is a member of the network: masking it
+// yields the network address again.
+func Test_IPv6Network_LastAddr_MemberProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		lastBytes := network.LastAddr().As16()
+		maskBytes := network.Mask().As16()
+		lastHi := binary.BigEndian.Uint64(lastBytes[:8])
+		lastLo := binary.BigEndian.Uint64(lastBytes[8:])
+		maskHi := binary.BigEndian.Uint64(maskBytes[:8])
+		maskLo := binary.BigEndian.Uint64(maskBytes[8:])
+		require.Equal(t, network.Addr(), netipAddrFrom6Bits(lastHi&maskHi, lastLo&maskLo))
+	})
+}
+
+// verifies by brute force on small networks that no member exceeds
+// the last address and that the last address itself is enumerated.
+//
+// The mask is built by clearing at most 12 chosen positions, drawn
+// with extra weight around bit 64 so the patterns straddle the half
+// boundary, and every host pattern is deposited into those positions
+// to enumerate the whole membership.
+func Test_IPv6Network_LastAddr_MaximalByBruteForceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		hostBits := rapid.IntRange(0, 12).Draw(t, "host bits")
+		positionGen := rapid.OneOf(rapid.IntRange(0, 127), rapid.IntRange(58, 70))
+		positions := rapid.SliceOfNDistinct(positionGen, hostBits, hostBits, rapid.ID).Draw(t, "host positions")
+		maskHi, maskLo := ^uint64(0), ^uint64(0)
+		for _, position := range positions {
+			if position < 64 {
+				maskLo &^= uint64(1) << position
+			} else {
+				maskHi &^= uint64(1) << (position - 64)
+			}
+		}
+		network, err := xnetip.IPv6NetworkFrom(
+			genNetipAddr6.Draw(t, "addr"),
+			netipAddrFrom6Bits(maskHi, maskLo),
+		)
+		require.NoError(t, err)
+		addrBytes := network.Addr().As16()
+		baseHi := binary.BigEndian.Uint64(addrBytes[:8])
+		baseLo := binary.BigEndian.Uint64(addrBytes[8:])
+		last := network.LastAddr()
+		reached := false
+		for pattern := range 1 << hostBits {
+			memberHi, memberLo := baseHi, baseLo
+			for idx, position := range positions {
+				if pattern>>idx&1 == 0 {
+					continue
+				}
+				if position < 64 {
+					memberLo |= uint64(1) << position
+				} else {
+					memberHi |= uint64(1) << (position - 64)
+				}
+			}
+			member := netipAddrFrom6Bits(memberHi, memberLo)
+			require.LessOrEqual(t, member.Compare(last), 0)
+			if member == last {
+				reached = true
+			}
+		}
+		require.True(t, reached, "last address never enumerated")
+	})
+}
+
+// verifies that the last address never sorts below the network address
+// and coincides with it exactly on a host route.
+func Test_IPv6Network_LastAddr_AtLeastAddrProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		require.GreaterOrEqual(t, network.LastAddr().Compare(network.Addr()), 0)
+		fullMask := network.Mask() == netipAddrFrom6Bits(^uint64(0), ^uint64(0))
+		require.Equal(t, fullMask, network.LastAddr() == network.Addr())
+	})
+}
+
+// verifies that the last address is computed without allocating,
+// whatever the mask's shape.
+func Test_IPv6Network_LastAddr_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseIPv6Network("2001:db8:1::/64")
+	nonContiguous := xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
+	requireNoAllocs(t, func() { addrSink = contiguous.LastAddr() })
+	requireNoAllocs(t, func() { addrSink = nonContiguous.LastAddr() })
+}
