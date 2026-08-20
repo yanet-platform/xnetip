@@ -226,6 +226,28 @@ func (m IPNetwork) PrefixLen() (int, bool) {
 	return prefix, ok
 }
 
+// String returns the text form of the network, see AppendTo.
+func (m IPNetwork) String() string {
+	// The buffer covers the longest form of either family, so the
+	// string conversion is the only allocation.
+	var buffer [91]byte
+	return string(m.AppendTo(buffer[:0]))
+}
+
+// AppendTo appends the text form of the network to b and returns the
+// extended buffer.
+//
+// An IPv4 network is written in the IPv4 form ("10.0.0.0/8"), never in
+// its IPv4-mapped storage form. See IPv4Network.AppendTo and
+// IPv6Network.AppendTo for the per-family format. The output parses
+// back with ParseIPNetwork.
+func (m IPNetwork) AppendTo(b []byte) []byte {
+	if network, ok := m.IPv4(); ok {
+		return network.AppendTo(b)
+	}
+	return m.network.AppendTo(b)
+}
+
 // ToIPv6Mapped embeds the network into IPv6 address space.
 //
 // An IPv4 network is returned as its IPv4-mapped IPv6 network (address

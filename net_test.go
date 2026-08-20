@@ -1,6 +1,7 @@
 package xnetip_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"net/netip"
 	"slices"
@@ -1362,4 +1363,127 @@ func Test_IPNetwork_PrefixLen_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { intSink, okSink = nonContiguous4.PrefixLen() })
 	requireNoAllocs(t, func() { intSink, okSink = contiguous6.PrefixLen() })
 	requireNoAllocs(t, func() { intSink, okSink = nonContiguous6.PrefixLen() })
+}
+
+// verifies that a network prints in its own family's text form: IPv4
+// unmapped with a family-native suffix, IPv6 as the wrapped network.
+func Test_IPNetwork_String_PrintsFamilyForm(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+		want    string
+	}{
+		{name: "IPv4 CIDR", network: mustIPNetwork4(t, "10.0.0.0", "255.0.0.0"), want: "10.0.0.0/8"},
+		{name: "IPv6 CIDR", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"), want: "2001:db8::/32"},
+		{name: "IPv4 host route keeps /32", network: mustIPNetwork4(t, "127.0.0.1", "255.255.255.255"), want: "127.0.0.1/32"},
+		{name: "IPv4 universe hides the stored /96", network: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"), want: "0.0.0.0/0"},
+		{name: "IPv6 universe", network: mustIPNetwork6(t, "::", "::"), want: "::/0"},
+		{name: "zero value", network: xnetip.IPNetwork{}, want: "::/0"},
+		{name: "IPv6 mapped stays IPv6 text", network: xnetip.IPNetworkFrom6(mustIPv6Network(t, "::ffff:192.0.2.0", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00")), want: "::ffff:192.0.2.0/120"},
+		{name: "IPv4 wrapped explicitly", network: xnetip.IPNetworkFrom4(mustIPv4Network(t, "192.0.2.0", "255.255.255.0")), want: "192.0.2.0/24"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.String())
+		})
+	}
+}
+
+// verifies that a non-contiguous mask prints in its family's mask
+// form, the IPv4 one unmapped from the 128-bit storage.
+func Test_IPNetwork_String_NonContiguousUsesMaskForm(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+		want    string
+	}{
+		{name: "IPv4 two-run", network: mustIPNetwork4(t, "192.168.0.1", "255.255.0.255"), want: "192.168.0.1/255.255.0.255"},
+		{name: "IPv6 two-run", network: mustIPNetwork6(t, "2a02:6b8:0:0:0:1234::", "ffff:ffff:0:0:ffff:ffff:0:0"), want: "2a02:6b8::1234:0:0/ffff:ffff::ffff:ffff:0:0"},
+		{name: "IPv4 alternating", network: mustIPNetwork4(t, "170.85.170.85", "170.85.170.85"), want: "170.85.170.85/170.85.170.85"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.String())
+		})
+	}
+}
+
+// verifies that appending writes after the caller's bytes and leaves
+// them intact.
+func Test_IPNetwork_AppendTo_KeepsExistingBytes(t *testing.T) {
+	network := mustIPNetwork4(t, "10.0.0.0", "255.0.0.0")
+	require.Equal(t, "x 10.0.0.0/8", string(network.AppendTo([]byte("x "))))
+}
+
+// verifies that wrapping an IPv4 network changes nothing in its text.
+func Test_IPNetwork_String_MatchesIPv4Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		require.Equal(t, network.String(), xnetip.IPNetworkFrom4(network).String())
+	})
+}
+
+// verifies that wrapping an IPv6 network changes nothing in its text.
+func Test_IPNetwork_String_MatchesIPv6Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		require.Equal(t, network.String(), xnetip.IPNetworkFrom6(network).String())
+	})
+}
+
+// verifies that appending to an empty buffer yields the same bytes the
+// string form has, and that drawn buffer content survives untouched.
+func Test_IPNetwork_AppendTo_MatchesStringProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		prefix := rapid.SliceOf(rapid.Byte()).Draw(t, "buffer")
+		require.Equal(t, network.String(), string(network.AppendTo(nil)))
+		extended := network.AppendTo(slices.Clone(prefix))
+		require.True(t, bytes.Equal(prefix, extended[:len(prefix)]))
+		require.Equal(t, network.String(), string(extended[len(prefix):]))
+	})
+}
+
+// verifies that appending into a buffer with enough capacity allocates
+// nothing for either family, the IPv4 extraction included.
+func Test_IPNetwork_AppendTo_AllocationFree(t *testing.T) {
+	network4 := mustIPNetwork4(t, "192.168.0.1", "255.255.0.255")
+	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff:ff00::ffff:ffff:0:0")
+	buffer := make([]byte, 0, 128)
+	requireNoAllocs(t, func() { bytesSink = network4.AppendTo(buffer[:0]) })
+	requireNoAllocs(t, func() { bytesSink = network6.AppendTo(buffer[:0]) })
+}
+
+// verifies that rendering to a string costs exactly the one string
+// conversion for either family.
+func Test_IPNetwork_String_SingleAllocation(t *testing.T) {
+	network4 := mustIPNetwork4(t, "10.0.0.0", "255.0.0.0")
+	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = network4.String() })))
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = network6.String() })))
+}
+
+func BenchmarkIPNetwork_String_IPv4(b *testing.B) {
+	network := mustIPNetwork4(b, "10.0.0.0", "255.0.0.0")
+	b.ReportAllocs()
+	for b.Loop() {
+		stringSink = network.String()
+	}
+}
+
+func BenchmarkIPNetwork_String_IPv6(b *testing.B) {
+	network := mustIPNetwork6(b, "2001:db8::", "ffff:ffff::")
+	b.ReportAllocs()
+	for b.Loop() {
+		stringSink = network.String()
+	}
+}
+
+func BenchmarkIPNetwork_AppendTo_IPv4(b *testing.B) {
+	network := mustIPNetwork4(b, "10.0.0.0", "255.0.0.0")
+	buffer := make([]byte, 0, 32)
+	b.ReportAllocs()
+	for b.Loop() {
+		bytesSink = network.AppendTo(buffer[:0])
+	}
 }
