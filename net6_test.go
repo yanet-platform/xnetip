@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"math"
+	"math/big"
 	"math/bits"
 	"net/netip"
 	"slices"
@@ -4373,5 +4374,245 @@ func BenchmarkIPv6Network_MergeByLowestMaskBit_Containment(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		network6Sink, okSink = left.MergeByLowestMaskBit(right)
+	}
+}
+
+// ipv6BigFromAddr returns the address's 128-bit pattern as a big
+// integer, the currency of the arbitrary-precision oracles.
+func ipv6BigFromAddr(addr netip.Addr) *big.Int {
+	bytes := addr.As16()
+	return new(big.Int).SetBytes(bytes[:])
+}
+
+// netipAddrFromBig returns the Is6 netip.Addr of a big integer's low
+// 128 bits, inverting ipv6BigFromAddr.
+func netipAddrFromBig(value *big.Int) netip.Addr {
+	var bytes [16]byte
+	value.FillBytes(bytes[:])
+	return netip.AddrFrom16(bytes)
+}
+
+// supernetForReferenceIPv6 is the fold oracle on big integers, an
+// implementation independent of the 128-bit word type.
+//
+// It keeps a mask bit only when every input masks it and agrees with
+// the receiver's address on it, and re-normalizes the address through
+// the checked constructor.
+func supernetForReferenceIPv6(t require.TestingT, receiver xnetip.IPv6Network, nets []xnetip.IPv6Network) xnetip.IPv6Network {
+	addr := ipv6BigFromAddr(receiver.Addr())
+	mask := ipv6BigFromAddr(receiver.Mask())
+	for _, network := range nets {
+		disagreement := new(big.Int).Xor(addr, ipv6BigFromAddr(network.Addr()))
+		mask.And(mask, new(big.Int).AndNot(ipv6BigFromAddr(network.Mask()), disagreement))
+	}
+	oracle, err := xnetip.IPv6NetworkFrom(
+		netipAddrFromBig(new(big.Int).And(addr, mask)),
+		netipAddrFromBig(mask),
+	)
+	require.NoError(t, err)
+	return oracle
+}
+
+// ipv6RelatedNetworks returns count consecutive /124 blocks under
+// 2001:db8:1::/48, a fold fixture that never collapses to zero.
+func ipv6RelatedNetworks(t require.TestingT, count int) []xnetip.IPv6Network {
+	networks := make([]xnetip.IPv6Network, count)
+	for idx := range networks {
+		network, err := xnetip.IPv6NetworkFromCIDR(netipAddrFrom6Bits(0x20010DB800010000, uint64(idx)*16), 124)
+		require.NoError(t, err)
+		networks[idx] = network
+	}
+	return networks
+}
+
+// ipv6RelatedNonContiguousNetworks returns count networks under the
+// mask with an 8-bit hole in the third group.
+//
+// The addresses spread over the last group, so a fold over them
+// exercises the holed shape without collapsing the mask to zero.
+func ipv6RelatedNonContiguousNetworks(t require.TestingT, count int) []xnetip.IPv6Network {
+	networks := make([]xnetip.IPv6Network, count)
+	for idx := range networks {
+		network, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(0x20010DB80C000000, uint64(idx)),
+			netipAddrFrom6Bits(0xFFFFFFFFFF00FFFF, ^uint64(0)),
+		)
+		require.NoError(t, err)
+		networks[idx] = network
+	}
+	return networks
+}
+
+// verifies that the fold keeps exactly the mask bits every input
+// masks and agrees on, over the ported reference cases.
+func Test_IPv6Network_SupernetFor_UnitAndBoundary(t *testing.T) {
+	cases := []struct {
+		name     string
+		receiver xnetip.IPv6Network
+		nets     []xnetip.IPv6Network
+		want     xnetip.IPv6Network
+	}{
+		{name: "a /39 folds into the shared /32", receiver: xnetip.MustParseIPv6Network("2001:db8:1::/32"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("2001:db8:2::/39")}, want: xnetip.MustParseIPv6Network("2001:db8::/32")},
+		{name: "two /64 leave a hole in the third group", receiver: xnetip.MustParseIPv6Network("2013:db8:1::1/64"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("2013:db8:2::1/64")}, want: xnetip.MustParseIPv6Network("2013:db8::/ffff:ffff:fffc:ffff::")},
+		{name: "alternating addresses disagree on every bit", receiver: xnetip.MustParseIPv6Network("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/128"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("5555:5555:5555:5555:5555:5555:5555:5555/128")}, want: xnetip.MustParseIPv6Network("::/0")},
+		{name: "partial agreement in the top group", receiver: xnetip.MustParseIPv6Network("8001:db8:1::/34"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("2013:db8:2::/32")}, want: xnetip.MustParseIPv6Network("1:db8::/5fed:ffff::")},
+		{name: "wider CIDR absorbs the receiver", receiver: xnetip.MustParseIPv6Network("2001:db8::/48"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("2001:db8::/32")}, want: xnetip.MustParseIPv6Network("2001:db8::/32")},
+		{name: "wider CIDR absorbs the element", receiver: xnetip.MustParseIPv6Network("2001:db8::/32"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("2001:db8::/48")}, want: xnetip.MustParseIPv6Network("2001:db8::/32")},
+		{name: "empty slice returns the receiver", receiver: xnetip.MustParseIPv6Network("2001:db8::/32"), nets: nil, want: xnetip.MustParseIPv6Network("2001:db8::/32")},
+		{name: "default route receiver stays the default route", receiver: xnetip.MustParseIPv6Network("::/0"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("2001:db8::/32")}, want: xnetip.MustParseIPv6Network("::/0")},
+		{name: "disagreement in the last bit of the high half", receiver: xnetip.MustParseIPv6Network("2001:db8::/64"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("2001:db8:0:1::/64")}, want: xnetip.MustParseIPv6Network("2001:db8::/63")},
+		{name: "disagreement in the first bit of the low half", receiver: xnetip.MustParseIPv6Network("2001:db8::/65"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("2001:db8:0:0:8000::/65")}, want: xnetip.MustParseIPv6Network("2001:db8::/64")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.receiver.SupernetFor(testCase.nets))
+		})
+	}
+}
+
+// verifies that non-contiguous inputs fold bit by bit: holes of the
+// input masks and address disagreements both clear result bits.
+func Test_IPv6Network_SupernetFor_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name     string
+		receiver xnetip.IPv6Network
+		nets     []xnetip.IPv6Network
+		want     xnetip.IPv6Network
+	}{
+		{name: "two-run inputs sharing the high runs", receiver: xnetip.MustParseIPv6Network("2a02:6b8:c00::48aa:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("2a02:6b8:c00::4707:0:0/ffff:ffff:ff00::ffff:ffff:0:0")}, want: xnetip.MustParseIPv6Network("2a02:6b8:c00::4002:0:0/ffff:ffff:ff00:0:ffff:f052::")},
+		{name: "two-run inputs disagreeing in the third group", receiver: xnetip.MustParseIPv6Network("2a02:6b8:c00::48aa:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("2a02:6b8:fc00::4707:0:0/ffff:ffff:ff00::ffff:ffff:0:0")}, want: xnetip.MustParseIPv6Network("2a02:6b8:c00::4002:0:0/ffff:ffff:f00:0:ffff:f052::")},
+		{name: "alternating mask of the input narrows the result", receiver: xnetip.MustParseIPv6Network("::/ffff:ffff::"), nets: []xnetip.IPv6Network{xnetip.MustParseIPv6Network("::/5555:5555::")}, want: xnetip.MustParseIPv6Network("::/5555:5555::")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.receiver.SupernetFor(testCase.nets))
+		})
+	}
+}
+
+// verifies that the fold agrees with the big-integer oracle on random
+// receivers and slices.
+func Test_IPv6Network_SupernetFor_MatchesReferenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		receiver := genIPv6Network.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genIPv6Network, 0, 32).Draw(t, "nets")
+		require.Equal(t, supernetForReferenceIPv6(t, receiver, nets), receiver.SupernetFor(nets))
+	})
+}
+
+// verifies that the result is normalized and contains the receiver
+// and every element.
+func Test_IPv6Network_SupernetFor_ContainsAllProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		receiver := genIPv6Network.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genIPv6Network, 0, 32).Draw(t, "nets")
+		result := receiver.SupernetFor(nets)
+		addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(result)
+		require.Equal(t, addrHi, addrHi&maskHi)
+		require.Equal(t, addrLo, addrLo&maskLo)
+		require.True(t, result.Contains(receiver))
+		for _, network := range nets {
+			require.True(t, result.Contains(network), "element %v", network)
+		}
+	})
+}
+
+// verifies bit-level maximality: every kept mask bit is masked and
+// agreed on by every input.
+//
+// Conversely, every dropped bit of the receiver's mask has an input
+// that either leaves the bit unmasked or disagrees with the receiver
+// on it, so no further bit could have been kept.
+func Test_IPv6Network_SupernetFor_MaximalityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		receiver := genIPv6Network.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genIPv6Network, 0, 32).Draw(t, "nets")
+		result := receiver.SupernetFor(nets)
+		receiverAddr := ipv6BigFromAddr(receiver.Addr())
+		receiverMask := ipv6BigFromAddr(receiver.Mask())
+		resultMask := ipv6BigFromAddr(result.Mask())
+		addrs := make([]*big.Int, len(nets))
+		masks := make([]*big.Int, len(nets))
+		for idx, network := range nets {
+			addrs[idx] = ipv6BigFromAddr(network.Addr())
+			masks[idx] = ipv6BigFromAddr(network.Mask())
+		}
+		for bit := range 128 {
+			switch {
+			case resultMask.Bit(bit) == 1:
+				require.Equal(t, uint(1), receiverMask.Bit(bit), "kept bit %d outside the receiver mask", bit)
+				for idx := range nets {
+					require.Equal(t, uint(1), masks[idx].Bit(bit), "kept bit %d unmasked by %v", bit, nets[idx])
+					require.Equal(t, receiverAddr.Bit(bit), addrs[idx].Bit(bit), "kept bit %d disagreed on by %v", bit, nets[idx])
+				}
+			case receiverMask.Bit(bit) == 1:
+				dropped := false
+				for idx := range nets {
+					if masks[idx].Bit(bit) == 0 || addrs[idx].Bit(bit) != receiverAddr.Bit(bit) {
+						dropped = true
+					}
+				}
+				require.True(t, dropped, "bit %d dropped with no input forcing it", bit)
+			}
+		}
+	})
+}
+
+// verifies that the fold does not depend on the order of the slice.
+func Test_IPv6Network_SupernetFor_OrderIndependenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		receiver := genIPv6Network.Draw(t, "receiver")
+		nets := rapid.SliceOfN(genIPv6Network, 0, 32).Draw(t, "nets")
+		shuffled := rapid.Permutation(nets).Draw(t, "shuffled")
+		require.Equal(t, receiver.SupernetFor(nets), receiver.SupernetFor(shuffled))
+	})
+}
+
+// verifies that whenever two networks merge, the merged network is
+// exactly the supernet of one for the other.
+func Test_IPv6Network_SupernetFor_AgreesWithMergeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		if merged, ok := left.Merge(right); ok {
+			require.Equal(t, merged, left.SupernetFor([]xnetip.IPv6Network{right}))
+		}
+		pair := genIPv6LowestBitSiblingPair.Draw(t, "pair")
+		merged, ok := pair[0].Merge(pair[1])
+		require.True(t, ok)
+		require.Equal(t, merged, pair[0].SupernetFor(pair[1:]))
+	})
+}
+
+// verifies that the fold allocates nothing over a 64-element slice,
+// whatever the mask's shape.
+func Test_IPv6Network_SupernetFor_AllocationFree(t *testing.T) {
+	related := ipv6RelatedNetworks(t, 64)
+	nonContiguous := ipv6RelatedNonContiguousNetworks(t, 64)
+	requireNoAllocs(t, func() { network6Sink = related[0].SupernetFor(related[1:]) })
+	requireNoAllocs(t, func() { network6Sink = nonContiguous[0].SupernetFor(nonContiguous[1:]) })
+}
+
+func BenchmarkIPv6Network_SupernetFor_64x124(b *testing.B) {
+	nets := ipv6RelatedNetworks(b, 64)
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink = nets[0].SupernetFor(nets[1:])
+	}
+}
+
+func BenchmarkIPv6Network_SupernetFor_1024x124(b *testing.B) {
+	nets := ipv6RelatedNetworks(b, 1024)
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink = nets[0].SupernetFor(nets[1:])
+	}
+}
+
+func BenchmarkIPv6Network_SupernetFor_1024xNonContiguous(b *testing.B) {
+	nets := ipv6RelatedNonContiguousNetworks(b, 1024)
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink = nets[0].SupernetFor(nets[1:])
 	}
 }

@@ -473,6 +473,35 @@ func (m IPv6Network) MergeByLowestMaskBit(other IPv6Network) (IPv6Network, bool)
 	return IPv6Network{}, false
 }
 
+// SupernetFor returns the smallest network containing this network
+// and every network in nets.
+//
+// The mask keeps exactly the bits that every input masks and on which
+// every input's address agrees with this network's address, so the
+// result is the greatest mask in the bitwise-subset order that still
+// covers all inputs. An empty slice returns the network itself. The
+// result may be non-contiguous even when every input is a CIDR block:
+// addresses differing at a bit off their mask boundary leave a hole.
+// Works with non-contiguous masks.
+func (m IPv6Network) SupernetFor(nets []IPv6Network) IPv6Network {
+	mask := m.mask.bits
+	for idx := range nets {
+		mask = nets[idx].supernetMask(m.addr, mask)
+	}
+	return fromBits6(m.addr, ipv6Addr{mask})
+}
+
+// supernetMask folds this network into the running supernet mask of a
+// receiver address.
+//
+// The step keeps a running bit only when this network masks it and
+// its address agrees with the receiver's address on it: exactly the
+// bits a common supernet of the receiver and this network may
+// constrain.
+func (m IPv6Network) supernetMask(addr ipv6Addr, mask uint128) uint128 {
+	return mask.And(m.mask.bits.AndNot(addr.bits.Xor(m.addr.bits)))
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //
