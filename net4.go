@@ -1,6 +1,9 @@
 package xnetip
 
-import "net/netip"
+import (
+	"math/bits"
+	"net/netip"
+)
 
 // IPv4Network is an IPv4 network: an address and a mask of arbitrary
 // shape.
@@ -126,6 +129,21 @@ func (m IPv4Network) IsContiguous() bool {
 	// The or with the predecessor fills exactly the trailing zeros:
 	// all ones iff no zero sits above the lowest set bit, zero wraps.
 	return mask|(mask-1) == ^uint32(0)
+}
+
+// Prefix returns the prefix length of the mask when the mask is
+// contiguous.
+//
+// The prefix is the number of leading one bits, 0 through 32. The
+// second result is false for a non-contiguous mask, in which case no
+// prefix length describes the network and the first result is 0.
+func (m IPv4Network) Prefix() (int, bool) {
+	if !m.IsContiguous() {
+		return 0, false
+	}
+	// The mask's leading ones are its complement's leading zeros, and
+	// after the contiguity check that run is the whole mask.
+	return bits.LeadingZeros32(^m.mask.Bits()), true
 }
 
 // ToIPv6Mapped returns this network as an IPv4-mapped IPv6 network.

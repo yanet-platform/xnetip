@@ -3,6 +3,7 @@ package xnetip_test
 import (
 	"bytes"
 	"encoding/binary"
+	"math/bits"
 	"net/netip"
 	"slices"
 	"testing"
@@ -749,5 +750,142 @@ func BenchmarkIPv4Network_IsContiguous_NonContiguous(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = network.IsContiguous()
+	}
+}
+
+// verifies that a contiguous mask reports its leading-ones run length,
+// from the universe through the host route.
+func Test_IPv4Network_Prefix_LeadingOnesRunLength(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+		want    int
+	}{
+		{name: "/24", network: mustIPv4Network(t, "192.168.1.0", "255.255.255.0"), want: 24},
+		{name: "host route /32", network: mustIPv4Network(t, "192.168.1.1", "255.255.255.255"), want: 32},
+		{name: "universe /0", network: mustIPv4Network(t, "0.0.0.0", "0.0.0.0"), want: 0},
+		{name: "single leading bit /1", network: mustIPv4Network(t, "128.0.0.0", "128.0.0.0"), want: 1},
+		{name: "/31", network: mustIPv4Network(t, "10.0.0.2", "255.255.255.254"), want: 31},
+		{name: "zero value is the universe", network: xnetip.IPv4Network{}, want: 0},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.True(t, ok)
+			require.Equal(t, testCase.want, prefix)
+		})
+	}
+}
+
+// verifies that a non-contiguous mask has no prefix length and reports
+// zero, whether the leading run is broken, empty or trailing-only.
+func Test_IPv4Network_Prefix_NonContiguousHasNone(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+	}{
+		{name: "hole in the middle", network: mustIPv4Network(t, "10.0.0.1", "255.0.0.255")},
+		{name: "no leading run", network: mustIPv4Network(t, "0.0.0.1", "0.0.0.255")},
+		{name: "leading zero then ones", network: mustIPv4Network(t, "0.0.0.0", "127.255.255.255")},
+		{name: "mask 255.0.255.0 ignores the second octet", network: mustIPv4Network(t, "192.0.1.0", "255.0.255.0")},
+		{name: "alternating", network: mustIPv4Network(t, "170.85.170.85", "170.85.170.85")},
+		{name: "two runs", network: mustIPv4Network(t, "10.0.0.0", "255.255.0.255")},
+		{name: "trailing ones only", network: mustIPv4Network(t, "0.0.0.1", "0.0.0.1")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.False(t, ok)
+			require.Zero(t, prefix)
+		})
+	}
+}
+
+// verifies that a prefix length exists exactly for contiguous masks
+// and that the length rebuilds the mask through the netip oracle.
+func Test_IPv4Network_Prefix_SomeIffContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		prefix, ok := network.Prefix()
+		require.Equal(t, network.IsContiguous(), ok)
+		if !ok {
+			require.Zero(t, prefix)
+			return
+		}
+		maskOracle, err := netip.MustParseAddr("255.255.255.255").Prefix(prefix)
+		require.NoError(t, err)
+		require.Equal(t, maskOracle.Addr(), network.Mask())
+	})
+}
+
+// verifies that a network built from any address and prefix length
+// reports that same length back.
+func Test_IPv4Network_Prefix_RoundTripsCIDRProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr")
+		cidr := rapid.IntRange(0, 32).Draw(t, "cidr")
+		network, err := xnetip.IPv4NetworkFromCIDR(addr, cidr)
+		require.NoError(t, err)
+		prefix, ok := network.Prefix()
+		require.True(t, ok)
+		require.Equal(t, cidr, prefix)
+	})
+}
+
+// verifies that for a contiguous mask the reported length is the one
+// net/netip accepts and reports back for the same address.
+func Test_IPv4Network_Prefix_MatchesNetipBitsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		if !network.IsContiguous() {
+			return
+		}
+		maskBytes := network.Mask().As4()
+		leading := bits.LeadingZeros32(^binary.BigEndian.Uint32(maskBytes[:]))
+		prefix, ok := network.Prefix()
+		require.True(t, ok)
+		require.Equal(t, netip.PrefixFrom(network.Addr(), leading).Bits(), prefix)
+	})
+}
+
+// verifies that computing the prefix allocates nothing on either
+// outcome.
+func Test_IPv4Network_Prefix_AllocationFree(t *testing.T) {
+	contiguous := mustIPv4Network(t, "192.168.0.0", "255.255.0.0")
+	nonContiguous := mustIPv4Network(t, "192.168.0.1", "255.255.0.255")
+	requireNoAllocs(t, func() { intSink, okSink = contiguous.Prefix() })
+	requireNoAllocs(t, func() { intSink, okSink = nonContiguous.Prefix() })
+}
+
+func BenchmarkIPv4Network_Prefix_Contiguous(b *testing.B) {
+	network := mustIPv4Network(b, "192.168.0.0", "255.255.0.0")
+	b.ReportAllocs()
+	for b.Loop() {
+		intSink, okSink = network.Prefix()
+	}
+}
+
+func BenchmarkIPv4Network_Prefix_NonContiguous(b *testing.B) {
+	network := mustIPv4Network(b, "192.168.0.1", "255.255.0.255")
+	b.ReportAllocs()
+	for b.Loop() {
+		intSink, okSink = network.Prefix()
+	}
+}
+
+func BenchmarkIPv4Network_Prefix_Mixed(b *testing.B) {
+	// A 50/50 contiguous/non-contiguous rotation exercises both
+	// outcomes of the contiguity check within one measurement.
+	networks := []xnetip.IPv4Network{
+		mustIPv4Network(b, "192.168.0.0", "255.255.0.0"),
+		mustIPv4Network(b, "192.168.0.1", "255.255.0.255"),
+		mustIPv4Network(b, "10.0.0.0", "255.0.0.0"),
+		mustIPv4Network(b, "10.0.0.1", "255.0.0.255"),
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		for _, network := range networks {
+			intSink, okSink = network.Prefix()
+		}
 	}
 }
