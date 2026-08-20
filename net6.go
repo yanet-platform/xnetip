@@ -490,6 +490,19 @@ func (m Network6) Difference(other Network6) iter.Seq[Network6] {
 	}
 }
 
+// contiguousLadderPart returns one part of the CIDR difference
+// ladder built over this network as the nested subtrahend.
+//
+// The part is the CIDR block of the given prefix length, 1 through
+// 128, whose address flips this network's address at the new mask
+// bit: the block that agrees with this network above that bit and
+// leaves it there. The masking AND normalizes the part's address.
+func (m Network6) contiguousLadderPart(bits int) Network6 {
+	mask := uint128MaskFromPrefix(bits)
+	bit := uint128Bit(128 - bits)
+	return fromBits6(addr6{m.addr.bits.Xor(bit)}, addr6{mask})
+}
+
 // IsAdjacent reports whether the two networks share a mask and differ
 // in exactly one masked bit.
 //

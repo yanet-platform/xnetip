@@ -1,6 +1,7 @@
 package xnetip
 
 import (
+	"iter"
 	"net/netip"
 	"strings"
 )
@@ -218,6 +219,48 @@ func (m Contiguous[T]) MergeByLowestMaskBit(other Contiguous[T]) (Contiguous[T],
 	return Contiguous[T]{network: merged}, true
 }
 
+// Difference returns the blocks whose union is the set difference
+// m \ other: every address of m that is not in other.
+//
+// For CIDR operands every part is itself a CIDR block, so the
+// sequence carries the type: when other is nested inside m the parts
+// are the prefix ladder from m's length plus one down to other's
+// length, most significant peeled bit first; a disjoint other yields
+// m once; a containing other yields nothing. Order, count and
+// disjointness are those of the wrapped networks' Difference. The
+// sequence is allocation-free and re-iterable.
+func (m Contiguous[T]) Difference(other Contiguous[T]) iter.Seq[Contiguous[T]] {
+	return func(yield func(Contiguous[T]) bool) {
+		// CIDR blocks never partially overlap, so the case analysis
+		// is containment alone.
+		//
+		// A containing subtrahend covers the source and leaves
+		// nothing. With containment ruled out both ways the blocks
+		// are disjoint — cross-family dual operands included — and
+		// the difference is the source itself.
+		if other.network.containsContiguous(m.network) {
+			return
+		}
+		if !m.network.containsContiguous(other.network) {
+			yield(m)
+			return
+		}
+		// Each ladder part is contiguous and wraps without revalidation.
+		//
+		// With the subtrahend strictly nested, the peel extends the
+		// source's leading run one bit per step, flipped on the
+		// subtrahend's address, so every part's mask is a leading run
+		// again and the parts match the general peel exactly.
+		last, _ := other.network.PrefixLen()
+		bits, _ := m.network.PrefixLen()
+		for ; bits < last; bits++ {
+			if !yield(Contiguous[T]{network: other.network.contiguousLadderPart(bits + 1)}) {
+				return
+			}
+		}
+	}
+}
+
 // PrefixLen returns the prefix length of the block, total by the
 // contiguity invariant.
 //
@@ -341,4 +384,8 @@ type network[T any] interface {
 	// MergeByLowestMaskBit is the concrete type's own comma-ok merge
 	// at containment or the mask's lowest set bit.
 	MergeByLowestMaskBit(T) (T, bool)
+
+	// contiguousLadderPart is the concrete type's kernel for one part
+	// of the CIDR difference ladder, built over the nested subtrahend.
+	contiguousLadderPart(int) T
 }

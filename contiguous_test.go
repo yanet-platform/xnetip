@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -883,6 +884,208 @@ func Test_Contiguous_Intersection_AllocationFree(t *testing.T) {
 	nested := xnetip.MustParseContiguous("10.1.0.0/16")
 	requireNoAllocs(t, func() { contiguousSink, okSink = container.Intersection(nested) })
 	requireNoAllocs(t, func() { contiguousSink, okSink = container.MergeByLowestMaskBit(nested) })
+}
+
+// verifies that subtracting a nested block peels exactly the prefix
+// ladder between the two lengths, most significant bit first.
+func Test_Contiguous_Difference_SupersetLadderExact(t *testing.T) {
+	source := xnetip.MustParseContiguous4("192.168.0.0/16")
+	other := xnetip.MustParseContiguous4("192.168.1.0/24")
+	expected := []xnetip.Contiguous[xnetip.Network4]{
+		xnetip.MustParseContiguous4("192.168.128.0/17"),
+		xnetip.MustParseContiguous4("192.168.64.0/18"),
+		xnetip.MustParseContiguous4("192.168.32.0/19"),
+		xnetip.MustParseContiguous4("192.168.16.0/20"),
+		xnetip.MustParseContiguous4("192.168.8.0/21"),
+		xnetip.MustParseContiguous4("192.168.4.0/22"),
+		xnetip.MustParseContiguous4("192.168.2.0/23"),
+		xnetip.MustParseContiguous4("192.168.0.0/24"),
+	}
+	require.Equal(t, expected, slices.Collect(source.Difference(other)))
+}
+
+// verifies that a disjoint subtrahend leaves the source as the
+// single part.
+func Test_Contiguous_Difference_Disjoint(t *testing.T) {
+	source := xnetip.MustParseContiguous4("10.0.0.0/8")
+	other := xnetip.MustParseContiguous4("192.168.0.0/16")
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network4]{source}, slices.Collect(source.Difference(other)))
+}
+
+// verifies that a containing subtrahend and the block itself both
+// leave nothing.
+func Test_Contiguous_Difference_SubsetAndSelf(t *testing.T) {
+	nested := xnetip.MustParseContiguous4("192.168.1.0/24")
+	container := xnetip.MustParseContiguous4("192.168.0.0/16")
+	require.Empty(t, slices.Collect(nested.Difference(container)))
+	require.Empty(t, slices.Collect(nested.Difference(nested)))
+}
+
+// verifies the full-depth ladder: the universe minus one host peels
+// the 32 blocks /1 through /32, each part the wrapped inner part.
+func Test_Contiguous_Difference_UniverseMinusHost(t *testing.T) {
+	source := xnetip.MustParseContiguous4("0.0.0.0/0")
+	other := xnetip.MustParseContiguous4("8.8.8.8/32")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 32)
+	inner := slices.Collect(source.Network().Difference(other.Network()))
+	for idx, part := range parts {
+		require.Equal(t, idx+1, part.PrefixLen())
+		require.Equal(t, inner[idx], part.Network())
+	}
+}
+
+// verifies the IPv6 ladder whose peeled bits straddle the 64-bit
+// half boundary: 17 parts, /49 through /65.
+func Test_Contiguous_Difference_LadderAcrossBit64(t *testing.T) {
+	source := xnetip.MustParseContiguous6("2001:db8::/48")
+	other := xnetip.MustParseContiguous6("2001:db8:0:0:8000::/65")
+	parts := slices.Collect(source.Difference(other))
+	require.Len(t, parts, 17)
+	inner := slices.Collect(source.Network().Difference(other.Network()))
+	for idx, part := range parts {
+		require.Equal(t, 49+idx, part.PrefixLen())
+		require.Equal(t, inner[idx], part.Network())
+	}
+}
+
+// verifies that a cross-family subtrahend of the dual instantiation
+// leaves the source as the single part: the operands are disjoint.
+func Test_Contiguous_Difference_DualCrossFamily(t *testing.T) {
+	source := xnetip.MustParseContiguous("10.0.0.0/8")
+	other := xnetip.MustParseContiguous("2001:db8::/32")
+	require.Equal(t, []xnetip.Contiguous[xnetip.Network]{source}, slices.Collect(source.Difference(other)))
+}
+
+// verifies that breaking out of the range loop stops the peel, and
+// that the sequence yields the full ladder again afterwards.
+func Test_Contiguous_Difference_EarlyBreakStops(t *testing.T) {
+	source := xnetip.MustParseContiguous4("192.168.0.0/16")
+	other := xnetip.MustParseContiguous4("192.168.1.0/24")
+	sequence := source.Difference(other)
+	seen := 0
+	for range sequence {
+		seen++
+		if seen == 2 {
+			break
+		}
+	}
+	require.Equal(t, 2, seen)
+	require.Len(t, slices.Collect(sequence), 8)
+}
+
+// verifies that the typed parts equal the unwrapped difference item
+// by item in the same order, in all three instantiations.
+func Test_Contiguous_Difference_MatchesInnerProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first4 := genContiguous4.Draw(t, "first4")
+		second4 := genContiguous4.Draw(t, "second4")
+		inner4 := slices.Collect(first4.Network().Difference(second4.Network()))
+		parts4 := slices.Collect(first4.Difference(second4))
+		require.Len(t, parts4, len(inner4))
+		for idx, part := range parts4 {
+			require.Equal(t, inner4[idx], part.Network())
+		}
+		first6 := genContiguous6.Draw(t, "first6")
+		second6 := genContiguous6.Draw(t, "second6")
+		inner6 := slices.Collect(first6.Network().Difference(second6.Network()))
+		parts6 := slices.Collect(first6.Difference(second6))
+		require.Len(t, parts6, len(inner6))
+		for idx, part := range parts6 {
+			require.Equal(t, inner6[idx], part.Network())
+		}
+		first := genContiguous.Draw(t, "first")
+		second := genContiguous.Draw(t, "second")
+		inner := slices.Collect(first.Network().Difference(second.Network()))
+		parts := slices.Collect(first.Difference(second))
+		require.Len(t, parts, len(inner))
+		for idx, part := range parts {
+			require.Equal(t, inner[idx], part.Network())
+		}
+	})
+}
+
+// verifies the ladder contract on strictly nested pairs in both
+// families.
+//
+// The count is the prefix gap between the two lengths and part k
+// carries the source length plus k plus one.
+func Test_Contiguous_Difference_LadderProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source4 := genContiguous4.Filter(func(block xnetip.Contiguous[xnetip.Network4]) bool {
+			return block.PrefixLen() < 32
+		}).Draw(t, "source4")
+		addrBits, maskBits := ipv4NetworkBits(source4.Network())
+		hostBits := rapid.Uint32().Draw(t, "host bits") &^ maskBits
+		bits4 := rapid.IntRange(source4.PrefixLen()+1, 32).Draw(t, "nested prefix 4")
+		nestedNetwork4, err := xnetip.Network4FromCIDR(netipAddrFrom4Bits(addrBits|hostBits), bits4)
+		require.NoError(t, err)
+		nested4, ok := xnetip.ContiguousFrom(nestedNetwork4)
+		require.True(t, ok)
+		parts4 := slices.Collect(source4.Difference(nested4))
+		require.Len(t, parts4, nested4.PrefixLen()-source4.PrefixLen())
+		for idx, part := range parts4 {
+			require.Equal(t, source4.PrefixLen()+idx+1, part.PrefixLen())
+		}
+		source6 := genContiguous6.Filter(func(block xnetip.Contiguous[xnetip.Network6]) bool {
+			return block.PrefixLen() < 128
+		}).Draw(t, "source6")
+		addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(source6.Network())
+		hostHi := rapid.Uint64().Draw(t, "host hi") &^ maskHi
+		hostLo := rapid.Uint64().Draw(t, "host lo") &^ maskLo
+		bits6 := rapid.IntRange(source6.PrefixLen()+1, 128).Draw(t, "nested prefix 6")
+		nestedNetwork6, err := xnetip.Network6FromCIDR(netipAddrFrom6Bits(addrHi|hostHi, addrLo|hostLo), bits6)
+		require.NoError(t, err)
+		nested6, ok := xnetip.ContiguousFrom(nestedNetwork6)
+		require.True(t, ok)
+		parts6 := slices.Collect(source6.Difference(nested6))
+		require.Len(t, parts6, nested6.PrefixLen()-source6.PrefixLen())
+		for idx, part := range parts6 {
+			require.Equal(t, source6.PrefixLen()+idx+1, part.PrefixLen())
+		}
+	})
+}
+
+// verifies that every part revalidates as contiguous, is contained
+// in the source and is disjoint from the subtrahend.
+func Test_Contiguous_Difference_PartsInvariantsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genContiguous.Draw(t, "source")
+		other := genContiguous.Draw(t, "other")
+		for part := range source.Difference(other) {
+			_, ok := xnetip.ContiguousFrom(part.Network())
+			require.True(t, ok)
+			require.True(t, source.Contains(part))
+			_, overlaps := part.Intersection(other)
+			require.False(t, overlaps)
+		}
+	})
+}
+
+// verifies that consuming the ladder with a range loop allocates
+// nothing in any of the three instantiations.
+func Test_Contiguous_Difference_AllocationFree(t *testing.T) {
+	source4 := xnetip.MustParseContiguous4("0.0.0.0/0")
+	other4 := xnetip.MustParseContiguous4("8.8.8.8/32")
+	requireNoAllocs(t, func() {
+		for part := range source4.Difference(other4) {
+			contiguous4Sink = part
+		}
+	})
+	source6 := xnetip.MustParseContiguous6("::/0")
+	other6 := xnetip.MustParseContiguous6("2001:db8::1/128")
+	requireNoAllocs(t, func() {
+		for part := range source6.Difference(other6) {
+			contiguous6Sink = part
+		}
+	})
+	source := xnetip.MustParseContiguous("::/0")
+	other := xnetip.MustParseContiguous("2001:db8::1/128")
+	requireNoAllocs(t, func() {
+		for part := range source.Difference(other) {
+			contiguousSink = part
+		}
+	})
 }
 
 // verifies that typed containment allocates nothing in all three

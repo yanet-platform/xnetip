@@ -496,6 +496,21 @@ func (m Network) Difference(other Network) iter.Seq[Network] {
 	}
 }
 
+// contiguousLadderPart returns one part of the CIDR difference
+// ladder built over this network as the nested subtrahend.
+//
+// The length is family-native, so an IPv4 network shifts it by the
+// mapped-range width before delegating to the stored form. The
+// storage invariant survives: the stored mask keeps at least the 96
+// mapped-range ones and the flipped bit stays inside the low 32
+// bits, so the part of an IPv4 network is IPv4-mapped again.
+func (m Network) contiguousLadderPart(bits int) Network {
+	if m.is4 {
+		bits += ipv4MappedPrefixBits
+	}
+	return Network{network: m.network.contiguousLadderPart(bits), is4: m.is4}
+}
+
 // IsAdjacent reports whether the two networks share a mask and differ
 // in exactly one masked bit.
 //
