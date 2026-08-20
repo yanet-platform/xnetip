@@ -240,6 +240,24 @@ func (m IPNetwork) Mask() netip.Addr {
 	return m.network.mask.Netip()
 }
 
+// LastAddr returns the greatest address in this network, in the
+// network's address family.
+//
+// For an IPv4 network the result is an Is4 netip.Addr, for an IPv6
+// network an Is6 one, zone-free either way. The value is the family's
+// greatest member: the broadcast address of a CIDR block, or the
+// network address with every host bit set for a non-contiguous mask.
+// It is computed once on the stored 128-bit form — the mapped mask of
+// an IPv4 network pins the top 96 bits, so setting its host bits only
+// touches the low 32 — and an IPv4 network merely unmaps the view.
+func (m IPNetwork) LastAddr() netip.Addr {
+	last := m.network.addr.bits.Or(m.network.mask.bits.Not())
+	if m.is4 {
+		return ipv4AddrFromBits(uint32(last.lo)).Netip()
+	}
+	return ipv6Addr{last}.Netip()
+}
+
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
 // other.
 //

@@ -3030,3 +3030,93 @@ func Test_IPNetwork_Prefix_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { prefixSink, okSink = network6.Prefix() })
 	requireNoAllocs(t, func() { prefixSink, okSink = nonContiguous.Prefix() })
 }
+
+// verifies that the last address comes back in the network's own
+// family: an Is4 address for IPv4, an Is6 one for IPv6.
+func Test_IPNetwork_LastAddr_FamilyPreserved(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+		want    netip.Addr
+	}{
+		{name: "IPv4 /24 broadcast", network: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: netip.MustParseAddr("192.168.1.255")},
+		{name: "IPv4 host route", network: xnetip.MustParseIPNetwork("10.0.0.1"), want: netip.MustParseAddr("10.0.0.1")},
+		{name: "IPv4 default route", network: xnetip.MustParseIPNetwork("0.0.0.0/0"), want: netip.MustParseAddr("255.255.255.255")},
+		{name: "IPv6 /64", network: xnetip.MustParseIPNetwork("2001:db8:1::/64"), want: netip.MustParseAddr("2001:db8:1::ffff:ffff:ffff:ffff")},
+		{name: "IPv6 host route", network: xnetip.MustParseIPNetwork("2a02:6b8::1"), want: netip.MustParseAddr("2a02:6b8::1")},
+		{name: "IPv6 default route", network: xnetip.MustParseIPNetwork("::/0"), want: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "zero value is the IPv6 default route", network: xnetip.IPNetwork{}, want: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			last := testCase.network.LastAddr()
+			require.Equal(t, testCase.want, last)
+			require.Equal(t, testCase.network.Is4(), last.Is4())
+		})
+	}
+}
+
+// verifies that a non-contiguous mask sets every host bit in either
+// family, holes outside the trailing run included.
+func Test_IPNetwork_LastAddr_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+		want    netip.Addr
+	}{
+		{name: "IPv4 two-run mask", network: mustIPNetwork4(t, "192.168.0.1", "255.255.0.255"), want: netip.MustParseAddr("192.168.255.1")},
+		{name: "IPv6 two-run mask", network: mustIPNetwork6(t, "2a02:6b8:c00::1234:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: netip.MustParseAddr("2a02:6b8:cff:ffff:0:1234:ffff:ffff")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.LastAddr())
+		})
+	}
+}
+
+// verifies that a wrapped IPv4 network answers exactly what the
+// concrete type answers, as an Is4 address.
+func Test_IPNetwork_LastAddr_MatchesIPv4Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		last := xnetip.IPNetworkFrom4(network).LastAddr()
+		require.Equal(t, network.LastAddr(), last)
+		require.True(t, last.Is4())
+	})
+}
+
+// verifies that a wrapped IPv6 network answers exactly what the
+// concrete type answers.
+func Test_IPNetwork_LastAddr_MatchesIPv6Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		require.Equal(t, network.LastAddr(), xnetip.IPNetworkFrom6(network).LastAddr())
+	})
+}
+
+// verifies that the stored mapped form of an IPv4 network computes the
+// mapped image of the IPv4 last address.
+//
+// The mapped mask pins the top 96 bits, so setting the host bits of
+// the stored form touches only the low 32 and the 128-bit result is
+// the mapped IPv4 result — the encoding invariant the method relies
+// on to compute once and only unmap the view.
+func Test_IPNetwork_LastAddr_StoredFormEquivalenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		wrapped := xnetip.IPNetworkFrom4(network)
+		storedLast := wrapped.ToIPv6Mapped().LastAddr()
+		lastBytes := wrapped.LastAddr().As4()
+		mappedLast := netipAddrFrom6Bits(0, 0x0000ffff00000000|uint64(binary.BigEndian.Uint32(lastBytes[:])))
+		require.Equal(t, mappedLast, storedLast)
+	})
+}
+
+// verifies that the last address is computed without allocating in
+// either family, whatever the mask's shape.
+func Test_IPNetwork_LastAddr_AllocationFree(t *testing.T) {
+	four := xnetip.MustParseIPNetwork("192.168.0.1/255.255.0.255")
+	six := xnetip.MustParseIPNetwork("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
+	requireNoAllocs(t, func() { addrSink = four.LastAddr() })
+	requireNoAllocs(t, func() { addrSink = six.LastAddr() })
+}
