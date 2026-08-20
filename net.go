@@ -113,6 +113,34 @@ func IPNetworkFromCIDR(addr netip.Addr, bits int) (IPNetwork, error) {
 	}
 }
 
+// IPNetworkFromPrefix converts a netip.Prefix into an IPNetwork.
+//
+// The family follows the prefix address: an IPv4 prefix becomes an
+// IPv4 network, anything else — an IPv4-mapped IPv6 prefix included —
+// an IPv6 network, as in netip. The result is normalized: host bits
+// of the prefix address are cleared, the same network
+// netip.Prefix.Masked would report. ok is false only for the invalid
+// zero prefix. The inverse of Prefix.
+func IPNetworkFromPrefix(p netip.Prefix) (IPNetwork, bool) {
+	if !p.IsValid() {
+		return IPNetwork{}, false
+	}
+	// The family dispatch makes the typed conversions total here, so
+	// their rejections are impossible.
+	if p.Addr().Is4() {
+		network, ok := IPv4NetworkFromPrefix(p)
+		if !ok {
+			return IPNetwork{}, false
+		}
+		return IPNetworkFrom4(network), true
+	}
+	network, ok := IPv6NetworkFromPrefix(p)
+	if !ok {
+		return IPNetwork{}, false
+	}
+	return IPNetworkFrom6(network), true
+}
+
 // ParseIPNetwork parses an IPv4 or IPv6 network in CIDR,
 // explicit-mask or bare address notation.
 //
@@ -270,6 +298,21 @@ func (m IPNetwork) PrefixLen() (int, bool) {
 		return prefix - ipv4MappedPrefixBits, true
 	}
 	return prefix, ok
+}
+
+// Prefix returns the network as a netip.Prefix in its own family.
+//
+// An IPv4 network yields an Is4 prefix with its 0 through 32 length,
+// never the IPv4-mapped storage form, while an IPv4-mapped IPv6
+// network stays IPv6. ok is false when the mask is not contiguous,
+// and the first result is then the invalid zero netip.Prefix. The
+// returned prefix is already masked. The inverse of
+// IPNetworkFromPrefix.
+func (m IPNetwork) Prefix() (netip.Prefix, bool) {
+	if network, ok := m.IPv4(); ok {
+		return network.Prefix()
+	}
+	return m.network.Prefix()
 }
 
 // String returns the text form of the network, see AppendTo.

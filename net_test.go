@@ -2094,3 +2094,231 @@ func Test_IPNetwork_MarshalText_SingleAllocation(t *testing.T) {
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = network4.MarshalText() })))
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = network6.MarshalText() })))
 }
+
+// verifies that a valid netip.Prefix converts into the network of its
+// address's family, host bits cleared.
+func Test_IPNetworkFromPrefix_ConvertsValidPrefixes(t *testing.T) {
+	cases := []struct {
+		name   string
+		prefix netip.Prefix
+		want   xnetip.IPNetwork
+	}{
+		{
+			name:   "IPv4 prefix",
+			prefix: netip.MustParsePrefix("10.0.0.0/8"),
+			want:   xnetip.MustParseIPNetwork("10.0.0.0/8"),
+		},
+		{
+			name:   "IPv6 prefix",
+			prefix: netip.MustParsePrefix("2001:db8::/32"),
+			want:   xnetip.MustParseIPNetwork("2001:db8::/32"),
+		},
+		{
+			name:   "IPv4 host bits cleared",
+			prefix: netip.MustParsePrefix("10.1.2.3/8"),
+			want:   xnetip.MustParseIPNetwork("10.0.0.0/8"),
+		},
+		{
+			name:   "IPv6 host bits cleared",
+			prefix: netip.MustParsePrefix("2001:db8::1/32"),
+			want:   xnetip.MustParseIPNetwork("2001:db8::/32"),
+		},
+		{
+			name:   "IPv6 /0 is the zero value",
+			prefix: netip.MustParsePrefix("::/0"),
+			want:   xnetip.IPNetwork{},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, ok := xnetip.IPNetworkFromPrefix(testCase.prefix)
+			require.True(t, ok)
+			require.Equal(t, testCase.want, network)
+		})
+	}
+}
+
+// verifies that an IPv4-mapped prefix converts into an IPv6 network,
+// never into its IPv4 counterpart, the netip family rule.
+func Test_IPNetworkFromPrefix_MappedPrefixStaysIPv6(t *testing.T) {
+	network, ok := xnetip.IPNetworkFromPrefix(netip.MustParsePrefix("::ffff:10.0.0.0/104"))
+	require.True(t, ok)
+	require.True(t, network.Is6())
+	_, isIPv4 := network.IPv4()
+	require.False(t, isIPv4)
+	require.Equal(t, xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), network)
+}
+
+// verifies that the IPv4 universe converts with its family length,
+// not the 96-bit one of the mapped storage form.
+func Test_IPNetworkFromPrefix_IPv4UniverseKeepsFamilyLength(t *testing.T) {
+	network, ok := xnetip.IPNetworkFromPrefix(netip.MustParsePrefix("0.0.0.0/0"))
+	require.True(t, ok)
+	require.True(t, network.Is4())
+	prefixLen, ok := network.PrefixLen()
+	require.True(t, ok)
+	require.Zero(t, prefixLen)
+}
+
+// verifies that the invalid zero prefix is rejected.
+func Test_IPNetworkFromPrefix_RejectsInvalidPrefix(t *testing.T) {
+	network, ok := xnetip.IPNetworkFromPrefix(netip.Prefix{})
+	require.False(t, ok)
+	require.Equal(t, xnetip.IPNetwork{}, network)
+}
+
+// verifies that a contiguous network converts to the already-masked
+// netip.Prefix of its own family, never the mapped storage form.
+func Test_IPNetwork_Prefix_OwnFamilyForms(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+		want    netip.Prefix
+	}{
+		{
+			name:    "IPv4 network yields an IPv4 prefix",
+			network: xnetip.MustParseIPNetwork("192.168.0.0/24"),
+			want:    netip.MustParsePrefix("192.168.0.0/24"),
+		},
+		{
+			name:    "IPv4 universe stays 0.0.0.0/0",
+			network: xnetip.MustParseIPNetwork("0.0.0.0/0"),
+			want:    netip.MustParsePrefix("0.0.0.0/0"),
+		},
+		{
+			name:    "IPv6 network",
+			network: xnetip.MustParseIPNetwork("2a02:6b8:c00::/40"),
+			want:    netip.MustParsePrefix("2a02:6b8:c00::/40"),
+		},
+		{
+			name:    "IPv4-mapped IPv6 network stays IPv6",
+			network: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"),
+			want:    netip.MustParsePrefix("::ffff:10.0.0.0/104"),
+		},
+		{
+			name:    "zero value is the IPv6 universe",
+			network: xnetip.IPNetwork{},
+			want:    netip.MustParsePrefix("::/0"),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.True(t, ok)
+			require.Equal(t, testCase.want, prefix)
+			require.Equal(t, prefix.Masked(), prefix)
+		})
+	}
+	mapped, ok := xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104").Prefix()
+	require.True(t, ok)
+	require.True(t, mapped.Addr().Is4In6())
+	plain, ok := xnetip.MustParseIPNetwork("192.168.0.0/24").Prefix()
+	require.True(t, ok)
+	require.True(t, plain.Addr().Is4())
+	require.Equal(t, 24, plain.Bits())
+}
+
+// verifies that a non-contiguous mask of either family has no prefix
+// form and answers the invalid zero netip.Prefix.
+func Test_IPNetwork_Prefix_NonContiguousHasNone(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+	}{
+		{name: "IPv4 two runs", network: xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0")},
+		{name: "IPv6 two runs", network: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::ffff:ffff:0:0")},
+		{name: "IPv4 alternating", network: xnetip.MustParseIPNetwork("170.85.170.85/170.85.170.85")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.False(t, ok)
+			require.Equal(t, netip.Prefix{}, prefix)
+		})
+	}
+}
+
+// verifies that any valid prefix of either family converts into a
+// network of that family and back to its masked self.
+func Test_IPNetworkFromPrefix_FamilyFollowsAddressProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		var stdPrefix netip.Prefix
+		if rapid.Bool().Draw(t, "is4") {
+			stdPrefix = genIPv4Prefix.Draw(t, "prefix4")
+		} else {
+			stdPrefix = genIPv6Prefix.Draw(t, "prefix6")
+		}
+		network, ok := xnetip.IPNetworkFromPrefix(stdPrefix)
+		require.True(t, ok)
+		require.Equal(t, stdPrefix.Addr().Is4(), network.Is4())
+		back, ok := network.Prefix()
+		require.True(t, ok)
+		require.Equal(t, stdPrefix.Masked(), back)
+	})
+}
+
+// verifies that a prefix form exists exactly for contiguous masks,
+// whatever the drawn family and mask shape.
+func Test_IPNetwork_Prefix_SomeIffContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		prefix, ok := network.Prefix()
+		require.Equal(t, network.IsContiguous(), ok)
+		if !ok {
+			require.Equal(t, netip.Prefix{}, prefix)
+		}
+	})
+}
+
+// verifies that a contiguous network survives the round trip through
+// netip.Prefix unchanged, its family included.
+func Test_IPNetwork_Prefix_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		stdPrefix, ok := network.Prefix()
+		if !ok {
+			return
+		}
+		back, ok := xnetip.IPNetworkFromPrefix(stdPrefix)
+		require.True(t, ok)
+		require.Equal(t, network, back)
+	})
+}
+
+// verifies that wrapping a concrete network changes neither the
+// prefix form nor its existence.
+func Test_IPNetwork_Prefix_AgreesWithConcreteTypesProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network4 := genIPv4Network.Draw(t, "network4")
+		concrete4, concrete4Ok := network4.Prefix()
+		wrapped4, wrapped4Ok := xnetip.IPNetworkFrom4(network4).Prefix()
+		require.Equal(t, concrete4Ok, wrapped4Ok)
+		require.Equal(t, concrete4, wrapped4)
+		network6 := genIPv6Network.Draw(t, "network6")
+		concrete6, concrete6Ok := network6.Prefix()
+		wrapped6, wrapped6Ok := xnetip.IPNetworkFrom6(network6).Prefix()
+		require.Equal(t, concrete6Ok, wrapped6Ok)
+		require.Equal(t, concrete6, wrapped6)
+	})
+}
+
+// verifies that both conversion directions allocate nothing for
+// either family on any outcome.
+func Test_IPNetworkFromPrefix_AllocationFree(t *testing.T) {
+	prefix4 := netip.MustParsePrefix("10.0.0.0/8")
+	prefix6 := netip.MustParsePrefix("2001:db8::/32")
+	requireNoAllocs(t, func() { ipNetworkSink, okSink = xnetip.IPNetworkFromPrefix(prefix4) })
+	requireNoAllocs(t, func() { ipNetworkSink, okSink = xnetip.IPNetworkFromPrefix(prefix6) })
+	requireNoAllocs(t, func() { ipNetworkSink, okSink = xnetip.IPNetworkFromPrefix(netip.Prefix{}) })
+}
+
+// verifies that converting out to a netip.Prefix allocates nothing
+// for either family, whatever the mask's shape.
+func Test_IPNetwork_Prefix_AllocationFree(t *testing.T) {
+	network4 := xnetip.MustParseIPNetwork("192.168.0.0/24")
+	network6 := xnetip.MustParseIPNetwork("2a02:6b8:c00::/40")
+	nonContiguous := xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0")
+	requireNoAllocs(t, func() { prefixSink, okSink = network4.Prefix() })
+	requireNoAllocs(t, func() { prefixSink, okSink = network6.Prefix() })
+	requireNoAllocs(t, func() { prefixSink, okSink = nonContiguous.Prefix() })
+}
