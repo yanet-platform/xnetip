@@ -249,6 +249,38 @@ func (m IPv6Network) Contains(other IPv6Network) bool {
 	return a2.And(m1) == a1 && m2.And(m1) == m1
 }
 
+// Intersection returns the network of addresses common to m and other.
+//
+// The intersection of two networks is always a single network: its
+// mask is the union of both masks and its address the union of both
+// addresses. ok is false when the networks are disjoint, which happens
+// exactly when they disagree on a bit position both masks constrain.
+// Masks may be non-contiguous. When one network contains the other the
+// result is the contained one, and a network intersected with itself
+// is itself.
+func (m IPv6Network) Intersection(other IPv6Network) (IPv6Network, bool) {
+	// The disjointness test compares the addresses on the doubly
+	// constrained bits alone.
+	//
+	// With this network as `(a1, m1)` and the other as `(a2, m2)`, the
+	// sets are disjoint exactly when `a1&m2 != a2&m1`: a bit set in
+	// only one mask is free on the other side and cannot conflict.
+	a1, m1 := m.addr.bits, m.mask.bits
+	a2, m2 := other.addr.bits, other.mask.bits
+	if a1.And(m2) != a2.And(m1) {
+		return IPv6Network{}, false
+	}
+	// The raw construction is exact, no masking AND is needed.
+	//
+	// Every set bit of either address lies inside its own mask and
+	// thus inside the union mask, so the union address is already
+	// normalized.
+	return IPv6Network{
+		addr: ipv6Addr{a1.Or(a2)},
+		mask: ipv6Addr{m1.Or(m2)},
+	}, true
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //
