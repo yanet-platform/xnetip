@@ -113,6 +113,33 @@ var genIPv6Addr = rapid.Custom(func(t *rapid.T) xnetip.IPv6Addr {
 	}
 })
 
+// genIPAddr draws a family-agnostic address: both families in equal
+// shares, plus mapped-as-IPv6 and boundary shapes.
+//
+// Four draws in ten are IPv4, four are IPv6, one is an IPv4-mapped
+// address deliberately kept in the IPv6 family (the shape that must
+// never collapse into IPv4), and one is a fixed boundary: the two
+// unspecified addresses, loopback, and the two all-ones addresses.
+var genIPAddr = rapid.Custom(func(t *rapid.T) xnetip.IPAddr {
+	switch rapid.IntRange(0, 9).Draw(t, "family") {
+	case 0, 1, 2, 3:
+		return xnetip.IPAddrFrom4(genIPv4Addr.Draw(t, "four"))
+	case 4, 5, 6, 7:
+		return xnetip.IPAddrFrom6(genIPv6Addr.Draw(t, "six"))
+	case 8:
+		return xnetip.IPAddrFrom6(genIPv4Addr.Draw(t, "mapped").ToIPv6Mapped())
+	default:
+		boundaries := []xnetip.IPAddr{
+			xnetip.IPAddrFrom6(xnetip.MustParseIPv6Addr("::")),
+			xnetip.IPAddrFrom6(xnetip.MustParseIPv6Addr("::1")),
+			xnetip.IPAddrFrom6(xnetip.MustParseIPv6Addr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")),
+			xnetip.IPAddrFrom4(xnetip.MustParseIPv4Addr("0.0.0.0")),
+			xnetip.IPAddrFrom4(xnetip.MustParseIPv4Addr("255.255.255.255")),
+		}
+		return rapid.SampledFrom(boundaries).Draw(t, "boundary")
+	}
+})
+
 // failRecorder is a require.TestingT that records failures instead of
 // stopping the test, so a helper's negative path can be asserted.
 type failRecorder struct {
@@ -135,5 +162,6 @@ var (
 	errSink       error
 	ipv4AddrSink  xnetip.IPv4Addr
 	ipv6AddrSink  xnetip.IPv6Addr
+	ipAddrSink    xnetip.IPAddr
 	netipAddrSink netip.Addr
 )
