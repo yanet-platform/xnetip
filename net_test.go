@@ -1154,3 +1154,83 @@ func Test_IPNetwork_Compare_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { intSink = network6.Compare(network6) })
 	requireNoAllocs(t, func() { intSink = network4.Compare(network6) })
 }
+
+// verifies that contiguity is judged in the network's own family, the
+// concrete types' positive and negative pins lifted through the wrap.
+func Test_IPNetwork_IsContiguous_JudgedInOwnFamily(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+		want    bool
+	}{
+		{name: "IPv4 universe", network: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0"), want: true},
+		{name: "IPv4 /19", network: mustIPNetwork4(t, "213.180.192.0", "255.255.224.0"), want: true},
+		{name: "IPv4 host route", network: mustIPNetwork4(t, "10.0.0.1", "255.255.255.255"), want: true},
+		{name: "IPv6 universe", network: mustIPNetwork6(t, "::", "::"), want: true},
+		{name: "IPv6 /40", network: mustIPNetwork6(t, "2a02:6b8:c00::", "ffff:ffff:ff00::"), want: true},
+		{name: "IPv6 run ends at the half boundary", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff:ffff:ffff::"), want: true},
+		{name: "IPv6 run crosses the half boundary", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff:ffff:ffff:8000::"), want: true},
+		{name: "zero value is the IPv6 universe", network: xnetip.IPNetwork{}, want: true},
+		{name: "mapped IPv6 with contiguous low mask", network: mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: true},
+		{name: "IPv4 top mask bit clear", network: mustIPNetwork4(t, "0.0.0.0", "127.255.255.255"), want: false},
+		{name: "IPv4 hole in the third octet", network: mustIPNetwork4(t, "213.180.0.192", "255.255.0.255"), want: false},
+		{name: "IPv4 two runs", network: mustIPNetwork4(t, "192.168.0.1", "255.0.255.0"), want: false},
+		{name: "IPv4 alternating", network: mustIPNetwork4(t, "170.85.170.85", "170.85.170.85"), want: false},
+		{name: "IPv6 two runs", network: mustIPNetwork6(t, "2a02:6b8:c00::f800:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: false},
+		{name: "IPv6 hole at bits 64..95", network: mustIPNetwork6(t, "2a02:6b8:0:0:1234:5678::", "ffff:ffff:0:0:ffff:ffff:0:0"), want: false},
+		{name: "IPv6 hole straddling bit 64", network: mustIPNetwork6(t, "::", "ffff:ffff:ffff:fffe:8000::"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.IsContiguous())
+		})
+	}
+}
+
+// verifies that the lifted predicate always equals the concrete IPv4
+// one, the equivalence that licenses the branch-free stored form.
+func Test_IPNetwork_IsContiguous_AgreesWithIPv4Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		require.Equal(t, network.IsContiguous(), xnetip.IPNetworkFrom4(network).IsContiguous())
+	})
+}
+
+// verifies that the lifted predicate always equals the concrete IPv6
+// one.
+func Test_IPNetwork_IsContiguous_AgreesWithIPv6Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		require.Equal(t, network.IsContiguous(), xnetip.IPNetworkFrom6(network).IsContiguous())
+	})
+}
+
+// verifies that the predicate agrees with the brute-force scan of the
+// family-typed mask bytes, whatever the family.
+func Test_IPNetwork_IsContiguous_MatchesBitScanProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		want := true
+		seenZero := false
+		for _, maskByte := range network.Mask().AsSlice() {
+			for idx := range 8 {
+				bit := maskByte>>(7-idx)&1 == 1
+				if bit && seenZero {
+					want = false
+				}
+				if !bit {
+					seenZero = true
+				}
+			}
+		}
+		require.Equal(t, want, network.IsContiguous())
+	})
+}
+
+// verifies that the predicate allocates nothing for either family.
+func Test_IPNetwork_IsContiguous_AllocationFree(t *testing.T) {
+	network4 := mustIPNetwork4(t, "192.168.0.0", "255.255.0.0")
+	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+	requireNoAllocs(t, func() { okSink = network4.IsContiguous() })
+	requireNoAllocs(t, func() { okSink = network6.IsContiguous() })
+}

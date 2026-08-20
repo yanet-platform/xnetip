@@ -186,6 +186,21 @@ func (m IPNetwork) Compare(other IPNetwork) int {
 	return m.network.Compare(other.network)
 }
 
+// IsContiguous reports whether the mask, in the network's own family,
+// is a CIDR prefix mask: leading one bits followed only by zero bits.
+//
+// For an IPv4 network the answer is that of IPv4Network.IsContiguous,
+// for an IPv6 network that of IPv6Network.IsContiguous. The stored
+// mask of an IPv4 network carries 96 leading ones above the 32 IPv4
+// mask bits, extending the leading run, so the 128-bit predicate of
+// the stored form answers for both families without a branch. When
+// the IPv4 mask is zero, the wrapped predecessor borrows one bit out
+// of the pinned region and the or restores it, so the all-zero IPv4
+// mask still counts as contiguous.
+func (m IPNetwork) IsContiguous() bool {
+	return m.network.IsContiguous()
+}
+
 // ToIPv6Mapped embeds the network into IPv6 address space.
 //
 // An IPv4 network is returned as its IPv4-mapped IPv6 network (address
