@@ -30,6 +30,38 @@ func IPNetworkFrom6(network IPv6Network) IPNetwork {
 	return IPNetwork{network: network}
 }
 
+// IPNetworkFromCIDR returns the network of addr with the top bits
+// bits masked, in addr's own family.
+//
+// The length is bounded by the family, 0 through 32 for IPv4 and 0
+// through 128 for IPv6, otherwise ErrCIDROverflow is returned. An
+// IPv4-mapped address is IPv6 and stays IPv6, as in netip. The invalid
+// zero netip.Addr is rejected with ErrAddrFamilyMismatch. Host bits of
+// addr are cleared.
+func IPNetworkFromCIDR(addr netip.Addr, bits int) (IPNetwork, error) {
+	// The typed constructors can only reject the length after the
+	// family dispatch, so the error is rebuilt to name this entry point.
+	switch {
+	case addr.Is4():
+		network, err := IPv4NetworkFromCIDR(addr, bits)
+		if err != nil {
+			input := cidrInput(addr, bits)
+			return IPNetwork{}, wrapParseError("IPNetworkFromCIDR", input, ErrCIDROverflow, nil)
+		}
+		return IPNetworkFrom4(network), nil
+	case addr.Is6():
+		network, err := IPv6NetworkFromCIDR(addr, bits)
+		if err != nil {
+			input := cidrInput(addr, bits)
+			return IPNetwork{}, wrapParseError("IPNetworkFromCIDR", input, ErrCIDROverflow, nil)
+		}
+		return IPNetworkFrom6(network), nil
+	default:
+		input := cidrInput(addr, bits)
+		return IPNetwork{}, wrapParseError("IPNetworkFromCIDR", input, ErrAddrFamilyMismatch, nil)
+	}
+}
+
 // Is4 reports whether the network is IPv4.
 func (m IPNetwork) Is4() bool {
 	return m.is4
