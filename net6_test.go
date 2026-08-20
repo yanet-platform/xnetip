@@ -894,6 +894,274 @@ func BenchmarkIPv6Network_SortFunc_1024(b *testing.B) {
 	}
 }
 
+// verifies that containment over contiguous masks follows the prefix
+// rules.
+//
+// The universe contains everything, a shorter prefix contains its
+// refinements and not the reverse, and a host route contains only
+// itself. Prefixes ending at, crossing and starting past bit 64 pin
+// the half boundary.
+func Test_IPv6Network_Contains_ContiguousAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		outer xnetip.IPv6Network
+		inner xnetip.IPv6Network
+		want  bool
+	}{
+		{name: "universe contains host route", outer: xnetip.MustParseIPv6Network("::/0"), inner: xnetip.MustParseIPv6Network("::1"), want: true},
+		{name: "shorter prefix contains longer", outer: xnetip.MustParseIPv6Network("::/32"), inner: xnetip.MustParseIPv6Network("::/33"), want: true},
+		{name: "longer prefix does not contain shorter", outer: xnetip.MustParseIPv6Network("::/33"), inner: xnetip.MustParseIPv6Network("::/32"), want: false},
+		{name: "host route contains itself", outer: xnetip.MustParseIPv6Network("::1"), inner: xnetip.MustParseIPv6Network("::1"), want: true},
+		{name: "host route does not contain neighbour", outer: xnetip.MustParseIPv6Network("::1/128"), inner: xnetip.MustParseIPv6Network("::2/128"), want: false},
+		{name: "nested contiguous", outer: xnetip.MustParseIPv6Network("2001:db8::/32"), inner: xnetip.MustParseIPv6Network("2001:db8:1::/48"), want: true},
+		{name: "nested contiguous reversed", outer: xnetip.MustParseIPv6Network("2001:db8:1::/48"), inner: xnetip.MustParseIPv6Network("2001:db8::/32"), want: false},
+		{name: "disjoint contiguous", outer: xnetip.MustParseIPv6Network("2001:db8::/32"), inner: xnetip.MustParseIPv6Network("fe80::/10"), want: false},
+		{name: "disjoint contiguous reversed", outer: xnetip.MustParseIPv6Network("fe80::/10"), inner: xnetip.MustParseIPv6Network("2001:db8::/32"), want: false},
+		{name: "run ending at the half boundary contains longer", outer: xnetip.MustParseIPv6Network("2001:db8:1:2::/64"), inner: xnetip.MustParseIPv6Network("2001:db8:1:2:3::/80"), want: true},
+		{name: "longer run does not contain the half-boundary run", outer: xnetip.MustParseIPv6Network("2001:db8:1:2:3::/80"), inner: xnetip.MustParseIPv6Network("2001:db8:1:2::/64"), want: false},
+		{name: "/63 contains the /64 across the boundary", outer: xnetip.MustParseIPv6Network("2001:db8:1:2::/63"), inner: xnetip.MustParseIPv6Network("2001:db8:1:3::/64"), want: true},
+		{name: "/64 does not contain its /63", outer: xnetip.MustParseIPv6Network("2001:db8:1:3::/64"), inner: xnetip.MustParseIPv6Network("2001:db8:1:2::/63"), want: false},
+		{name: "/65 does not contain the /64 above it", outer: xnetip.MustParseIPv6Network("2001:db8:1:2:8000::/65"), inner: xnetip.MustParseIPv6Network("2001:db8:1:2::/64"), want: false},
+		{name: "/64 contains its lower /65 half", outer: xnetip.MustParseIPv6Network("2001:db8:1:2::/64"), inner: xnetip.MustParseIPv6Network("2001:db8:1:2:8000::/65"), want: true},
+		{name: "all-ones host contains itself", outer: xnetip.MustParseIPv6Network("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128"), inner: xnetip.MustParseIPv6Network("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128"), want: true},
+		{name: "universe contains universe", outer: xnetip.MustParseIPv6Network("::/0"), inner: xnetip.MustParseIPv6Network("::/0"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.outer.Contains(testCase.inner))
+		})
+	}
+}
+
+// verifies that containment over non-contiguous masks needs both the
+// pattern match and the mask-subset relation.
+//
+// The subset relation is bitwise, so a numerically smaller mask is
+// not thereby a subset and the shortcut valid for contiguous masks
+// must not leak in. Two-run masks and holes straddling bit 64 pin the
+// half boundary.
+func Test_IPv6Network_Contains_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		outer xnetip.IPv6Network
+		inner xnetip.IPv6Network
+		want  bool
+	}{
+		{name: "two-run mask contains matching host", outer: xnetip.MustParseIPv6Network("2a02:6b8:c00::4d71:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), inner: xnetip.MustParseIPv6Network("2a02:6b8:c00:1234:0:4d71::1"), want: true},
+		{name: "two-run mask rejects mismatch on a constrained group", outer: xnetip.MustParseIPv6Network("2a02:6b8:c00::4d71:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), inner: xnetip.MustParseIPv6Network("2a02:6b8:c00:1234:0:4d72::1"), want: false},
+		{name: "pattern contains narrower pattern", outer: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff::"), inner: xnetip.MustParseIPv6Network("2001:db8::1/ffff:ffff::ffff"), want: true},
+		{name: "narrower pattern does not contain wider", outer: xnetip.MustParseIPv6Network("2001:db8::1/ffff:ffff::ffff"), inner: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff::"), want: false},
+		{name: "hole in the third group contains its host", outer: xnetip.MustParseIPv6Network("2001:db8:c00::1/ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff"), inner: xnetip.MustParseIPv6Network("2001:db8:c05::1/128"), want: true},
+		{name: "mask subset fails on disjoint mask bits", outer: xnetip.MustParseIPv6Network("2001::/ffff::ffff:0"), inner: xnetip.MustParseIPv6Network("2001::/ffff::ffff"), want: false},
+		{name: "mask subset fails on disjoint mask bits reversed", outer: xnetip.MustParseIPv6Network("2001::/ffff::ffff"), inner: xnetip.MustParseIPv6Network("2001::/ffff::ffff:0"), want: false},
+		{name: "host varying only inside the straddling hole", outer: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ffff:ff00:ff:ffff::"), inner: xnetip.MustParseIPv6Network("2001:db8:0:12:3400::/128"), want: true},
+		{name: "constrained bits around the straddling hole differ", outer: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ffff:ff00:ff:ffff::"), inner: xnetip.MustParseIPv6Network("2001:db8:0:1200:34::/ffff:ffff:ffff:ff00:ff:ffff::"), want: false},
+		{name: "constrained bits around the straddling hole differ reversed", outer: xnetip.MustParseIPv6Network("2001:db8:0:1200:34::/ffff:ffff:ffff:ff00:ff:ffff::"), inner: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ffff:ff00:ff:ffff::"), want: false},
+		{name: "alternating groups contain the zero host", outer: xnetip.MustParseIPv6Network("::/ffff:0:ffff:0:ffff:0:ffff:0"), inner: xnetip.MustParseIPv6Network("::/128"), want: true},
+		{name: "zero host does not contain the alternating groups", outer: xnetip.MustParseIPv6Network("::/128"), inner: xnetip.MustParseIPv6Network("::/ffff:0:ffff:0:ffff:0:ffff:0"), want: false},
+		{name: "complementary alternating patterns", outer: xnetip.MustParseIPv6Network("aa00:0:aa00:0:aa00:0:aa00:0/ff00:ff:ff00:ff:ff00:ff:ff00:ff"), inner: xnetip.MustParseIPv6Network("bb:0:bb:0:bb:0:bb:0/ff:ff00:ff:ff00:ff:ff00:ff:ff00"), want: false},
+		{name: "complementary alternating patterns reversed", outer: xnetip.MustParseIPv6Network("bb:0:bb:0:bb:0:bb:0/ff:ff00:ff:ff00:ff:ff00:ff:ff00"), inner: xnetip.MustParseIPv6Network("aa00:0:aa00:0:aa00:0:aa00:0/ff00:ff:ff00:ff:ff00:ff:ff00:ff"), want: false},
+		{name: "numerically smaller mask is not a subset", outer: xnetip.MustParseIPv6Network("::/::ffff:ffff"), inner: xnetip.MustParseIPv6Network("::/0:0:0:0:ffff:ffff::"), want: false},
+		{name: "numerically larger mask is not a subset either", outer: xnetip.MustParseIPv6Network("::/0:0:0:0:ffff:ffff::"), inner: xnetip.MustParseIPv6Network("::/::ffff:ffff"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.outer.Contains(testCase.inner))
+		})
+	}
+}
+
+// verifies that every network contains itself, whatever the mask shape.
+func Test_IPv6Network_Contains_ReflexiveProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		require.True(t, network.Contains(network))
+	})
+}
+
+// verifies that mutual containment holds exactly for equal networks.
+func Test_IPv6Network_Contains_AntisymmetryProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		mutual := left.Contains(right) && right.Contains(left)
+		require.Equal(t, left == right, mutual)
+	})
+}
+
+// verifies that containment is transitive on random triples.
+func Test_IPv6Network_Contains_TransitivityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := genIPv6Network.Draw(t, "first")
+		second := genIPv6Network.Draw(t, "second")
+		third := genIPv6Network.Draw(t, "third")
+		if first.Contains(second) && second.Contains(third) {
+			require.True(t, first.Contains(third))
+		}
+	})
+}
+
+// verifies that the universe contains every network and is contained
+// only in itself.
+func Test_IPv6Network_Contains_UniverseProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		require.True(t, xnetip.IPv6Network{}.Contains(network))
+		require.Equal(t, network == xnetip.IPv6Network{}, network.Contains(xnetip.IPv6Network{}))
+	})
+}
+
+// verifies that containment equals set inclusion on networks confined
+// to the top group.
+//
+// Both masks live in the top eight bits, so enumerating the 256
+// patterns there is exhaustive: the outer network contains the inner
+// one exactly when every member of the inner is a member of the outer.
+func Test_IPv6Network_Contains_BruteForceMembershipTopProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outerAddr := uint64(rapid.IntRange(0, 255).Draw(t, "outer addr"))
+		outerMask := uint64(rapid.IntRange(0, 255).Draw(t, "outer mask"))
+		innerAddr := uint64(rapid.IntRange(0, 255).Draw(t, "inner addr"))
+		innerMask := uint64(rapid.IntRange(0, 255).Draw(t, "inner mask"))
+		outer, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(outerAddr<<56, 0),
+			netipAddrFrom6Bits(outerMask<<56, 0),
+		)
+		require.NoError(t, err)
+		inner, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(innerAddr<<56, 0),
+			netipAddrFrom6Bits(innerMask<<56, 0),
+		)
+		require.NoError(t, err)
+		want := true
+		for x := uint64(0); x <= 255; x++ {
+			memberOfInner := x&innerMask == innerAddr&innerMask
+			memberOfOuter := x&outerMask == outerAddr&outerMask
+			if memberOfInner && !memberOfOuter {
+				want = false
+				break
+			}
+		}
+		require.Equal(t, want, outer.Contains(inner))
+	})
+}
+
+// verifies that containment equals set inclusion on networks confined
+// to an eight-bit window straddling the half boundary.
+//
+// The window spans bits 60 through 67, four bits in each 64-bit half,
+// so the exhaustive check exercises exactly the seam a half-word
+// mixup would break: the outer network contains the inner one exactly
+// when every member of the inner is a member of the outer.
+func Test_IPv6Network_Contains_BruteForceMembershipStraddlingProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outerAddr := uint64(rapid.IntRange(0, 255).Draw(t, "outer addr"))
+		outerMask := uint64(rapid.IntRange(0, 255).Draw(t, "outer mask"))
+		innerAddr := uint64(rapid.IntRange(0, 255).Draw(t, "inner addr"))
+		innerMask := uint64(rapid.IntRange(0, 255).Draw(t, "inner mask"))
+		outer, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(outerAddr>>4, outerAddr<<60),
+			netipAddrFrom6Bits(outerMask>>4, outerMask<<60),
+		)
+		require.NoError(t, err)
+		inner, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(innerAddr>>4, innerAddr<<60),
+			netipAddrFrom6Bits(innerMask>>4, innerMask<<60),
+		)
+		require.NoError(t, err)
+		want := true
+		for x := uint64(0); x <= 255; x++ {
+			memberOfInner := x&innerMask == innerAddr&innerMask
+			memberOfOuter := x&outerMask == outerAddr&outerMask
+			if memberOfInner && !memberOfOuter {
+				want = false
+				break
+			}
+		}
+		require.Equal(t, want, outer.Contains(inner))
+	})
+}
+
+// verifies that lifting two IPv4 networks into IPv6 space preserves
+// containment, the property dual-stack comparisons rely on.
+func Test_IPv6Network_Contains_IPv4MappedEquivalenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outer := genIPv4Network.Draw(t, "outer")
+		inner := genIPv4Network.Draw(t, "inner")
+		require.Equal(
+			t,
+			outer.Contains(inner),
+			outer.ToIPv6Mapped().Contains(inner.ToIPv6Mapped()),
+		)
+	})
+}
+
+// verifies that on contiguous networks containment agrees with the
+// net/netip rule.
+//
+// The oracle is the prefix pair: the outer prefix covers the inner
+// address and its length does not exceed the inner one.
+func Test_IPv6Network_Contains_MatchesNetipPrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outerPrefix := genIPv6Prefix.Draw(t, "outer").Masked()
+		innerPrefix := genIPv6Prefix.Draw(t, "inner").Masked()
+		outer, ok := xnetip.IPv6NetworkFromPrefix(outerPrefix)
+		require.True(t, ok)
+		inner, ok := xnetip.IPv6NetworkFromPrefix(innerPrefix)
+		require.True(t, ok)
+		want := outerPrefix.Contains(innerPrefix.Addr()) && outerPrefix.Bits() <= innerPrefix.Bits()
+		require.Equal(t, want, outer.Contains(inner))
+	})
+}
+
+// verifies that containing a host route agrees with the net/netip
+// address containment of the same prefix.
+func Test_IPv6Network_Contains_HostRouteMatchesNetipProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outerPrefix := genIPv6Prefix.Draw(t, "outer").Masked()
+		outer, ok := xnetip.IPv6NetworkFromPrefix(outerPrefix)
+		require.True(t, ok)
+		address := genNetipAddr6.Draw(t, "address")
+		host, err := xnetip.IPv6NetworkFromAddr(address)
+		require.NoError(t, err)
+		require.Equal(t, outerPrefix.Contains(address), outer.Contains(host))
+	})
+}
+
+// verifies that the containment check allocates nothing.
+func Test_IPv6Network_Contains_AllocationFree(t *testing.T) {
+	outer := xnetip.MustParseIPv6Network("2001:db8:c00::1/ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff")
+	inner := xnetip.MustParseIPv6Network("2001:db8:c05::1/128")
+	requireNoAllocs(t, func() { okSink = outer.Contains(inner) })
+}
+
+func BenchmarkIPv6Network_Contains_ContiguousTrue(b *testing.B) {
+	outer := xnetip.MustParseIPv6Network("2001:db8::/32")
+	inner := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
+func BenchmarkIPv6Network_Contains_ContiguousFalse(b *testing.B) {
+	outer := xnetip.MustParseIPv6Network("2001:db8::/32")
+	inner := xnetip.MustParseIPv6Network("fe80::/10")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
+func BenchmarkIPv6Network_Contains_NonContiguous(b *testing.B) {
+	outer := xnetip.MustParseIPv6Network("2001:db8:c00::1/ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff")
+	inner := xnetip.MustParseIPv6Network("2001:db8:c05::1/128")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
 // verifies that exactly the masks made of leading ones followed by
 // zeros are contiguous, the all-zero and all-ones masks included.
 //

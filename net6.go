@@ -227,6 +227,28 @@ func (m IPv6Network) Compare(other IPv6Network) int {
 	return m.mask.Compare(other.mask)
 }
 
+// Contains reports whether every address of other is also an address
+// of m.
+//
+// Two networks are compared as address sets: m contains other when
+// other agrees with m on every bit position m constrains, and other
+// constrains at least those positions. Identical networks contain
+// each other, ::/0 contains everything, a host route contains only
+// itself. Masks may be non-contiguous.
+func (m IPv6Network) Contains(other IPv6Network) bool {
+	// With this network as `(a1, m1)` and the other as `(a2, m2)`,
+	// inclusion is the match `a2&m1 == a1` plus the subset `m2&m1 == m1`.
+	//
+	// The first conjunct checks agreement on every constrained bit,
+	// the second that the other mask fixes at least those bits. Both
+	// lean on the addresses being normalized, and the subset test
+	// must stay an AND: a numeric mask comparison is wrong for
+	// non-contiguous masks.
+	a1, m1 := m.addr.bits, m.mask.bits
+	a2, m2 := other.addr.bits, other.mask.bits
+	return a2.And(m1) == a1 && m2.And(m1) == m1
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //
