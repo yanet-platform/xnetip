@@ -294,6 +294,14 @@ func (m IPv6Network) Intersects(other IPv6Network) bool {
 	return ok
 }
 
+// IsDisjoint reports whether the two networks share no address.
+//
+// It is the logical complement of Intersects and holds the same
+// guarantees for non-contiguous masks.
+func (m IPv6Network) IsDisjoint(other IPv6Network) bool {
+	return !m.Intersects(other)
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //

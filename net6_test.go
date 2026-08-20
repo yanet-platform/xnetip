@@ -1642,6 +1642,77 @@ func BenchmarkIPv6Network_Intersects_NonContiguous(b *testing.B) {
 	}
 }
 
+// verifies that disjointness holds exactly for networks sharing no
+// address.
+//
+// No network is disjoint from itself or from the universe, two host
+// routes are disjoint exactly when they differ, and sibling blocks
+// split at bit 64 pin the half boundary.
+func Test_IPv6Network_IsDisjoint_ContiguousAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  bool
+	}{
+		{name: "overlapping contiguous", left: xnetip.MustParseIPv6Network("2001:db8::/32"), right: xnetip.MustParseIPv6Network("2001:db8:1::/48"), want: false},
+		{name: "overlapping contiguous reversed", left: xnetip.MustParseIPv6Network("2001:db8:1::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: false},
+		{name: "disjoint contiguous", left: xnetip.MustParseIPv6Network("2001:db8::/32"), right: xnetip.MustParseIPv6Network("fe80::/10"), want: true},
+		{name: "self", left: xnetip.MustParseIPv6Network("2001:db8::/32"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: false},
+		{name: "unspecified with anything", left: xnetip.MustParseIPv6Network("::/0"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: false},
+		{name: "different host routes", left: xnetip.MustParseIPv6Network("2001:db8::1/128"), right: xnetip.MustParseIPv6Network("2001:db8::2/128"), want: true},
+		{name: "blocks differing at bit 64", left: xnetip.MustParseIPv6Network("2001:db8:0:0::/64"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/64"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsDisjoint(testCase.right))
+		})
+	}
+}
+
+// verifies that disjointness of non-contiguous networks needs a
+// doubly constrained bit that differs.
+//
+// Masks sharing no set bit are never disjoint, whatever the
+// addresses, and a disagreement next to a free hole straddling bit 64
+// pins the half boundary.
+func Test_IPv6Network_IsDisjoint_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  bool
+	}{
+		{name: "pattern disjoint from block", left: xnetip.MustParseIPv6Network("2001::1/ffff::ffff"), right: xnetip.MustParseIPv6Network("2002::/16"), want: true},
+		{name: "pattern overlapping block", left: xnetip.MustParseIPv6Network("2001::1/ffff::ffff"), right: xnetip.MustParseIPv6Network("2001:1::/32"), want: false},
+		{name: "hole straddling the boundary, disagreeing constrained group", left: xnetip.MustParseIPv6Network("2001:db8::1:0:0/ffff:ffff:ffff:0:0:ffff::"), right: xnetip.MustParseIPv6Network("2001:db8:0:1:1:2::/ffff:ffff:ffff:ffff:ffff:ffff::"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsDisjoint(testCase.right))
+		})
+	}
+}
+
+// verifies that disjointness is the exact complement of intersection,
+// symmetric, and never holds for a network against itself.
+func Test_IPv6Network_IsDisjoint_ComplementOfIntersectsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		require.Equal(t, !left.Intersects(right), left.IsDisjoint(right))
+		require.Equal(t, left.IsDisjoint(right), right.IsDisjoint(left))
+		require.False(t, left.IsDisjoint(left))
+	})
+}
+
+// verifies that the predicate allocates nothing.
+func Test_IPv6Network_IsDisjoint_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseIPv6Network("2001::1/ffff::ffff")
+	right := xnetip.MustParseIPv6Network("2002::/16")
+	requireNoAllocs(t, func() { okSink = left.IsDisjoint(right) })
+}
+
 // verifies that exactly the masks made of leading ones followed by
 // zeros are contiguous, the all-zero and all-ones masks included.
 //
