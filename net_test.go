@@ -1749,6 +1749,124 @@ func Test_IPNetwork_IsDisjoint_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { okSink = left4.IsDisjoint(right6) })
 }
 
+// verifies that adjacency delegates within a family and is false
+// across families.
+//
+// The family rule is absolute: even the IPv4-mapped IPv6 siblings of
+// two adjacent IPv4 networks are not adjacent to the IPv4 originals.
+func Test_IPNetwork_IsAdjacent_FamiliesAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  bool
+	}{
+		{name: "IPv4 siblings", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: true},
+		{name: "IPv6 siblings", left: xnetip.MustParseIPNetwork("2001:db8::/48"), right: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: true},
+		{name: "mixed families", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
+		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv4 identical", left: xnetip.MustParseIPNetwork("192.168.0.0/24"), right: xnetip.MustParseIPNetwork("192.168.0.0/24"), want: false},
+		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.IPNetwork{}, want: false},
+		{name: "mapped IPv6 sibling vs the IPv4 sibling", left: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/120"), right: xnetip.MustParseIPNetwork("10.0.1.0/24"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacent(testCase.right))
+		})
+	}
+}
+
+// verifies that non-contiguous adjacency of both families flows
+// through the wrapper.
+func Test_IPNetwork_IsAdjacent_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  bool
+	}{
+		{name: "IPv4 pattern siblings", left: xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPNetwork("10.1.0.1/255.255.0.255"), want: true},
+		{name: "IPv6 two-run siblings", left: xnetip.MustParseIPNetwork("::/ffff:ffff::ffff"), right: xnetip.MustParseIPNetwork("::1/ffff:ffff::ffff"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacent(testCase.right))
+		})
+	}
+}
+
+// verifies that the wrapped predicate equals the concrete answer in
+// each family, on random pairs and on constructed siblings.
+//
+// A sibling flips the lowest set mask bit of the address, so every
+// draw with a non-empty mask exercises the adjacent case that random
+// pairs almost never hit.
+func Test_IPNetwork_IsAdjacent_AgreesWithConcreteProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left4 := genIPv4Network.Draw(t, "left4")
+		right4 := genIPv4Network.Draw(t, "right4")
+		require.Equal(
+			t,
+			left4.IsAdjacent(right4),
+			xnetip.IPNetworkFrom4(left4).IsAdjacent(xnetip.IPNetworkFrom4(right4)),
+		)
+		maskBytes := left4.Mask().As4()
+		maskBits := binary.BigEndian.Uint32(maskBytes[:])
+		if maskBits != 0 {
+			addrBytes := left4.Addr().As4()
+			addrBits := binary.BigEndian.Uint32(addrBytes[:])
+			sibling, err := xnetip.IPv4NetworkFrom(
+				netipAddrFrom4Bits(addrBits^(maskBits&-maskBits)),
+				netipAddrFrom4Bits(maskBits),
+			)
+			require.NoError(t, err)
+			require.True(t, left4.IsAdjacent(sibling))
+			require.True(t, xnetip.IPNetworkFrom4(left4).IsAdjacent(xnetip.IPNetworkFrom4(sibling)))
+		}
+		left6 := genIPv6Network.Draw(t, "left6")
+		right6 := genIPv6Network.Draw(t, "right6")
+		require.Equal(
+			t,
+			left6.IsAdjacent(right6),
+			xnetip.IPNetworkFrom6(left6).IsAdjacent(xnetip.IPNetworkFrom6(right6)),
+		)
+	})
+}
+
+// verifies that networks of different families are never adjacent,
+// whatever their masks.
+func Test_IPNetwork_IsAdjacent_CrossFamilyAlwaysFalseProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
+		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		require.False(t, network4.IsAdjacent(network6))
+		require.False(t, network6.IsAdjacent(network4))
+	})
+}
+
+// verifies that adjacency is symmetric and irreflexive, whatever the
+// families.
+func Test_IPNetwork_IsAdjacent_SymmetryProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPNetwork.Draw(t, "left")
+		right := genIPNetwork.Draw(t, "right")
+		require.Equal(t, left.IsAdjacent(right), right.IsAdjacent(left))
+		require.False(t, left.IsAdjacent(left))
+	})
+}
+
+// verifies that the predicate allocates nothing in either family and
+// across families.
+func Test_IPNetwork_IsAdjacent_AllocationFree(t *testing.T) {
+	left4 := xnetip.MustParseIPNetwork("10.0.0.1/255.255.0.255")
+	right4 := xnetip.MustParseIPNetwork("10.1.0.1/255.255.0.255")
+	left6 := xnetip.MustParseIPNetwork("::/ffff:ffff::ffff")
+	right6 := xnetip.MustParseIPNetwork("::1/ffff:ffff::ffff")
+	requireNoAllocs(t, func() { okSink = left4.IsAdjacent(right4) })
+	requireNoAllocs(t, func() { okSink = left6.IsAdjacent(right6) })
+	requireNoAllocs(t, func() { okSink = left4.IsAdjacent(right6) })
+}
+
 // verifies that contiguity is judged in the network's own family, the
 // concrete types' positive and negative pins lifted through the wrap.
 func Test_IPNetwork_IsContiguous_JudgedInOwnFamily(t *testing.T) {
