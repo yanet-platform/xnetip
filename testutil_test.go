@@ -12,6 +12,7 @@ package xnetip_test
 
 import (
 	"encoding/binary"
+	"iter"
 	"math"
 	"net/netip"
 	"testing"
@@ -68,6 +69,22 @@ type failRecorder struct {
 func (m *failRecorder) Errorf(string, ...any) { m.errors++ }
 
 func (m *failRecorder) FailNow() { m.failedNow = true }
+
+// collectHead collects at most limit leading elements of an address
+// sequence.
+//
+// It exists so the head of an unbounded network can be asserted
+// without draining the whole sequence.
+func collectHead(sequence iter.Seq[netip.Addr], limit int) []netip.Addr {
+	head := []netip.Addr{}
+	for addr := range sequence {
+		head = append(head, addr)
+		if len(head) == limit {
+			break
+		}
+	}
+	return head
+}
 
 // mustIPv4Network builds an IPv4Network from an address and mask pair
 // given in string form, stopping the test on any constructor error.

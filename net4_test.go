@@ -2876,6 +2876,323 @@ func ipv4NetworkBits(network xnetip.IPv4Network) (addr, mask uint32) {
 	return binary.BigEndian.Uint32(addrBytes[:]), binary.BigEndian.Uint32(maskBytes[:])
 }
 
+// verifies that a /24 yields its 256 addresses in ascending numeric
+// order, each greater than the previous by exactly one.
+//
+// The suites for this sequence are forward-only: the interleaved
+// front-and-back cases a double-ended cursor would pin have no
+// iter.Seq analogue, so none appear here — the backward walk is a
+// sequence of its own.
+func Test_IPv4Network_Addrs_Slash24AscendsByOne(t *testing.T) {
+	network := xnetip.MustParseIPv4Network("192.168.1.0/24")
+	expected := netip.MustParseAddr("192.168.1.0")
+	count := 0
+	for addr := range network.Addrs() {
+		require.Equal(t, expected, addr)
+		expected = expected.Next()
+		count++
+	}
+	require.Equal(t, 256, count)
+}
+
+// verifies that a host route yields exactly its single address.
+func Test_IPv4Network_Addrs_HostRouteSingle(t *testing.T) {
+	network := xnetip.MustParseIPv4Network("10.0.0.1/32")
+	collected := slices.Collect(network.Addrs())
+	require.Equal(t, []netip.Addr{netip.MustParseAddr("10.0.0.1")}, collected)
+}
+
+// verifies that the default route starts at the unspecified address
+// and steps to its successor: the head of the 2^32-item sequence.
+func Test_IPv4Network_Addrs_UniverseHead(t *testing.T) {
+	network := xnetip.MustParseIPv4Network("0.0.0.0/0")
+	head := collectHead(network.Addrs(), 2)
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("0.0.0.0"),
+		netip.MustParseAddr("0.0.0.1"),
+	}, head)
+}
+
+// verifies that a non-contiguous sequence starts at the network
+// address, ends at the last address and never repeats an item.
+func Test_IPv4Network_Addrs_NonContiguousFirstAndLast(t *testing.T) {
+	network := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+	collected := slices.Collect(network.Addrs())
+	require.Len(t, collected, 256)
+	require.Equal(t, network.Addr(), collected[0])
+	require.Equal(t, network.LastAddr(), collected[255])
+	require.Equal(t, netip.MustParseAddr("192.168.255.1"), collected[255])
+	seen := map[netip.Addr]bool{}
+	for _, addr := range collected {
+		require.False(t, seen[addr], "address repeated: %v", addr)
+		seen[addr] = true
+	}
+}
+
+// verifies that breaking out of the loop stops the sequence after
+// exactly the consumed items.
+func Test_IPv4Network_Addrs_EarlyBreakStops(t *testing.T) {
+	network := xnetip.MustParseIPv4Network("192.168.1.0/24")
+	consumed := 0
+	for range network.Addrs() {
+		consumed++
+		if consumed == 3 {
+			break
+		}
+	}
+	require.Equal(t, 3, consumed)
+}
+
+// verifies that one sequence value can be ranged twice and yields the
+// same addresses on both passes.
+func Test_IPv4Network_Addrs_ReIterable(t *testing.T) {
+	network := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+	sequence := network.Addrs()
+	first := slices.Collect(sequence)
+	second := slices.Collect(sequence)
+	require.Equal(t, first, second)
+}
+
+// verifies that a mask freeing the third octet yields, as a set, the
+// grid of addresses ranging over exactly that octet.
+func Test_IPv4Network_Addrs_NonContiguousGrid(t *testing.T) {
+	network := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+	expected := make([]netip.Addr, 0, 256)
+	for value := range 256 {
+		expected = append(expected, netip.AddrFrom4([4]byte{192, 168, byte(value), 1}))
+	}
+	actual := slices.Collect(network.Addrs())
+	slices.SortFunc(expected, netip.Addr.Compare)
+	slices.SortFunc(actual, netip.Addr.Compare)
+	require.Equal(t, expected, actual)
+}
+
+// verifies the exact forward order of a mask with a four-bit hole.
+//
+// Successive host indices fill the hole, so the third octet steps by
+// sixteen while every other octet stays pinned.
+func Test_IPv4Network_Addrs_NonContiguousPinnedForwardOrder(t *testing.T) {
+	network := xnetip.MustParseIPv4Network("10.0.0.1/255.255.15.255")
+	expected := make([]netip.Addr, 0, 16)
+	for value := range 16 {
+		expected = append(expected, netip.AddrFrom4([4]byte{10, 0, byte(16 * value), 1}))
+	}
+	require.Equal(t, expected, slices.Collect(network.Addrs()))
+}
+
+// verifies on the alternating mask that the two lowest host bits fill
+// first: indices 0 through 3 map to host patterns 0, 1, 4, 5.
+func Test_IPv4Network_Addrs_AlternatingMask(t *testing.T) {
+	network := xnetip.MustParseIPv4Network("0.0.0.0/170.170.170.170")
+	head := collectHead(network.Addrs(), 4)
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("0.0.0.0"),
+		netip.MustParseAddr("0.0.0.1"),
+		netip.MustParseAddr("0.0.0.4"),
+		netip.MustParseAddr("0.0.0.5"),
+	}, head)
+}
+
+// verifies the head of the widest non-contiguous network against the
+// host-index oracle.
+//
+// Its 30 host bits make a full drain infeasible, so only the first
+// three items are probed.
+func Test_IPv4Network_Addrs_WidestNonContiguousHead(t *testing.T) {
+	network := xnetip.MustParseIPv4Network("128.0.0.1/128.0.0.1")
+	head := collectHead(network.Addrs(), 3)
+	require.Equal(t, []netip.Addr{
+		ipv4AddrAtHostIndexReference(network, 0),
+		ipv4AddrAtHostIndexReference(network, 1),
+		ipv4AddrAtHostIndexReference(network, 2),
+	}, head)
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("128.0.0.1"),
+		netip.MustParseAddr("128.0.0.3"),
+		netip.MustParseAddr("128.0.0.5"),
+	}, head)
+}
+
+// verifies that the head of the sequence matches the host-index
+// oracle.
+//
+// The address at index k is the network address with k deposited
+// into the mask's zero bits, least significant first.
+func Test_IPv4Network_Addrs_HeadMatchesHostIndexOracleProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		take := min(uint64(1)<<network.NumHostBits(), 32)
+		index := uint64(0)
+		for addr := range network.Addrs() {
+			require.Equal(t, ipv4AddrAtHostIndexReference(network, uint32(index)), addr)
+			index++
+			if index == take {
+				break
+			}
+		}
+		require.Equal(t, take, index)
+	})
+}
+
+// pdepUint32Reference deposits the low bits of source into the set
+// bits of mask, least significant first.
+//
+// It is the software expansion the host-index oracle is defined by,
+// kept as an obviously correct bit loop.
+func pdepUint32Reference(source, mask uint32) uint32 {
+	deposited := uint32(0)
+	for mask != 0 {
+		lowest := mask & -mask
+		if source&1 != 0 {
+			deposited |= lowest
+		}
+		source >>= 1
+		mask ^= lowest
+	}
+	return deposited
+}
+
+// ipv4AddrAtHostIndexReference returns the address the sequence must
+// yield at the given host index.
+//
+// That address is the network address with the index deposited into
+// the mask's zero bits.
+func ipv4AddrAtHostIndexReference(network xnetip.IPv4Network, index uint32) netip.Addr {
+	base, mask := ipv4NetworkBits(network)
+	return netipAddrFrom4Bits(base | pdepUint32Reference(index, ^mask))
+}
+
+// verifies on bounded spaces that the yielded count is exactly two to
+// the number of host bits.
+func Test_IPv4Network_Addrs_CountMatchesHostBitsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := drawBoundedIPv4Network(t, 16)
+		count := 0
+		for range network.Addrs() {
+			count++
+		}
+		require.Equal(t, 1<<network.NumHostBits(), count)
+	})
+}
+
+// drawBoundedIPv4Network draws a network whose mask clears at most
+// maxHostBits chosen positions.
+//
+// The bounded host space keeps a full drain of the membership cheap
+// enough for a property test.
+func drawBoundedIPv4Network(t *rapid.T, maxHostBits int) xnetip.IPv4Network {
+	hostBits := rapid.IntRange(0, maxHostBits).Draw(t, "host bits")
+	positions := rapid.SliceOfNDistinct(rapid.IntRange(0, 31), hostBits, hostBits, rapid.ID).Draw(t, "host positions")
+	mask := ^uint32(0)
+	for _, position := range positions {
+		mask &^= uint32(1) << position
+	}
+	network, err := xnetip.IPv4NetworkFrom(genNetipAddr4.Draw(t, "addr"), netipAddrFrom4Bits(mask))
+	require.NoError(t, err)
+	return network
+}
+
+// verifies on bounded spaces that every yielded address is a member
+// of the network by the bit test and that no address repeats.
+func Test_IPv4Network_Addrs_MembershipAndUniquenessProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := drawBoundedIPv4Network(t, 12)
+		base, mask := ipv4NetworkBits(network)
+		seen := map[netip.Addr]bool{}
+		for addr := range network.Addrs() {
+			addrBytes := addr.As4()
+			require.Equal(t, base, binary.BigEndian.Uint32(addrBytes[:])&mask)
+			require.False(t, seen[addr], "address repeated")
+			seen[addr] = true
+		}
+		require.Len(t, seen, 1<<network.NumHostBits())
+	})
+}
+
+// verifies that a contiguous network's sequence ascends strictly from
+// the network address to the last address.
+func Test_IPv4Network_Addrs_ContiguousAscendsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefixBits := rapid.IntRange(16, 32).Draw(t, "bits")
+		network, err := xnetip.IPv4NetworkFromCIDR(genNetipAddr4.Draw(t, "addr"), prefixBits)
+		require.NoError(t, err)
+		previous, started := netip.Addr{}, false
+		for addr := range network.Addrs() {
+			if started {
+				require.Equal(t, 1, addr.Compare(previous), "sequence not strictly ascending")
+			} else {
+				require.Equal(t, network.Addr(), addr)
+				started = true
+			}
+			previous = addr
+		}
+		require.True(t, started)
+		require.Equal(t, network.LastAddr(), previous)
+	})
+}
+
+// verifies against net/netip that a contiguous sequence equals
+// repeated successor steps from the network address onward.
+func Test_IPv4Network_Addrs_MatchesNetipNextDifferential(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefixBits := rapid.IntRange(20, 32).Draw(t, "bits")
+		network, err := xnetip.IPv4NetworkFromCIDR(genNetipAddr4.Draw(t, "addr"), prefixBits)
+		require.NoError(t, err)
+		expected := network.Addr()
+		for addr := range network.Addrs() {
+			require.Equal(t, expected, addr)
+			expected = expected.Next()
+		}
+	})
+}
+
+// verifies that a full drain of the sequence performs no allocation,
+// whatever the mask's shape.
+func Test_IPv4Network_Addrs_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseIPv4Network("192.168.1.0/24")
+	nonContiguous := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+	requireNoAllocs(t, func() {
+		for addr := range contiguous.Addrs() {
+			addrSink = addr
+		}
+	})
+	requireNoAllocs(t, func() {
+		for addr := range nonContiguous.Addrs() {
+			addrSink = addr
+		}
+	})
+}
+
+func BenchmarkIPv4Network_Addrs_Slash24(b *testing.B) {
+	network := xnetip.MustParseIPv4Network("77.88.55.0/24")
+	b.ReportAllocs()
+	for b.Loop() {
+		for addr := range network.Addrs() {
+			addrSink = addr
+		}
+	}
+}
+
+func BenchmarkIPv4Network_Addrs_Slash16(b *testing.B) {
+	network := xnetip.MustParseIPv4Network("77.88.0.0/16")
+	b.ReportAllocs()
+	for b.Loop() {
+		for addr := range network.Addrs() {
+			addrSink = addr
+		}
+	}
+}
+
+func BenchmarkIPv4Network_Addrs_NonContiguous8HostBits(b *testing.B) {
+	network := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+	b.ReportAllocs()
+	for b.Loop() {
+		for addr := range network.Addrs() {
+			addrSink = addr
+		}
+	}
+}
+
 // mergeReferenceIPv4 is the simple merge oracle.
 //
 // Equal networks merge to themselves, equal-mask single-bit siblings

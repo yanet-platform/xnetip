@@ -1,6 +1,7 @@
 package xnetip
 
 import (
+	"iter"
 	"math/bits"
 	"net/netip"
 	"strconv"
@@ -244,6 +245,50 @@ func (m IPv4Network) LastAddr() netip.Addr {
 // the 128 fits no integer, the exponent is the lossless form.
 func (m IPv4Network) NumHostBits() int {
 	return bits.OnesCount32(^m.mask.Bits())
+}
+
+// Addrs returns every address of the network in host-index order.
+//
+// The k host positions (mask bits that are zero) are filled with the
+// successive values 0 through 2^k-1, least-significant host bit
+// first. For a contiguous mask this is ascending numeric order from
+// Addr() to LastAddr(). For a non-contiguous mask the numeric order
+// of the yielded addresses differs from the iteration order. Every
+// yielded address is an Is4 netip.Addr, zone-free. The sequence is
+// re-iterable, allocation-free and stops early when the consumer
+// breaks. The number of addresses is exactly 1 << NumHostBits().
+func (m IPv4Network) Addrs() iter.Seq[netip.Addr] {
+	return func(yield func(netip.Addr) bool) {
+		base, mask := m.addr.Bits(), m.mask.Bits()
+		hostMask := ^mask
+		last := base | hostMask
+		front := base
+		// The walk ends at the address with every host bit set.
+		//
+		// Host patterns never repeat, so that address is reached
+		// exactly once, after all others, and comparing against it
+		// terminates every network including the default route,
+		// whose count would overflow the word.
+		if hostMask&(hostMask+1) == 0 {
+			for {
+				if !yield(ipv4AddrFromBits(front).Netip()) || front == last {
+					return
+				}
+				front++
+			}
+		}
+		// The non-contiguous step is O(1) for any mask shape.
+		//
+		// Presetting the mask bits to one makes the +1 carry ripple
+		// straight across them, so the increment lands in the next
+		// host position however the host bits are scattered.
+		for {
+			if !yield(ipv4AddrFromBits(front).Netip()) || front == last {
+				return
+			}
+			front = ((front|mask)+1)&hostMask | base
+		}
+	}
 }
 
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
