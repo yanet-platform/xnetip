@@ -3789,3 +3789,250 @@ func BenchmarkIPv6Network_Merge_NonContiguous(b *testing.B) {
 		network6Sink, okSink = left.Merge(right)
 	}
 }
+
+// isAdjacentByLowestMaskBitReferenceIPv6 is the simple oracle for the
+// lowest-mask-bit adjacency.
+//
+// It isolates the boundary bit with a trailing-zero count over the
+// halves and a shift, independent from the arithmetic isolation the
+// implementation uses. A zero mask has no boundary bit and never
+// qualifies.
+func isAdjacentByLowestMaskBitReferenceIPv6(left, right xnetip.IPv6Network) bool {
+	leftAddrHi, leftAddrLo, leftMaskHi, leftMaskLo := ipv6NetworkBits(left)
+	rightAddrHi, rightAddrLo, rightMaskHi, rightMaskLo := ipv6NetworkBits(right)
+	if leftMaskHi != rightMaskHi || leftMaskLo != rightMaskLo || leftMaskHi|leftMaskLo == 0 {
+		return false
+	}
+	var lowestHi, lowestLo uint64
+	if leftMaskLo != 0 {
+		lowestLo = 1 << bits.TrailingZeros64(leftMaskLo)
+	} else {
+		lowestHi = 1 << bits.TrailingZeros64(leftMaskHi)
+	}
+	return leftAddrHi^rightAddrHi == lowestHi && leftAddrLo^rightAddrLo == lowestLo
+}
+
+// verifies that only same-mask pairs differing in exactly the mask's
+// lowest set bit qualify, and adjacency at any higher bit is refused.
+//
+// The half-boundary rows pin the lowest-bit isolation across bit 64,
+// which must scan the low half first and fall back to the high half
+// only when the low half is empty.
+func Test_IPv6Network_IsAdjacentByLowestMaskBit_ContiguousAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  bool
+	}{
+		{name: "CIDR siblings", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8:1::/48"), want: true},
+		{name: "CIDR siblings reversed", left: xnetip.MustParseIPv6Network("2001:db8:1::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/48"), want: true},
+		{name: "host routes differing in bit 0", left: xnetip.MustParseIPv6Network("2001:db8::/128"), right: xnetip.MustParseIPv6Network("2001:db8::1/128"), want: true},
+		{name: "host routes differing in bit 0 reversed", left: xnetip.MustParseIPv6Network("2001:db8::1/128"), right: xnetip.MustParseIPv6Network("2001:db8::/128"), want: true},
+		{name: "identical", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/48"), want: false},
+		{name: "different masks", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: false},
+		{name: "adjacent at the top mask bit, not the lowest", left: xnetip.MustParseIPv6Network("::/2"), right: xnetip.MustParseIPv6Network("8000::/2"), want: false},
+		{name: "default route with itself", left: xnetip.MustParseIPv6Network("::/0"), right: xnetip.MustParseIPv6Network("::/0"), want: false},
+		{name: "/64 siblings at bit 64", left: xnetip.MustParseIPv6Network("2001:db8:0:0::/64"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/64"), want: true},
+		{name: "/65 siblings at bit 63", left: xnetip.MustParseIPv6Network("2001:db8::/65"), right: xnetip.MustParseIPv6Network("2001:db8:0:0:8000::/65"), want: true},
+		{name: "/65 pair differing at bit 64", left: xnetip.MustParseIPv6Network("2001:db8::/65"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/65"), want: false},
+		{name: "/63 pair differing at a host bit is identical", left: xnetip.MustParseIPv6Network("2001:db8:0:0::/63"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/63"), want: false},
+		{name: "/1 siblings at bit 127", left: xnetip.MustParseIPv6Network("::/1"), right: xnetip.MustParseIPv6Network("8000::/1"), want: true},
+		{name: "/127 siblings", left: xnetip.MustParseIPv6Network("2001:db8::/127"), right: xnetip.MustParseIPv6Network("2001:db8::2/127"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacentByLowestMaskBit(testCase.right))
+		})
+	}
+}
+
+// verifies that for a non-contiguous mask only the lowest run's
+// boundary bit counts.
+//
+// A sibling differing at a higher run's boundary stays adjacent in
+// the plain sense but does not qualify here.
+func Test_IPv6Network_IsAdjacentByLowestMaskBit_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  bool
+	}{
+		{name: "two-run mask at its lowest bit", left: xnetip.MustParseIPv6Network("::/ffff:ffff::ffff"), right: xnetip.MustParseIPv6Network("::1/ffff:ffff::ffff"), want: true},
+		{name: "two-run mask at its lowest bit reversed", left: xnetip.MustParseIPv6Network("::1/ffff:ffff::ffff"), right: xnetip.MustParseIPv6Network("::/ffff:ffff::ffff"), want: true},
+		{name: "two-run mask at the high run's boundary bit 96", left: xnetip.MustParseIPv6Network("::/ffff:ffff::ffff"), right: xnetip.MustParseIPv6Network("0:1::/ffff:ffff::ffff"), want: false},
+		{name: "low run ending at bit 32, differing there", left: xnetip.MustParseIPv6Network("2a02:6b8::/ffff:ffff::ffff:ffff:0:0"), right: xnetip.MustParseIPv6Network("2a02:6b8::1:0:0/ffff:ffff::ffff:ffff:0:0"), want: true},
+		{name: "lowest set bit 64 under a hole, differing there", left: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:0:ffff::"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/ffff:ffff:0:ffff::"), want: true},
+		{name: "lowest set bit 64 under a hole, differing at bit 96", left: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:0:ffff::"), right: xnetip.MustParseIPv6Network("2001:db9::/ffff:ffff:0:ffff::"), want: false},
+		{name: "geo two-run siblings in the low run", left: xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), right: xnetip.MustParseIPv6Network("2a02:6b8:c00::1235:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacentByLowestMaskBit(testCase.right))
+		})
+	}
+}
+
+// verifies that the rejected higher-bit pairs of the unit tables are
+// still plainly adjacent: the predicate is a strict restriction.
+func Test_IPv6Network_IsAdjacentByLowestMaskBit_RejectedPairsStayAdjacent(t *testing.T) {
+	cases := [][2]string{
+		{"::/2", "8000::/2"},
+		{"2001:db8::/65", "2001:db8:0:1::/65"},
+		{"::/ffff:ffff::ffff", "0:1::/ffff:ffff::ffff"},
+		{"2001:db8::/ffff:ffff:0:ffff::", "2001:db9::/ffff:ffff:0:ffff::"},
+	}
+	for _, pair := range cases {
+		left := xnetip.MustParseIPv6Network(pair[0])
+		right := xnetip.MustParseIPv6Network(pair[1])
+		require.True(t, left.IsAdjacent(right), "pair %v", pair)
+		require.False(t, left.IsAdjacentByLowestMaskBit(right), "pair %v", pair)
+	}
+}
+
+// verifies that the predicate agrees with the trailing-zeros oracle
+// on random pairs.
+func Test_IPv6Network_IsAdjacentByLowestMaskBit_MatchesReferenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		require.Equal(t, isAdjacentByLowestMaskBitReferenceIPv6(left, right), left.IsAdjacentByLowestMaskBit(right))
+	})
+}
+
+// verifies that the predicate implies plain adjacency, is symmetric
+// and is irreflexive.
+func Test_IPv6Network_IsAdjacentByLowestMaskBit_ImpliesAdjacentAndSymmetryProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		if left.IsAdjacentByLowestMaskBit(right) {
+			require.True(t, left.IsAdjacent(right))
+		}
+		require.Equal(t, left.IsAdjacentByLowestMaskBit(right), right.IsAdjacentByLowestMaskBit(left))
+		require.False(t, left.IsAdjacentByLowestMaskBit(left))
+	})
+}
+
+// verifies that the buddy at the mask's lowest set bit qualifies and
+// a sibling at any higher set bit is adjacent but does not.
+func Test_IPv6Network_IsAdjacentByLowestMaskBit_BuddyConstructionProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(network)
+		if maskHi|maskLo == 0 {
+			return
+		}
+		var lowestHi, lowestLo uint64
+		if maskLo != 0 {
+			lowestLo = maskLo & -maskLo
+		} else {
+			lowestHi = maskHi & -maskHi
+		}
+		buddy, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(addrHi^lowestHi, addrLo^lowestLo),
+			netipAddrFrom6Bits(maskHi, maskLo),
+		)
+		require.NoError(t, err)
+		require.True(t, network.IsAdjacentByLowestMaskBit(buddy))
+		require.True(t, buddy.IsAdjacentByLowestMaskBit(network))
+		higherBits := []int{}
+		for bit := range 128 {
+			set := bit < 64 && maskLo&(1<<bit) != 0 || bit >= 64 && maskHi&(1<<(bit-64)) != 0
+			isLowest := bit < 64 && lowestLo == 1<<bit || bit >= 64 && lowestHi == 1<<(bit-64)
+			if set && !isLowest {
+				higherBits = append(higherBits, bit)
+			}
+		}
+		if len(higherBits) == 0 {
+			return
+		}
+		bit := rapid.SampledFrom(higherBits).Draw(t, "higher bit")
+		var bitHi, bitLo uint64
+		if bit < 64 {
+			bitLo = 1 << bit
+		} else {
+			bitHi = 1 << (bit - 64)
+		}
+		sibling, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(addrHi^bitHi, addrLo^bitLo),
+			netipAddrFrom6Bits(maskHi, maskLo),
+		)
+		require.NoError(t, err)
+		require.True(t, network.IsAdjacent(sibling))
+		require.False(t, network.IsAdjacentByLowestMaskBit(sibling))
+	})
+}
+
+// verifies the buddy construction on masks whose lowest set bit sits
+// at the interesting positions 0, 63, 64 and 127.
+//
+// A contiguous mask ending at the drawn position makes that position
+// the lowest set bit, so the flip crosses the 64-bit half boundary in
+// both directions.
+func Test_IPv6Network_IsAdjacentByLowestMaskBit_HalfBoundaryBuddyProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		position := rapid.SampledFrom([]int{0, 63, 64, 127}).Draw(t, "position")
+		var maskHi, maskLo uint64
+		if position < 64 {
+			maskHi = ^uint64(0)
+			maskLo = ^uint64(0) << position
+		} else {
+			maskHi = ^uint64(0) << (position - 64)
+		}
+		network, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(rapid.Uint64().Draw(t, "addr hi"), rapid.Uint64().Draw(t, "addr lo")),
+			netipAddrFrom6Bits(maskHi, maskLo),
+		)
+		require.NoError(t, err)
+		addrHi, addrLo, _, _ := ipv6NetworkBits(network)
+		var bitHi, bitLo uint64
+		if position < 64 {
+			bitLo = 1 << position
+		} else {
+			bitHi = 1 << (position - 64)
+		}
+		buddy, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(addrHi^bitHi, addrLo^bitLo),
+			netipAddrFrom6Bits(maskHi, maskLo),
+		)
+		require.NoError(t, err)
+		require.True(t, network.IsAdjacentByLowestMaskBit(buddy))
+		require.True(t, buddy.IsAdjacentByLowestMaskBit(network))
+	})
+}
+
+// verifies that the predicate allocates nothing.
+func Test_IPv6Network_IsAdjacentByLowestMaskBit_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseIPv6Network("::/ffff:ffff::ffff")
+	right := xnetip.MustParseIPv6Network("::1/ffff:ffff::ffff")
+	requireNoAllocs(t, func() { okSink = left.IsAdjacentByLowestMaskBit(right) })
+}
+
+func BenchmarkIPv6Network_IsAdjacentByLowestMaskBit_CIDRSiblings(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/48")
+	right := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacentByLowestMaskBit(right)
+	}
+}
+
+func BenchmarkIPv6Network_IsAdjacentByLowestMaskBit_AdjacentNonLowestBit(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("::/2")
+	right := xnetip.MustParseIPv6Network("8000::/2")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacentByLowestMaskBit(right)
+	}
+}
+
+func BenchmarkIPv6Network_IsAdjacentByLowestMaskBit_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("::/ffff:ffff::ffff")
+	right := xnetip.MustParseIPv6Network("::1/ffff:ffff::ffff")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacentByLowestMaskBit(right)
+	}
+}
