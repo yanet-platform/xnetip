@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 	"net/netip"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -720,4 +721,170 @@ func Test_IPv6NetworkFromAddr_AllocationFree(t *testing.T) {
 	var err error
 	requireNoAllocs(t, func() { network6Sink, err = xnetip.IPv6NetworkFromAddr(addr) })
 	require.NoError(t, err)
+}
+
+// verifies that the order is lexicographic on the address first and
+// the mask second, both as unsigned 128-bit integers.
+func Test_IPv6Network_Compare_AddressFirstMaskSecond(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  int
+	}{
+		{name: "address dominates mask", left: mustIPv6Network(t, "2001::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), right: mustIPv6Network(t, "2001:db9::", "ffff:ffff::"), want: -1},
+		{name: "equal address, mask decides", left: mustIPv6Network(t, "2001:db8::", "ffff:ffff::"), right: mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff:ffff::"), want: -1},
+		{name: "equal address, larger mask after", left: mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff:ffff::"), right: mustIPv6Network(t, "2001:db8::", "ffff:ffff::"), want: 1},
+		{name: "zero before middle", left: mustIPv6Network(t, "::", "::"), right: mustIPv6Network(t, "2001:db8::", "ffff:ffff::"), want: -1},
+		{name: "middle before max", left: mustIPv6Network(t, "2001:db8::", "ffff:ffff::"), right: mustIPv6Network(t, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: -1},
+		{name: "zero before max", left: mustIPv6Network(t, "::", "::"), right: mustIPv6Network(t, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: -1},
+		{name: "low half decides when high halves agree", left: mustIPv6Network(t, "2001:db8::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), right: mustIPv6Network(t, "2001:db8::2", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: -1},
+		{name: "high half decides regardless of low half", left: mustIPv6Network(t, "2001:db8::ffff:ffff:ffff:ffff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), right: mustIPv6Network(t, "2001:db9::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: -1},
+		{name: "top address bit compares unsigned", left: mustIPv6Network(t, "8000::", "8000::"), right: mustIPv6Network(t, "7fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: 1},
+		{name: "same address, non-contiguous mask decides", left: mustIPv6Network(t, "2001:db8::5", "ffff:ffff:ff00:ff00:ffff:ffff:ffff:ffff"), right: mustIPv6Network(t, "2001:db8::5", "ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff"), want: -1},
+		{name: "masks differing only in the low half", left: mustIPv6Network(t, "::", "ffff::ffff:0:0"), right: mustIPv6Network(t, "::", "ffff::ffff:ffff:0"), want: -1},
+		{name: "alternating masks under one address", left: mustIPv6Network(t, "::", "ffff:0:ffff:0:ffff:0:ffff:0"), right: mustIPv6Network(t, "::", "0:ffff:0:ffff:0:ffff:0:ffff"), want: 1},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.Compare(testCase.right))
+		})
+	}
+}
+
+// verifies that equal networks compare as zero and only they do.
+func Test_IPv6Network_Compare_EqualityIsZero(t *testing.T) {
+	left := mustIPv6Network(t, "2001:db8::", "ffff:ffff::")
+	right := mustIPv6Network(t, "2001:db8::", "ffff:ffff::")
+	require.Equal(t, 0, left.Compare(right))
+	require.Equal(t, left, right)
+}
+
+// verifies that sorting a shuffled fixture yields the exact documented
+// order, the contract the aggregation and split inputs rely on.
+func Test_IPv6Network_Compare_SortPinsDocumentedOrder(t *testing.T) {
+	shuffled := []xnetip.IPv6Network{
+		mustIPv6Network(t, "2a02:6b8::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
+		mustIPv6Network(t, "2001:db9::", "ffff:ffff::"),
+		mustIPv6Network(t, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
+		mustIPv6Network(t, "2001:db8::5", "ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff"),
+		mustIPv6Network(t, "::", "::"),
+		mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff::"),
+		mustIPv6Network(t, "2001:db8::5", "ffff:ffff:ff00:ff00:ffff:ffff:ffff:ffff"),
+		mustIPv6Network(t, "2001:db8::", "ffff:ffff::"),
+	}
+	want := []xnetip.IPv6Network{
+		mustIPv6Network(t, "::", "::"),
+		mustIPv6Network(t, "2001:db8::", "ffff:ffff::"),
+		mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff::"),
+		mustIPv6Network(t, "2001:db8::5", "ffff:ffff:ff00:ff00:ffff:ffff:ffff:ffff"),
+		mustIPv6Network(t, "2001:db8::5", "ffff:ffff:ff00:ffff:ffff:ffff:ffff:ffff"),
+		mustIPv6Network(t, "2001:db9::", "ffff:ffff::"),
+		mustIPv6Network(t, "2a02:6b8::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
+		mustIPv6Network(t, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
+	}
+	slices.SortFunc(shuffled, xnetip.IPv6Network.Compare)
+	require.Equal(t, want, shuffled)
+}
+
+// verifies that the order equals the tuple order of the netip address
+// views, is antisymmetric and is zero exactly on equal values.
+func Test_IPv6Network_Compare_MatchesTupleOrderProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		want := left.Addr().Compare(right.Addr())
+		if want == 0 {
+			want = left.Mask().Compare(right.Mask())
+		}
+		require.Equal(t, want, left.Compare(right))
+		require.Equal(t, -want, right.Compare(left))
+		require.Equal(t, left == right, left.Compare(right) == 0)
+	})
+}
+
+// verifies that the order is transitive on random triples.
+func Test_IPv6Network_Compare_TransitivityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := genIPv6Network.Draw(t, "first")
+		second := genIPv6Network.Draw(t, "second")
+		third := genIPv6Network.Draw(t, "third")
+		if first.Compare(second) <= 0 && second.Compare(third) <= 0 {
+			require.LessOrEqual(t, first.Compare(third), 0)
+		}
+	})
+}
+
+// verifies that sorting a random slice by the order yields a sorted
+// permutation of the input.
+func Test_IPv6Network_Compare_SortFuncProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		networks := rapid.SliceOfN(genIPv6Network, 0, 32).Draw(t, "networks")
+		sorted := slices.Clone(networks)
+		slices.SortFunc(sorted, xnetip.IPv6Network.Compare)
+		require.True(t, slices.IsSortedFunc(sorted, xnetip.IPv6Network.Compare))
+		require.ElementsMatch(t, networks, sorted)
+	})
+}
+
+// verifies that the address-first component agrees with the
+// netip.Addr order whenever the addresses differ.
+func Test_IPv6Network_Compare_MatchesNetipAddrOrder(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		if left.Addr() != right.Addr() {
+			require.Equal(t, left.Addr().Compare(right.Addr()), left.Compare(right))
+		}
+	})
+}
+
+// verifies that comparing allocates nothing.
+func Test_IPv6Network_Compare_AllocationFree(t *testing.T) {
+	left := mustIPv6Network(t, "2001:db8::", "ffff:ffff::")
+	right := mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff::")
+	requireNoAllocs(t, func() { intSink = left.Compare(right) })
+}
+
+func BenchmarkIPv6Network_Compare_MaskDecides(b *testing.B) {
+	left := mustIPv6Network(b, "2001:db8::", "ffff:ffff::")
+	right := mustIPv6Network(b, "2001:db8::", "ffff:ffff:ffff::")
+	b.ReportAllocs()
+	for b.Loop() {
+		intSink = left.Compare(right)
+	}
+}
+
+func BenchmarkIPv6Network_Compare_AddressDecides(b *testing.B) {
+	left := mustIPv6Network(b, "2001:db8::", "ffff:ffff::")
+	right := mustIPv6Network(b, "2001:db9::", "ffff:ffff:ffff::")
+	b.ReportAllocs()
+	for b.Loop() {
+		intSink = left.Compare(right)
+	}
+}
+
+func BenchmarkIPv6Network_SortFunc_1024(b *testing.B) {
+	// The fixture is random-ish, not nearly sorted.
+	//
+	// The 64-bit wrapping product of the index and the golden-ratio
+	// constant fills the high address half, the low half stays zero
+	// and the prefixes spread over /16../128.
+	template := make([]xnetip.IPv6Network, 1024)
+	for idx := range template {
+		bits := uint64(idx) * 0x9E3779B97F4A7C15
+		network, err := xnetip.IPv6NetworkFromCIDR(netipAddrFrom6Bits(bits, 0), 16+int(bits%113))
+		if err != nil {
+			b.Fatal(err)
+		}
+		template[idx] = network
+	}
+	networks := make([]xnetip.IPv6Network, len(template))
+	b.ReportAllocs()
+	for b.Loop() {
+		// The 32 KiB fixture refresh stays inside the timed region: a
+		// paused timer would keep the loop from ever finishing.
+		copy(networks, template)
+		slices.SortFunc(networks, xnetip.IPv6Network.Compare)
+	}
 }

@@ -103,6 +103,21 @@ func (m IPv6Network) Mask() netip.Addr {
 	return m.mask.Netip()
 }
 
+// Compare returns -1, 0 or +1 as m sorts before, equal to or after
+// other.
+//
+// The order is lexicographic on (address, mask), both compared as
+// unsigned 128-bit integers: the address decides first and the mask
+// breaks ties, so a container sorts before the networks nested under
+// the same address. This order is a documented contract: the output
+// of AggregateIPv6 and the input of BinarySplitIPv6 are sorted by it.
+func (m IPv6Network) Compare(other IPv6Network) int {
+	if order := m.addr.Compare(other.addr); order != 0 {
+		return order
+	}
+	return m.mask.Compare(other.mask)
+}
+
 // IsIPv4MappedIPv6 reports whether this network is an IPv4-mapped IPv6
 // network.
 //
