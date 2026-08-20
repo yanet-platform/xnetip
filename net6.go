@@ -342,8 +342,9 @@ func (m Network6) AddrsBackward() iter.Seq[netip.Addr] {
 // The order is lexicographic on (address, mask), both compared as
 // unsigned 128-bit integers: the address decides first and the mask
 // breaks ties, so a container sorts before the networks nested under
-// the same address. This order is a documented contract: the output
-// of Aggregate6 and the input of BinarySplit6 are sorted by it.
+// the same address. This order is a documented contract: it is the
+// sort Aggregate6 applies before its greedy pass and the order
+// BinarySplit6 expects of its input.
 func (m Network6) Compare(other Network6) int {
 	if order := m.addr.Compare(other.addr); order != 0 {
 		return order
