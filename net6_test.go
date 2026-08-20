@@ -4036,3 +4036,342 @@ func BenchmarkIPv6Network_IsAdjacentByLowestMaskBit_NonContiguous(b *testing.B) 
 		okSink = left.IsAdjacentByLowestMaskBit(right)
 	}
 }
+
+// mergeByLowestMaskBitReferenceIPv6 is the simple oracle for the
+// class-closed merge.
+//
+// Containment either way returns the container, otherwise the
+// trailing-zeros adjacency oracle gates a sibling merge whose mask
+// clears the counted bit and whose address is re-normalized through
+// the checked constructor.
+func mergeByLowestMaskBitReferenceIPv6(t require.TestingT, left, right xnetip.IPv6Network) (xnetip.IPv6Network, bool) {
+	if left.Contains(right) {
+		return left, true
+	}
+	if right.Contains(left) {
+		return right, true
+	}
+	if !isAdjacentByLowestMaskBitReferenceIPv6(left, right) {
+		return xnetip.IPv6Network{}, false
+	}
+	leftAddrHi, leftAddrLo, leftMaskHi, leftMaskLo := ipv6NetworkBits(left)
+	rightAddrHi, rightAddrLo, _, _ := ipv6NetworkBits(right)
+	var lowestHi, lowestLo uint64
+	if leftMaskLo != 0 {
+		lowestLo = 1 << bits.TrailingZeros64(leftMaskLo)
+	} else {
+		lowestHi = 1 << bits.TrailingZeros64(leftMaskHi)
+	}
+	merged, err := xnetip.IPv6NetworkFrom(
+		netipAddrFrom6Bits(leftAddrHi&rightAddrHi, leftAddrLo&rightAddrLo),
+		netipAddrFrom6Bits(leftMaskHi&^lowestHi, leftMaskLo&^lowestLo),
+	)
+	require.NoError(t, err)
+	return merged, true
+}
+
+// verifies that merging succeeds exactly for containment and for
+// lowest-mask-bit siblings, and returns the combined network.
+//
+// The half-boundary rows pin the sibling path where the lowest mask
+// bit sits at bit 64 or bit 63, so the cleared bit and the reduced
+// mask cross the 64-bit halves of the word.
+func Test_IPv6Network_MergeByLowestMaskBit_UnitAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  xnetip.IPv6Network
+		ok    bool
+	}{
+		{name: "CIDR siblings merge to the parent", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8:1::/48"), want: xnetip.MustParseIPv6Network("2001:db8::/47"), ok: true},
+		{name: "CIDR siblings reversed", left: xnetip.MustParseIPv6Network("2001:db8:1::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/48"), want: xnetip.MustParseIPv6Network("2001:db8::/47"), ok: true},
+		{name: "host routes differing in bit 0 merge to /127", left: xnetip.MustParseIPv6Network("2001:db8::/128"), right: xnetip.MustParseIPv6Network("2001:db8::1/128"), want: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe"), ok: true},
+		{name: "adjacent at the top bit is refused", left: xnetip.MustParseIPv6Network("::/2"), right: xnetip.MustParseIPv6Network("8000::/2"), ok: false},
+		{name: "identical returns itself", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/48"), want: xnetip.MustParseIPv6Network("2001:db8::/48"), ok: true},
+		{name: "containment returns the larger", left: xnetip.MustParseIPv6Network("2001:db8::/32"), right: xnetip.MustParseIPv6Network("2001:db8:1::/48"), want: xnetip.MustParseIPv6Network("2001:db8::/32"), ok: true},
+		{name: "containment reversed", left: xnetip.MustParseIPv6Network("2001:db8:1::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: xnetip.MustParseIPv6Network("2001:db8::/32"), ok: true},
+		{name: "default route with itself", left: xnetip.MustParseIPv6Network("::/0"), right: xnetip.MustParseIPv6Network("::/0"), want: xnetip.MustParseIPv6Network("::/0"), ok: true},
+		{name: "default route absorbs any network", left: xnetip.MustParseIPv6Network("::/0"), right: xnetip.MustParseIPv6Network("2001:db8::/48"), want: xnetip.MustParseIPv6Network("::/0"), ok: true},
+		{name: "default route absorbs any network reversed", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("::/0"), want: xnetip.MustParseIPv6Network("::/0"), ok: true},
+		{name: "different masks, no containment", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:beef::/32"), ok: false},
+		{name: "different masks, no containment reversed", left: xnetip.MustParseIPv6Network("2001:beef::/32"), right: xnetip.MustParseIPv6Network("2001:db8::/48"), ok: false},
+		{name: "/64 siblings at bit 64 merge to /63", left: xnetip.MustParseIPv6Network("2001:db8:0:0::/64"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/64"), want: xnetip.MustParseIPv6Network("2001:db8::/63"), ok: true},
+		{name: "/65 siblings at bit 63 merge to /64", left: xnetip.MustParseIPv6Network("2001:db8::/65"), right: xnetip.MustParseIPv6Network("2001:db8:0:0:8000::/65"), want: xnetip.MustParseIPv6Network("2001:db8::/64"), ok: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			merged, ok := testCase.left.MergeByLowestMaskBit(testCase.right)
+			require.Equal(t, testCase.ok, ok)
+			require.Equal(t, testCase.want, merged)
+		})
+	}
+}
+
+// verifies that non-contiguous masks merge only at the lowest run's
+// boundary bit or by containment.
+func Test_IPv6Network_MergeByLowestMaskBit_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  xnetip.IPv6Network
+		ok    bool
+	}{
+		{name: "containment with two-run masks", left: xnetip.MustParseIPv6Network("2001::/ffff:ff00::ffff"), right: xnetip.MustParseIPv6Network("2001::/ffff:ff80::ffff"), want: xnetip.MustParseIPv6Network("2001::/ffff:ff00::ffff"), ok: true},
+		{name: "containment with two-run masks reversed", left: xnetip.MustParseIPv6Network("2001::/ffff:ff80::ffff"), right: xnetip.MustParseIPv6Network("2001::/ffff:ff00::ffff"), want: xnetip.MustParseIPv6Network("2001::/ffff:ff00::ffff"), ok: true},
+		{name: "siblings at the low run's bit 0", left: xnetip.MustParseIPv6Network("2001::/ffff:ff00::ffff"), right: xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff"), want: xnetip.MustParseIPv6Network("2001::/ffff:ff00::fffe"), ok: true},
+		{name: "siblings at the low run's bit 0 reversed", left: xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff"), right: xnetip.MustParseIPv6Network("2001::/ffff:ff00::ffff"), want: xnetip.MustParseIPv6Network("2001::/ffff:ff00::fffe"), ok: true},
+		{name: "siblings at the high run's bit 104 refused", left: xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff"), right: xnetip.MustParseIPv6Network("2001:100::1/ffff:ff00::ffff"), ok: false},
+		{name: "one-bit low run collapses to the contiguous /32", left: xnetip.MustParseIPv6Network("::/ffff:ffff:0:0:8000::"), right: xnetip.MustParseIPv6Network("::8000:0:0:0/ffff:ffff:0:0:8000::"), want: xnetip.MustParseIPv6Network("::/ffff:ffff::"), ok: true},
+		{name: "alternating mask, siblings at bit 0", left: xnetip.MustParseIPv6Network("::/5555:5555:5555:5555:5555:5555:5555:5555"), right: xnetip.MustParseIPv6Network("::1/5555:5555:5555:5555:5555:5555:5555:5555"), want: xnetip.MustParseIPv6Network("::/5555:5555:5555:5555:5555:5555:5555:5554"), ok: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			merged, ok := testCase.left.MergeByLowestMaskBit(testCase.right)
+			require.Equal(t, testCase.ok, ok)
+			require.Equal(t, testCase.want, merged)
+		})
+	}
+}
+
+// verifies that the one-bit low run pair and its merge stay in the
+// bi-contiguous class while the result degenerates to contiguous.
+func Test_IPv6Network_MergeByLowestMaskBit_BicontiguousDegeneration(t *testing.T) {
+	left := xnetip.MustParseIPv6Network("::/ffff:ffff:0:0:8000::")
+	right := xnetip.MustParseIPv6Network("::8000:0:0:0/ffff:ffff:0:0:8000::")
+	require.True(t, left.IsBicontiguous())
+	require.True(t, right.IsBicontiguous())
+	require.True(t, left.IsAdjacentByLowestMaskBit(right))
+	merged, ok := left.MergeByLowestMaskBit(right)
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv6Network("::/ffff:ffff::"), merged)
+	require.True(t, merged.IsContiguous())
+	require.True(t, merged.IsBicontiguous())
+}
+
+// verifies that the refused higher-bit pairs of the unit tables are
+// still combined by the unrestricted merge.
+//
+// The refusal is what keeps the result inside the inputs' class.
+func Test_IPv6Network_MergeByLowestMaskBit_RefusedPairsStillMerge(t *testing.T) {
+	cases := []struct {
+		name string
+		pair [2]string
+		want string
+	}{
+		{name: "top-bit pair merges non-contiguously", pair: [2]string{"::/2", "8000::/2"}, want: "::/4000::"},
+		{name: "higher-run pair widens the two-run mask", pair: [2]string{"2001::1/ffff:ff00::ffff", "2001:100::1/ffff:ff00::ffff"}, want: "2001::1/ffff:fe00::ffff"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			left := xnetip.MustParseIPv6Network(testCase.pair[0])
+			right := xnetip.MustParseIPv6Network(testCase.pair[1])
+			_, ok := left.MergeByLowestMaskBit(right)
+			require.False(t, ok)
+			merged, ok := left.Merge(right)
+			require.True(t, ok)
+			require.Equal(t, xnetip.MustParseIPv6Network(testCase.want), merged)
+		})
+	}
+}
+
+// verifies that the seven reference pairs, one per branch of the case
+// analysis, agree with the simple oracle.
+func Test_IPv6Network_MergeByLowestMaskBit_ReferenceFixedCases(t *testing.T) {
+	cases := [][2]string{
+		{"2001:db8::/48", "2001:db8:1::/48"},
+		{"2001::/ffff:ff00::ffff", "2001::1/ffff:ff00::ffff"},
+		{"::/2", "8000::/2"},
+		{"2001:db8::/48", "2001:db8::/48"},
+		{"2001:db8::/32", "2001:db8:1::/48"},
+		{"2001:db8::/32", "2001:beef:1::/48"},
+		{"::/0", "::/0"},
+	}
+	for _, pair := range cases {
+		left := xnetip.MustParseIPv6Network(pair[0])
+		right := xnetip.MustParseIPv6Network(pair[1])
+		wantNetwork, wantOK := mergeByLowestMaskBitReferenceIPv6(t, left, right)
+		merged, ok := left.MergeByLowestMaskBit(right)
+		require.Equal(t, wantOK, ok, "pair %v", pair)
+		require.Equal(t, wantNetwork, merged, "pair %v", pair)
+	}
+}
+
+// verifies that the merge agrees with the simple oracle on random
+// pairs.
+func Test_IPv6Network_MergeByLowestMaskBit_MatchesReferenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		wantNetwork, wantOK := mergeByLowestMaskBitReferenceIPv6(t, left, right)
+		merged, ok := left.MergeByLowestMaskBit(right)
+		require.Equal(t, wantOK, ok)
+		require.Equal(t, wantNetwork, merged)
+	})
+}
+
+// verifies that the merge fires exactly on containment in either
+// direction or on a lowest-mask-bit sibling pair.
+func Test_IPv6Network_MergeByLowestMaskBit_OKIffPredicateProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		_, ok := left.MergeByLowestMaskBit(right)
+		want := left.Contains(right) || right.Contains(left) || left.IsAdjacentByLowestMaskBit(right)
+		require.Equal(t, want, ok)
+	})
+}
+
+// verifies that the merge is commutative in both the value and the
+// flag.
+func Test_IPv6Network_MergeByLowestMaskBit_CommutativityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		leftMerged, leftOK := left.MergeByLowestMaskBit(right)
+		rightMerged, rightOK := right.MergeByLowestMaskBit(left)
+		require.Equal(t, leftOK, rightOK)
+		require.Equal(t, leftMerged, rightMerged)
+	})
+}
+
+// verifies that the merge is a restriction of Merge: whenever it
+// fires it returns exactly the same network.
+func Test_IPv6Network_MergeByLowestMaskBit_AgreesWithMergeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		merged, ok := left.MergeByLowestMaskBit(right)
+		if !ok {
+			return
+		}
+		unrestricted, unrestrictedOK := left.Merge(right)
+		require.True(t, unrestrictedOK)
+		require.Equal(t, unrestricted, merged)
+	})
+}
+
+// verifies that constructed buddy pairs always merge, agree with
+// Merge, commute, contain both inputs and yield a normalized result.
+func Test_IPv6Network_MergeByLowestMaskBit_SiblingsMergeAndAgreeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		pair := genIPv6LowestBitSiblingPair.Draw(t, "pair")
+		merged, ok := pair[0].MergeByLowestMaskBit(pair[1])
+		require.True(t, ok)
+		unrestricted, unrestrictedOK := pair[0].Merge(pair[1])
+		require.True(t, unrestrictedOK)
+		require.Equal(t, unrestricted, merged)
+		reversed, reversedOK := pair[1].MergeByLowestMaskBit(pair[0])
+		require.True(t, reversedOK)
+		require.Equal(t, merged, reversed)
+		require.True(t, merged.Contains(pair[0]))
+		require.True(t, merged.Contains(pair[1]))
+		addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(merged)
+		require.Equal(t, addrHi, addrHi&maskHi)
+		require.Equal(t, addrLo, addrLo&maskLo)
+	})
+}
+
+// verifies the class closure: two contiguous buddies always merge
+// into a contiguous parent.
+func Test_IPv6Network_MergeByLowestMaskBit_ClosureContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		pair := genIPv6ContiguousSiblingPair.Draw(t, "pair")
+		require.True(t, pair[0].IsContiguous())
+		require.True(t, pair[1].IsContiguous())
+		merged, ok := pair[0].MergeByLowestMaskBit(pair[1])
+		require.True(t, ok)
+		require.True(t, merged.IsContiguous())
+	})
+}
+
+// verifies the class closure: two bi-contiguous buddies always merge
+// into a bi-contiguous parent.
+//
+// The degenerate one-bit low run collapses to a contiguous mask,
+// which is still bi-contiguous.
+func Test_IPv6Network_MergeByLowestMaskBit_ClosureBicontiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		pair := genIPv6BicontiguousSiblingPair.Draw(t, "pair")
+		require.True(t, pair[0].IsBicontiguous())
+		require.True(t, pair[1].IsBicontiguous())
+		merged, ok := pair[0].MergeByLowestMaskBit(pair[1])
+		require.True(t, ok)
+		require.True(t, merged.IsBicontiguous())
+	})
+}
+
+// verifies on an 8-bit model, networks confined to the top octet,
+// that a successful merge holds exactly the union of the two sets.
+func Test_IPv6Network_MergeByLowestMaskBit_MembershipBruteForceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		leftAddr := uint64(rapid.IntRange(0, 255).Draw(t, "left addr")) << 56
+		leftMask := uint64(rapid.IntRange(0, 255).Draw(t, "left mask")) << 56
+		rightAddr := uint64(rapid.IntRange(0, 255).Draw(t, "right addr")) << 56
+		rightMask := uint64(rapid.IntRange(0, 255).Draw(t, "right mask")) << 56
+		left, err := xnetip.IPv6NetworkFrom(netipAddrFrom6Bits(leftAddr, 0), netipAddrFrom6Bits(leftMask, 0))
+		require.NoError(t, err)
+		right, err := xnetip.IPv6NetworkFrom(netipAddrFrom6Bits(rightAddr, 0), netipAddrFrom6Bits(rightMask, 0))
+		require.NoError(t, err)
+		merged, ok := left.MergeByLowestMaskBit(right)
+		if !ok {
+			return
+		}
+		mergedAddrHi, _, mergedMaskHi, _ := ipv6NetworkBits(merged)
+		for x := range uint64(256) {
+			candidate := x << 56
+			inLeft := candidate&leftMask == leftAddr&leftMask
+			inRight := candidate&rightMask == rightAddr&rightMask
+			inMerged := candidate&mergedMaskHi == mergedAddrHi
+			require.Equal(t, inLeft || inRight, inMerged, "member 0x%016x", candidate)
+		}
+	})
+}
+
+// verifies that the merge allocates nothing on the sibling and the
+// containment paths.
+func Test_IPv6Network_MergeByLowestMaskBit_AllocationFree(t *testing.T) {
+	sibling := xnetip.MustParseIPv6Network("2001:db8::/48")
+	buddy := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	container := xnetip.MustParseIPv6Network("2001:db8::/32")
+	contained := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	requireNoAllocs(t, func() { network6Sink, okSink = sibling.MergeByLowestMaskBit(buddy) })
+	requireNoAllocs(t, func() { network6Sink, okSink = container.MergeByLowestMaskBit(contained) })
+}
+
+func BenchmarkIPv6Network_MergeByLowestMaskBit_CIDRSiblings(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/48")
+	right := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, okSink = left.MergeByLowestMaskBit(right)
+	}
+}
+
+func BenchmarkIPv6Network_MergeByLowestMaskBit_AdjacentNonLowestBit(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("::/2")
+	right := xnetip.MustParseIPv6Network("8000::/2")
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, okSink = left.MergeByLowestMaskBit(right)
+	}
+}
+
+func BenchmarkIPv6Network_MergeByLowestMaskBit_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("::/ffff:ffff::ffff")
+	right := xnetip.MustParseIPv6Network("::1/ffff:ffff::ffff")
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, okSink = left.MergeByLowestMaskBit(right)
+	}
+}
+
+func BenchmarkIPv6Network_MergeByLowestMaskBit_Containment(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/32")
+	right := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, okSink = left.MergeByLowestMaskBit(right)
+	}
+}

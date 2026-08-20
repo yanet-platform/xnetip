@@ -350,6 +350,68 @@ var genIPv6BicontiguousNetwork = rapid.Custom(func(t *rapid.T) xnetip.IPv6Networ
 	return network
 })
 
+// genIPv6LowestBitSiblingPair draws a network with a non-empty mask
+// and its buddy at the mask's lowest set bit.
+//
+// Such a pair is adjacent by the lowest mask bit by construction, so
+// it exercises the merging case that random pairs almost never hit,
+// over every mask shape the network generator draws, the half-word
+// and straddle masks included.
+var genIPv6LowestBitSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv6Network {
+	network := genIPv6Network.Filter(func(network xnetip.IPv6Network) bool {
+		return network.Mask() != netipAddrFrom6Bits(0, 0)
+	}).Draw(t, "network")
+	return ipv6SiblingPairAtLowestMaskBit(t, network)
+})
+
+// genIPv6ContiguousSiblingPair draws a CIDR network of prefix length
+// one or more and its buddy at the prefix boundary bit.
+//
+// Both halves are contiguous, so the pair pins the class closure of
+// the lowest-mask-bit merge: the parent must be contiguous too.
+var genIPv6ContiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv6Network {
+	bits := rapid.IntRange(1, 128).Draw(t, "bits")
+	network, err := xnetip.IPv6NetworkFromCIDR(genNetipAddr6.Draw(t, "addr"), bits)
+	require.NoError(t, err)
+	return ipv6SiblingPairAtLowestMaskBit(t, network)
+})
+
+// genIPv6BicontiguousSiblingPair draws a network whose mask is a
+// product of per-half prefixes, the low run non-empty, and its buddy.
+//
+// The low half carries at least one leading one, so the lowest set
+// mask bit sits in the low half and the pair pins the bi-contiguous
+// class closure of the merge, the degenerate one-bit low run
+// included.
+var genIPv6BicontiguousSiblingPair = rapid.Custom(func(t *rapid.T) [2]xnetip.IPv6Network {
+	hiPrefix := rapid.IntRange(0, 64).Draw(t, "hi prefix")
+	loPrefix := rapid.IntRange(1, 64).Draw(t, "lo prefix")
+	network, err := xnetip.IPv6NetworkFrom(
+		netipAddrFrom6Bits(rapid.Uint64().Draw(t, "addr hi"), rapid.Uint64().Draw(t, "addr lo")),
+		netipAddrFrom6Bits(^uint64(0)<<(64-hiPrefix), ^uint64(0)<<(64-loPrefix)),
+	)
+	require.NoError(t, err)
+	return ipv6SiblingPairAtLowestMaskBit(t, network)
+})
+
+// ipv6SiblingPairAtLowestMaskBit pairs a network, whose mask must be
+// non-empty, with its buddy at the mask's lowest set bit.
+func ipv6SiblingPairAtLowestMaskBit(t require.TestingT, network xnetip.IPv6Network) [2]xnetip.IPv6Network {
+	addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(network)
+	var lowestHi, lowestLo uint64
+	if maskLo != 0 {
+		lowestLo = maskLo & -maskLo
+	} else {
+		lowestHi = maskHi & -maskHi
+	}
+	buddy, err := xnetip.IPv6NetworkFrom(
+		netipAddrFrom6Bits(addrHi^lowestHi, addrLo^lowestLo),
+		netipAddrFrom6Bits(maskHi, maskLo),
+	)
+	require.NoError(t, err)
+	return [2]xnetip.IPv6Network{network, buddy}
+}
+
 // genIPNetwork draws a family-agnostic network, wrapping an IPv4 or an
 // IPv6 draw with equal probability.
 //

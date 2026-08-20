@@ -430,6 +430,49 @@ func (m IPv6Network) IsAdjacentByLowestMaskBit(other IPv6Network) bool {
 	return m1 == m2 && !m1.IsZero() && a1.Xor(a2) == m1.LowestSetBit()
 }
 
+// MergeByLowestMaskBit merges two networks when one contains the
+// other or when they are lowest-mask-bit siblings.
+//
+// Exactly two disjoint cases merge and everything else reports
+// false: containment returns the larger network, and a sibling pair
+// sharing a mask and differing in precisely its lowest set bit
+// returns the common address under that mask with the bit removed.
+// Adjacency at any higher masked bit is refused even though Merge
+// accepts it, so the result stays in the inputs' class — for a
+// non-contiguous mask only the lowest run's boundary bit is a merge
+// point. Whenever ok is true the result equals Merge's.
+func (m IPv6Network) MergeByLowestMaskBit(other IPv6Network) (IPv6Network, bool) {
+	if m.mask == other.mask {
+		if m.addr == other.addr {
+			return m, true
+		}
+		if m.IsAdjacentByLowestMaskBit(other) {
+			// The sibling result is normalized without a masking AND.
+			//
+			// The addresses differ only in the mask's lowest set bit,
+			// which the reduced mask clears, so their AND holds no
+			// bit outside that mask.
+			return IPv6Network{
+				addr: ipv6Addr{m.addr.bits.And(other.addr.bits)},
+				mask: ipv6Addr{m.mask.bits.ClearLowestSetBit()},
+			}, true
+		}
+		return IPv6Network{}, false
+	}
+	// With unequal masks adjacency is impossible, so containment is
+	// the only remaining way to merge.
+	//
+	// The equal-mask branch above needed only the address compare
+	// because containment degenerates to equality there.
+	if m.Contains(other) {
+		return m, true
+	}
+	if other.Contains(m) {
+		return other, true
+	}
+	return IPv6Network{}, false
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //
