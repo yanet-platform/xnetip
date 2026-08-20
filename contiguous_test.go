@@ -1837,3 +1837,228 @@ func Test_Contiguous_AppendTo_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { bytesSink = block6.AppendTo(buffer[:0]) })
 	requireNoAllocs(t, func() { bytesSink = block.AppendTo(buffer[:0]) })
 }
+
+// verifies that host bits below the prefix length are cleared,
+// wrapping the same block the equivalent prefix text parses to.
+func Test_ContiguousFromCIDR4_ClearsHostBits(t *testing.T) {
+	block, err := xnetip.ContiguousFromCIDR4(netip.MustParseAddr("192.168.1.5"), 24)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous4(t, "192.168.1.0/24"), block)
+}
+
+// verifies that both IPv4 length boundaries construct: zero masks
+// every address bit away and thirty-two keeps the full host route.
+func Test_ContiguousFromCIDR4_Boundaries(t *testing.T) {
+	universe, err := xnetip.ContiguousFromCIDR4(netip.MustParseAddr("192.168.1.5"), 0)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous4(t, "0.0.0.0/0"), universe)
+	host, err := xnetip.ContiguousFromCIDR4(netip.MustParseAddr("192.168.1.5"), 32)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous4(t, "192.168.1.5/32"), host)
+}
+
+// verifies that a length outside the IPv4 range is refused with the
+// overflow sentinel under this constructor's name.
+func Test_ContiguousFromCIDR4_Overflow(t *testing.T) {
+	for _, bits := range []int{33, -1} {
+		_, err := xnetip.ContiguousFromCIDR4(netip.MustParseAddr("192.168.1.5"), bits)
+		require.ErrorIs(t, err, xnetip.ErrCIDROverflow, "bits %d", bits)
+		require.True(t, strings.HasPrefix(err.Error(), "xnetip.ContiguousFromCIDR4("), err.Error())
+	}
+}
+
+// verifies that the IPv4 form rejects every non-Is4 address: plain
+// IPv6, IPv4-mapped IPv6 and the invalid zero address.
+func Test_ContiguousFromCIDR4_FamilyMismatch(t *testing.T) {
+	for _, addr := range []netip.Addr{
+		netip.MustParseAddr("2001:db8::1"),
+		netip.MustParseAddr("::ffff:192.168.1.5"),
+		{},
+	} {
+		_, err := xnetip.ContiguousFromCIDR4(addr, 24)
+		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch, addr.String())
+	}
+}
+
+// verifies that host bits below the prefix length are cleared,
+// wrapping the same block the equivalent prefix text parses to.
+func Test_ContiguousFromCIDR6_ClearsHostBits(t *testing.T) {
+	block, err := xnetip.ContiguousFromCIDR6(netip.MustParseAddr("2001:db8::1"), 64)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous6(t, "2001:db8::/64"), block)
+}
+
+// verifies that both IPv6 length boundaries construct: zero masks
+// every address bit away and the full width keeps the host route.
+func Test_ContiguousFromCIDR6_Boundaries(t *testing.T) {
+	universe, err := xnetip.ContiguousFromCIDR6(netip.MustParseAddr("2001:db8::1"), 0)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous6(t, "::/0"), universe)
+	host, err := xnetip.ContiguousFromCIDR6(netip.MustParseAddr("2001:db8::1"), 128)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous6(t, "2001:db8::1/128"), host)
+}
+
+// verifies that a length outside the IPv6 range is refused with the
+// overflow sentinel under this constructor's name.
+func Test_ContiguousFromCIDR6_Overflow(t *testing.T) {
+	for _, bits := range []int{129, -1} {
+		_, err := xnetip.ContiguousFromCIDR6(netip.MustParseAddr("2001:db8::1"), bits)
+		require.ErrorIs(t, err, xnetip.ErrCIDROverflow, "bits %d", bits)
+		require.True(t, strings.HasPrefix(err.Error(), "xnetip.ContiguousFromCIDR6("), err.Error())
+	}
+}
+
+// verifies that the IPv6 form rejects an Is4 address and the invalid
+// zero address while accepting an IPv4-mapped IPv6 one.
+func Test_ContiguousFromCIDR6_FamilyMismatch(t *testing.T) {
+	for _, addr := range []netip.Addr{netip.MustParseAddr("192.168.1.5"), {}} {
+		_, err := xnetip.ContiguousFromCIDR6(addr, 64)
+		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch, addr.String())
+	}
+	mapped, err := xnetip.ContiguousFromCIDR6(netip.MustParseAddr("::ffff:192.168.1.5"), 104)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous6(t, "::ffff:192.0.0.0/104"), mapped)
+}
+
+// verifies that the family follows the address: an Is4 address makes
+// an IPv4 block and an IPv4-mapped IPv6 one stays IPv6.
+func Test_ContiguousFromCIDR_SelectsFamilyByAddress(t *testing.T) {
+	blockV4, err := xnetip.ContiguousFromCIDR(netip.MustParseAddr("192.168.1.5"), 24)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous(t, "192.168.1.0/24"), blockV4)
+	_, ok := blockV4.Network().IPv4()
+	require.True(t, ok)
+	blockMapped, err := xnetip.ContiguousFromCIDR(netip.MustParseAddr("::ffff:192.168.1.5"), 104)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous(t, "::ffff:192.0.0.0/104"), blockMapped)
+	_, ok = blockMapped.Network().IPv6()
+	require.True(t, ok)
+}
+
+// verifies that both families' length boundaries construct through
+// the family-agnostic form.
+func Test_ContiguousFromCIDR_Boundaries(t *testing.T) {
+	universe4, err := xnetip.ContiguousFromCIDR(netip.MustParseAddr("192.168.1.5"), 0)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous(t, "0.0.0.0/0"), universe4)
+	host4, err := xnetip.ContiguousFromCIDR(netip.MustParseAddr("192.168.1.5"), 32)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous(t, "192.168.1.5/32"), host4)
+	universe6, err := xnetip.ContiguousFromCIDR(netip.MustParseAddr("2001:db8::1"), 0)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous(t, "::/0"), universe6)
+	host6, err := xnetip.ContiguousFromCIDR(netip.MustParseAddr("2001:db8::1"), 128)
+	require.NoError(t, err)
+	require.Equal(t, mustContiguous(t, "2001:db8::1/128"), host6)
+}
+
+// verifies that a length outside the address's own family range and
+// the invalid zero address are refused with their sentinels.
+func Test_ContiguousFromCIDR_OverflowAndZeroAddr(t *testing.T) {
+	_, err := xnetip.ContiguousFromCIDR(netip.MustParseAddr("192.168.1.5"), 33)
+	require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+	require.True(t, strings.HasPrefix(err.Error(), "xnetip.ContiguousFromCIDR("), err.Error())
+	_, err = xnetip.ContiguousFromCIDR(netip.MustParseAddr("2001:db8::1"), 129)
+	require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+	_, err = xnetip.ContiguousFromCIDR(netip.Addr{}, 0)
+	require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+}
+
+// verifies that the typed IPv4 constructor accepts exactly the
+// lengths the plain one does, wrapping the identical network.
+func Test_ContiguousFromCIDR4_MatchesTypedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr")
+		bits := rapid.IntRange(-1, 33).Draw(t, "bits")
+		block, err := xnetip.ContiguousFromCIDR4(addr, bits)
+		network, plainErr := xnetip.Network4FromCIDR(addr, bits)
+		if plainErr != nil {
+			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+			return
+		}
+		require.NoError(t, err)
+		require.Equal(t, network, block.Network())
+		require.Equal(t, bits, block.PrefixLen())
+		require.Equal(t, netip.PrefixFrom(addr, bits).Masked(), block.Prefix())
+	})
+}
+
+// verifies that the typed IPv6 constructor accepts exactly the
+// lengths the plain one does, wrapping the identical network.
+func Test_ContiguousFromCIDR6_MatchesTypedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr6.Draw(t, "addr")
+		bits := rapid.IntRange(-1, 129).Draw(t, "bits")
+		block, err := xnetip.ContiguousFromCIDR6(addr, bits)
+		network, plainErr := xnetip.Network6FromCIDR(addr, bits)
+		if plainErr != nil {
+			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+			return
+		}
+		require.NoError(t, err)
+		require.Equal(t, network, block.Network())
+		require.Equal(t, bits, block.PrefixLen())
+		require.Equal(t, netip.PrefixFrom(addr, bits).Masked(), block.Prefix())
+	})
+}
+
+// verifies that the typed family-agnostic constructor accepts the
+// exact lengths the plain one does, wrapping the identical network.
+func Test_ContiguousFromCIDR_MatchesTypedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr4")
+		limit := 32
+		if rapid.Bool().Draw(t, "ipv6") {
+			addr = genNetipAddr6.Draw(t, "addr6")
+			limit = 128
+		}
+		bits := rapid.IntRange(-1, limit+1).Draw(t, "bits")
+		block, err := xnetip.ContiguousFromCIDR(addr, bits)
+		network, plainErr := xnetip.NetworkFromCIDR(addr, bits)
+		if plainErr != nil {
+			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+			return
+		}
+		require.NoError(t, err)
+		require.Equal(t, network, block.Network())
+		require.Equal(t, bits, block.PrefixLen())
+	})
+}
+
+// verifies that the address-and-length constructors agree with the
+// parsers on the equivalent prefix text in every family.
+func Test_ContiguousFromCIDR_AgreesWithParserProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr4 := genNetipAddr4.Draw(t, "addr4")
+		bits4 := rapid.IntRange(0, 32).Draw(t, "bits4")
+		block4, err := xnetip.ContiguousFromCIDR4(addr4, bits4)
+		require.NoError(t, err)
+		parsed4, err := xnetip.ParseContiguous4(addr4.String() + "/" + strconv.Itoa(bits4))
+		require.NoError(t, err)
+		require.Equal(t, parsed4, block4)
+		addr6 := genNetipAddr6.Draw(t, "addr6")
+		bits6 := rapid.IntRange(0, 128).Draw(t, "bits6")
+		block6, err := xnetip.ContiguousFromCIDR6(addr6, bits6)
+		require.NoError(t, err)
+		parsed6, err := xnetip.ParseContiguous6(addr6.String() + "/" + strconv.Itoa(bits6))
+		require.NoError(t, err)
+		require.Equal(t, parsed6, block6)
+		block, err := xnetip.ContiguousFromCIDR(addr6, bits6)
+		require.NoError(t, err)
+		parsed, err := xnetip.ParseContiguous(addr6.String() + "/" + strconv.Itoa(bits6))
+		require.NoError(t, err)
+		require.Equal(t, parsed, block)
+	})
+}
+
+// verifies that the accept path of each address-and-length
+// constructor is allocation-free.
+func Test_ContiguousFromCIDR_AllocationFree(t *testing.T) {
+	addr4 := netip.MustParseAddr("192.168.1.5")
+	addr6 := netip.MustParseAddr("2001:db8::1")
+	requireNoAllocs(t, func() { contiguous4Sink, errSink = xnetip.ContiguousFromCIDR4(addr4, 24) })
+	requireNoAllocs(t, func() { contiguous6Sink, errSink = xnetip.ContiguousFromCIDR6(addr6, 64) })
+	requireNoAllocs(t, func() { contiguousSink, errSink = xnetip.ContiguousFromCIDR(addr4, 24) })
+	requireNoAllocs(t, func() { contiguousSink, errSink = xnetip.ContiguousFromCIDR(addr6, 64) })
+}

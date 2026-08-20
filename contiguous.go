@@ -18,6 +18,83 @@ func ContiguousFrom[T network[T]](network T) (Contiguous[T], bool) {
 	return Contiguous[T]{network: network}, true
 }
 
+// ContiguousFromCIDR4 returns the block of addr with the top bits
+// bits masked, host bits cleared.
+//
+// The mask built from a length is a leading run of ones, so the
+// result is a CIDR block by construction. The address must be Is4 —
+// an IPv6 address, IPv4-mapped included, or the invalid zero
+// netip.Addr is rejected with ErrAddrFamilyMismatch — and bits must
+// be in the range 0 through 32, otherwise ErrCIDROverflow is
+// returned: the Network4FromCIDR contract under this function's
+// name.
+func ContiguousFromCIDR4(addr netip.Addr, bits int) (Contiguous[Network4], error) {
+	// The typed constructor can only reject the length after the
+	// family check, so the error is rebuilt to name this entry point.
+	if !addr.Is4() {
+		input := cidrInput(addr, bits)
+		return Contiguous[Network4]{}, wrapParseError("ContiguousFromCIDR4", input, ErrAddrFamilyMismatch, nil)
+	}
+	network, err := Network4FromCIDR(addr, bits)
+	if err != nil {
+		input := cidrInput(addr, bits)
+		return Contiguous[Network4]{}, wrapParseError("ContiguousFromCIDR4", input, ErrCIDROverflow, nil)
+	}
+	// A mask built from a prefix length is contiguous by
+	// construction, so the block wraps without revalidation.
+	return Contiguous[Network4]{network: network}, nil
+}
+
+// ContiguousFromCIDR6 returns the block of addr with the top bits
+// bits masked, host bits cleared.
+//
+// The mask built from a length is a leading run of ones, so the
+// result is a CIDR block by construction. The address must be Is6
+// (an IPv4-mapped address is IPv6, a zone is dropped silently) — an
+// Is4 address or the invalid zero netip.Addr is rejected with
+// ErrAddrFamilyMismatch — and bits must be in the range 0 through
+// 128, otherwise ErrCIDROverflow is returned: the Network6FromCIDR
+// contract under this function's name.
+func ContiguousFromCIDR6(addr netip.Addr, bits int) (Contiguous[Network6], error) {
+	if !addr.Is6() {
+		input := cidrInput(addr, bits)
+		return Contiguous[Network6]{}, wrapParseError("ContiguousFromCIDR6", input, ErrAddrFamilyMismatch, nil)
+	}
+	network, err := Network6FromCIDR(addr, bits)
+	if err != nil {
+		input := cidrInput(addr, bits)
+		return Contiguous[Network6]{}, wrapParseError("ContiguousFromCIDR6", input, ErrCIDROverflow, nil)
+	}
+	// A mask built from a prefix length is contiguous by
+	// construction, so the block wraps without revalidation.
+	return Contiguous[Network6]{network: network}, nil
+}
+
+// ContiguousFromCIDR returns the block of addr with the top bits
+// bits masked, in addr's own family, host bits cleared.
+//
+// The mask built from a length is a leading run of ones, so the
+// result is a CIDR block by construction. The length is bounded by
+// the family, 0 through 32 for IPv4 and 0 through 128 for IPv6,
+// otherwise ErrCIDROverflow is returned. An IPv4-mapped address is
+// IPv6 and stays IPv6, as in netip. The invalid zero netip.Addr is
+// rejected with ErrAddrFamilyMismatch: the NetworkFromCIDR contract
+// under this function's name.
+func ContiguousFromCIDR(addr netip.Addr, bits int) (Contiguous[Network], error) {
+	if !addr.IsValid() {
+		input := cidrInput(addr, bits)
+		return Contiguous[Network]{}, wrapParseError("ContiguousFromCIDR", input, ErrAddrFamilyMismatch, nil)
+	}
+	network, err := NetworkFromCIDR(addr, bits)
+	if err != nil {
+		input := cidrInput(addr, bits)
+		return Contiguous[Network]{}, wrapParseError("ContiguousFromCIDR", input, ErrCIDROverflow, nil)
+	}
+	// A mask built from a prefix length is contiguous by
+	// construction, so the block wraps without revalidation.
+	return Contiguous[Network]{network: network}, nil
+}
+
 // ParseContiguous4 parses an IPv4 CIDR block in prefix,
 // explicit-mask or bare address notation.
 //
