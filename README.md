@@ -19,9 +19,9 @@ aggregation, iteration) stays correct on it.
 | Set algebra | `Contains`, `Overlaps` | `Contains`, `Intersection`, `Intersects`, `IsDisjoint`, `IsAdjacent`, `Merge`, `SupernetFor`, `Difference` (exact, pairwise-disjoint pieces) |
 | Contiguity | implied by the type | a query: `IsContiguous`, `Prefix() (int, bool)`, `ToContiguous`, `LastAddr` |
 | Collections | — | `AggregateIPv4/6` (in-place), `BinarySplitIPv4/6`, `RangeToNetworksIPv4/6` (address range → minimal CIDR list) |
-| Iteration | `Addr.Next`/`Prev` | `Addrs`, `AddrsBackward` as `iter.Seq`, `NumHostBits` for the exact count |
-| Addresses | `netip.Addr` with zones | `IPv4Addr`, `IPv6Addr`, `IPAddr`: host-order integers, zone-free, the `netip.Addr` predicate set, conversions to and from `netip.Addr`/`netip.Prefix` |
-| Ordering | `Compare` | `Compare` on every type, IPv4 before IPv6, the sort key aggregation relies on |
+| Iteration | `Addr.Next`/`Prev` | `Addrs`, `AddrsBackward` as `iter.Seq[netip.Addr]`, `NumHostBits` for the exact count |
+| Addresses | `netip.Addr` with zones | plain `netip.Addr` is the address currency of the whole API — accessors, iteration and constructors speak it; zones are rejected at the parsing boundary, and contiguous networks convert to and from `netip.Prefix` |
+| Ordering | `Compare` | `Compare` on every network type, IPv4 before IPv6, the sort key aggregation relies on |
 | Zero value | invalid `Addr`/`Prefix` | valid networks: `0.0.0.0/0`, `::/0` |
 
 All types are small immutable values, operations do not allocate, and the

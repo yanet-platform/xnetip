@@ -2,65 +2,56 @@ package xnetip
 
 import "net/netip"
 
-// IPv6Addr is an IPv6 address stored as a 128-bit integer.
+// ipv6Addr is an IPv6 address stored as a 128-bit integer.
 //
-// The zero value is the unspecified address ::. Values are comparable
-// with == and are never invalid: unlike netip.Addr there is no zone and
-// no "invalid" state, so an address is exactly a 128-bit pattern.
+// It is the internal address kernel of the IPv6 network type: the public
+// API speaks netip.Addr, while the mask algebra runs on this plain bit
+// pattern, which has no zone and no invalid state by construction.
 // IPv4-mapped addresses (::ffff:a.b.c.d) are ordinary IPv6 addresses
 // here, as in netip's 16-byte form.
-type IPv6Addr struct {
+type ipv6Addr struct {
 	bits uint128
 }
 
-// IPv6AddrFrom16 returns the address of the given 16 bytes in network order.
-func IPv6AddrFrom16(addr [16]byte) IPv6Addr {
-	return IPv6Addr{uint128From16(addr)}
+// ipv6AddrFrom16 returns the address of the given 16 bytes in network
+// order.
+func ipv6AddrFrom16(addr [16]byte) ipv6Addr {
+	return ipv6Addr{uint128From16(addr)}
 }
 
-// IPv6AddrFromBits returns the address whose 128-bit pattern is hi<<64 | lo.
+// ipv6AddrFromBits returns the address whose 128-bit pattern is
+// hi<<64 | lo.
 //
 // hi holds the first eight bytes in network order and lo the last eight,
-// so IPv6AddrFromBits(0x20010db800000000, 1) is 2001:db8::1.
-func IPv6AddrFromBits(hi, lo uint64) IPv6Addr {
-	return IPv6Addr{uint128FromHalves(hi, lo)}
+// so ipv6AddrFromBits(0x20010db800000000, 1) is 2001:db8::1.
+func ipv6AddrFromBits(hi, lo uint64) ipv6Addr {
+	return ipv6Addr{uint128FromHalves(hi, lo)}
 }
 
-// IPv6AddrFrom8 returns the address made of the eight 16-bit groups as
-// they appear in the textual form, first group first.
+// ipv6AddrFromNetip converts a netip.Addr to ipv6Addr, dropping any zone.
 //
-// It is the constructor that spells an address group by group:
-// IPv6AddrFrom8(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1) is 2001:db8::1. The
-// first four groups form the high half and the last four the low half.
-func IPv6AddrFrom8(a, b, c, d, e, f, g, h uint16) IPv6Addr {
-	hi := uint64(a)<<48 | uint64(b)<<32 | uint64(c)<<16 | uint64(d)
-	lo := uint64(e)<<48 | uint64(f)<<32 | uint64(g)<<16 | uint64(h)
-	return IPv6Addr{uint128FromHalves(hi, lo)}
-}
-
-// IPv6AddrFromNetip converts a netip.Addr to IPv6Addr, dropping any zone.
-//
-// ok is false unless a.Is6() reports true: an IPv4 address and the zero
-// netip.Addr are not converted, while an IPv4-mapped address such as
-// ::ffff:1.2.3.4 is IPv6 and converts as its 16-byte form, never
-// unmapped. A zone is discarded silently because the addresses of this
-// package are zone-free by design — a zone only scopes link-local
-// forwarding and has no bearing on mask algebra. On failure the returned
-// address is the zero value.
-func IPv6AddrFromNetip(a netip.Addr) (addr IPv6Addr, ok bool) {
+// ok is false unless a.Is6() reports true: an IPv4 address and the
+// invalid zero netip.Addr are not converted, while an IPv4-mapped
+// address such as ::ffff:1.2.3.4 is IPv6 and converts as its 16-byte
+// form, never unmapped. A zone is discarded silently because the
+// addresses of this package are zone-free by design — a zone only scopes
+// link-local forwarding and has no bearing on mask algebra. On failure
+// the returned address is the zero value.
+func ipv6AddrFromNetip(a netip.Addr) (addr ipv6Addr, ok bool) {
 	if !a.Is6() {
-		return IPv6Addr{}, false
+		return ipv6Addr{}, false
 	}
-	return IPv6AddrFrom16(a.As16()), true
+	return ipv6AddrFrom16(a.As16()), true
 }
 
 // As16 returns the address as 16 bytes in network order.
-func (m IPv6Addr) As16() [16]byte {
+func (m ipv6Addr) As16() [16]byte {
 	return m.bits.As16()
 }
 
-// Bits returns the address as two host-order 64-bit halves, hi first.
-func (m IPv6Addr) Bits() (hi, lo uint64) {
+// Bits returns the two host-order halves of the address, the first eight
+// bytes in hi and the last eight in lo.
+func (m ipv6Addr) Bits() (hi, lo uint64) {
 	return m.bits.hi, m.bits.lo
 }
 
@@ -69,29 +60,21 @@ func (m IPv6Addr) Bits() (hi, lo uint64) {
 // The view is always valid, so it can flow into every standard API that
 // takes a netip.Addr, and converting it back always succeeds. An
 // IPv4-mapped value keeps its 16-byte form (Is4In6, not Is4).
-func (m IPv6Addr) Netip() netip.Addr {
+func (m ipv6Addr) Netip() netip.Addr {
 	return netip.AddrFrom16(m.As16())
 }
 
 // ToIPv4Mapped returns the IPv4 address embedded in an IPv4-mapped IPv6
-// address ::ffff:a.b.c.d, inverting IPv4Addr.ToIPv6Mapped.
+// address ::ffff:a.b.c.d, inverting the mapping of the IPv4 kernel.
 //
 // The second result is false for every address outside ::ffff:0:0/96,
 // including the deprecated IPv4-compatible form ::a.b.c.d (RFC 4291
 // section 2.5.5.1), which netip.Addr.Unmap does not unwrap either.
-func (m IPv6Addr) ToIPv4Mapped() (IPv4Addr, bool) {
+func (m ipv6Addr) ToIPv4Mapped() (ipv4Addr, bool) {
 	if !m.Is4In6() {
-		return IPv4Addr{}, false
+		return ipv4Addr{}, false
 	}
-	return IPv4AddrFromBits(uint32(m.bits.lo)), true
-}
-
-// IsUnspecified reports whether the address is ::.
-//
-// The IPv4-mapped ::ffff:0.0.0.0 is a different 128-bit value and is not
-// unspecified, as in net/netip.
-func (m IPv6Addr) IsUnspecified() bool {
-	return m.bits.IsZero()
+	return ipv4AddrFromBits(uint32(m.bits.lo)), true
 }
 
 // ipv4MappedPrefix is the low half of the IPv4-mapped range
@@ -101,234 +84,30 @@ const ipv4MappedPrefix = uint64(0xffff) << 32
 // Is4In6 reports whether the address is IPv4-mapped, that is in
 // ::ffff:0:0/96 (RFC 4291 section 2.5.5.2).
 //
-// The classification predicates of this type follow net/netip and judge
-// a mapped address by its embedded IPv4 part.
-func (m IPv6Addr) Is4In6() bool {
+// The family-agnostic network type stores IPv4 networks in this range
+// and relies on the test to keep its family flag consistent.
+func (m ipv6Addr) Is4In6() bool {
 	return m.bits.hi == 0 && m.bits.lo>>32 == ipv4MappedPrefix>>32
-}
-
-// IsLoopback reports whether the address is ::1, or an IPv4-mapped
-// address whose IPv4 part is loopback (net/netip semantics).
-func (m IPv6Addr) IsLoopback() bool {
-	if m.Is4In6() {
-		return IPv4AddrFromBits(uint32(m.bits.lo)).IsLoopback()
-	}
-	return m.bits.hi == 0 && m.bits.lo == 1
-}
-
-// IsPrivate reports whether the address is in fc00::/7 (RFC 4193), or an
-// IPv4-mapped address whose IPv4 part is RFC 1918 private.
-//
-// A private address still counts as global unicast, exactly as in
-// net/netip.
-func (m IPv6Addr) IsPrivate() bool {
-	if m.Is4In6() {
-		return IPv4AddrFromBits(uint32(m.bits.lo)).IsPrivate()
-	}
-	return uint8(m.bits.hi>>56)&0xfe == 0xfc
-}
-
-// IsMulticast reports whether the address is in ff00::/8, or an
-// IPv4-mapped address whose IPv4 part is in 224.0.0.0/4.
-func (m IPv6Addr) IsMulticast() bool {
-	if m.Is4In6() {
-		return IPv4AddrFromBits(uint32(m.bits.lo)).IsMulticast()
-	}
-	return m.bits.hi>>56 == 0xff
-}
-
-// IsLinkLocalUnicast reports whether the address is in fe80::/10, or an
-// IPv4-mapped address whose IPv4 part is in 169.254.0.0/16.
-func (m IPv6Addr) IsLinkLocalUnicast() bool {
-	if m.Is4In6() {
-		return IPv4AddrFromBits(uint32(m.bits.lo)).IsLinkLocalUnicast()
-	}
-	return uint16(m.bits.hi>>48)&0xffc0 == 0xfe80
-}
-
-// IsLinkLocalMulticast reports whether the address is a link-local
-// multicast address, scope 2 in the first group.
-//
-// An IPv4-mapped address qualifies when its IPv4 part is in
-// 224.0.0.0/24, the net/netip rule.
-func (m IPv6Addr) IsLinkLocalMulticast() bool {
-	if m.Is4In6() {
-		return IPv4AddrFromBits(uint32(m.bits.lo)).IsLinkLocalMulticast()
-	}
-	return uint16(m.bits.hi>>48)&0xff0f == 0xff02
-}
-
-// IsInterfaceLocalMulticast reports whether the address is an
-// interface-local multicast address (scope 1 in the first group).
-//
-// It is always false for an IPv4-mapped address: the scope is an
-// IPv6-only concept and net/netip answers the same way.
-func (m IPv6Addr) IsInterfaceLocalMulticast() bool {
-	if m.Is4In6() {
-		return false
-	}
-	return uint16(m.bits.hi>>48)&0xff0f == 0xff01
-}
-
-// IsGlobalUnicast reports whether the address is global unicast in the
-// sense of net/netip and package net.
-//
-// It is false for ::, loopback, multicast and link-local unicast
-// addresses. An IPv4-mapped address is judged by its IPv4 part, which
-// also excludes the mapped 0.0.0.0 and 255.255.255.255. Unique local
-// addresses (fc00::/7) count as global unicast, exactly as in net/netip.
-func (m IPv6Addr) IsGlobalUnicast() bool {
-	if m.Is4In6() {
-		return IPv4AddrFromBits(uint32(m.bits.lo)).IsGlobalUnicast()
-	}
-	return !m.bits.IsZero() &&
-		!m.IsLoopback() &&
-		!m.IsMulticast() &&
-		!m.IsLinkLocalUnicast()
-}
-
-// Next returns the address one above m, in the numeric order of Compare.
-//
-// The second result is false when m is the all-ones address
-// ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff, which has no next address.
-// Unlike netip.Addr.Next, the end is reported with the comma-ok form
-// rather than an invalid address, because every IPv6Addr value is a real
-// address.
-func (m IPv6Addr) Next() (IPv6Addr, bool) {
-	if m.bits.IsMax() {
-		return IPv6Addr{}, false
-	}
-	return IPv6Addr{m.bits.AddOne()}, true
-}
-
-// Prev returns the address one below m, in the numeric order of Compare.
-//
-// The second result is false when m is ::, which has no previous
-// address. Unlike netip.Addr.Prev, the end is reported with the comma-ok
-// form rather than an invalid address, because every IPv6Addr value is a
-// real address.
-func (m IPv6Addr) Prev() (IPv6Addr, bool) {
-	if m.bits.IsZero() {
-		return IPv6Addr{}, false
-	}
-	return IPv6Addr{m.bits.SubOne()}, true
-}
-
-// BitLen returns 128, the number of bits in an IPv6 address.
-func (m IPv6Addr) BitLen() int {
-	return 128
 }
 
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after other.
 //
 // The order is the numeric order of the 128-bit address, high half first
-// and low half on a tie, the same order netip.Addr.Compare gives two IPv6
-// addresses without zones. It is the order every sorting operation in
-// this package uses for IPv6 addresses, and the key the network order
+// and low half on a tie, the same order netip.Addr.Compare gives two
+// IPv6 addresses without zones. It is the order every sorting operation
+// in this package uses for IPv6 addresses, and the key the network order
 // packs together with the mask.
-func (m IPv6Addr) Compare(other IPv6Addr) int {
+func (m ipv6Addr) Compare(other ipv6Addr) int {
 	return m.bits.Compare(other.bits)
-}
-
-// String returns the canonical RFC 5952 text of the address, such as
-// "2001:db8::1" or "::ffff:1.2.3.4" for the IPv4-mapped range.
-//
-// The form is the one net/netip prints for an IPv6 address without a
-// zone: the longest run of two or more zero groups collapses to "::",
-// the leftmost run wins a tie, a single zero group stays, hex is
-// lowercase without leading zeros. It allocates once, for the result.
-func (m IPv6Addr) String() string {
-	return netip.AddrFrom16(m.As16()).String()
 }
 
 // AppendTo appends the canonical text of the address to b and returns
 // the extended buffer.
 //
-// It is the allocation-free path behind String and MarshalText: with
-// enough capacity in b (45 bytes suffice) it performs no allocation.
-func (m IPv6Addr) AppendTo(b []byte) []byte {
+// The form is the RFC 5952 one net/netip prints, mapped addresses as
+// "::ffff:a.b.c.d", 45 bytes at most. It is the allocation-free kernel
+// behind the network formatters: with enough capacity in b it performs
+// no allocation.
+func (m ipv6Addr) AppendTo(b []byte) []byte {
 	return netip.AddrFrom16(m.As16()).AppendTo(b)
-}
-
-// StringExpanded returns the address as eight zero-padded 4-digit hex
-// groups, such as "2001:0db8:0000:0000:0000:0000:0000:0001".
-//
-// It is the form netip.Addr.StringExpanded prints: nothing is compressed
-// and the IPv4-mapped range is written as hex groups too, so every
-// address is exactly 39 bytes long. It allocates once, for the result.
-func (m IPv6Addr) StringExpanded() string {
-	return netip.AddrFrom16(m.As16()).StringExpanded()
-}
-
-// MarshalText implements encoding.TextMarshaler.
-//
-// The text is exactly String(): the canonical RFC 5952 form, mapped
-// addresses as "::ffff:a.b.c.d". The error is always nil, and the single
-// allocation is the returned slice, sized upfront for the longest form.
-// The zero value marshals as "::", not as empty text, because it is a
-// real address.
-func (m IPv6Addr) MarshalText() ([]byte, error) {
-	return m.AppendText(make([]byte, 0, len("ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255")))
-}
-
-// AppendText implements encoding.TextAppender by appending the text of
-// MarshalText to b.
-//
-// It is the allocation-free variant of MarshalText, and the error is
-// always nil.
-func (m IPv6Addr) AppendText(b []byte) ([]byte, error) {
-	return m.AppendTo(b), nil
-}
-
-// UnmarshalText implements encoding.TextUnmarshaler.
-//
-// The text must be accepted by ParseIPv6Addr, so a zone suffix is
-// rejected, and on error the receiver is left untouched. Unlike
-// netip.Addr, empty text is an error rather than the zero value, because
-// the zero IPv6Addr is the valid address :: and an absent field must not
-// silently decode into it.
-func (m *IPv6Addr) UnmarshalText(text []byte) error {
-	address, err := ParseIPv6Addr(string(text))
-	if err != nil {
-		return err
-	}
-	*m = address
-	return nil
-}
-
-// ParseIPv6Addr parses s as an IPv6 address ("2001:db8::1",
-// "::ffff:1.2.3.4").
-//
-// The accepted grammar is the IPv6 grammar of net/netip without zones:
-// hex groups of up to four digits in either case, one optional "::" for
-// at least one zero group, an optional dotted IPv4 quad as the last two
-// groups, nothing else. Other text wraps ErrParse with the net/netip
-// error that explains the rejection. A zone suffix ("fe80::1%eth0")
-// wraps ErrZone and dotted-decimal IPv4 text wraps ErrAddrFamilyMismatch,
-// each alone. IPv4-mapped text stays its 16 bytes, never unmapped. Every
-// error names the parser and echoes s, so errors.Is works on the sentinels.
-func ParseIPv6Addr(s string) (IPv6Addr, error) {
-	addr, err := netip.ParseAddr(s)
-	if err != nil {
-		return IPv6Addr{}, wrapParseError("ParseIPv6Addr", s, ErrParse, err)
-	}
-	if addr.Zone() != "" {
-		return IPv6Addr{}, wrapParseError("ParseIPv6Addr", s, ErrZone, nil)
-	}
-	if !addr.Is6() {
-		return IPv6Addr{}, wrapParseError("ParseIPv6Addr", s, ErrAddrFamilyMismatch, nil)
-	}
-	return IPv6AddrFrom16(addr.As16()), nil
-}
-
-// MustParseIPv6Addr calls ParseIPv6Addr and panics on error.
-//
-// It is intended for tests and package-level variables with hard-coded
-// text, like netip.MustParseAddr.
-func MustParseIPv6Addr(s string) IPv6Addr {
-	addr, err := ParseIPv6Addr(s)
-	if err != nil {
-		panic(err)
-	}
-	return addr
 }

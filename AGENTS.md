@@ -29,12 +29,12 @@ CI (GitHub Actions, `.github/workflows/ci.yml`) runs `go test -race`, vet, gofum
 
 ```
 uint128.go         unexported 128-bit helper {hi, lo uint64}, exported methods, unexported constructors — every IPv6 bit trick goes through it
-addr4.go addr6.go addr.go        IPv4Addr{uint32}  IPv6Addr{uint128}  IPAddr{addr IPv6Addr; is4 bool}
+addr4.go addr6.go  unexported address kernels ipv4Addr{uint32} ipv6Addr{uint128} — the public API speaks netip.Addr
 network4.go network6.go network.go   IPv4Network  IPv6Network  IPNetwork{network IPv6Network; is4 bool}
-                   a type's whole API lives in its file (constructors, Parse*, formatters, marshalling, predicates, set algebra, Addrs, Difference)
+                   a type's whole API lives in its file (constructors, Parse*, formatters, marshalling, set algebra, Addrs, Difference)
 errors.go compact.go             sentinels, Compact[T]
 range.go aggregate.go binary_split.go   free functions over ranges and slices (RangeToNetworks*, Aggregate*, BinarySplit*), one file each
-*_test.go          mirror of the source file, package xnetip_test; uint128_test.go is the one white-box file (package xnetip)
+*_test.go          mirror of the source file, package xnetip_test; white-box files (package xnetip): uint128_test.go and the kernel suites addr4_test.go, addr6_test.go, errors_test.go
 testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by the type's birth session
 .roadmap/          gitignored session plan: 00-overview.md (order, status, backlog) + NNN-slug.md per pending session (deleted once done)
 .agents/conventions/{go,comments,tests}.md   style rules (read the one you touch)
@@ -42,7 +42,7 @@ testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by t
 
 ## Types and invariants
 
-- Addresses are host-order integers, zone-free by construction (that is why `netip.Addr` is not the base type). `IPv6Addr` wraps `uint128`, `IPAddr` stores IPv4 as IPv4-mapped IPv6 plus `is4`.
+- The public API speaks `netip.Addr`: accessors (`Addr`, `Mask`, `LastAddr`), iterators (`Addrs`) and checked constructors all use it. A constructor taking `netip.Addr` returns `(T, error)` and rejects a foreign family and the invalid zero `Addr` with `ErrAddrFamilyMismatch`; a zone is dropped silently. Relational operations taking `netip.Addr` are total — a foreign-family argument (an IPv4-mapped address against an IPv4 network included) is simply not contained, the `netip.Prefix.Contains` rule. Internally addresses are host-order integers (unexported `ipv4Addr{uint32}`, `ipv6Addr{uint128}`), zone-free by construction.
 - Networks are always normalized: `addr & mask == addr`. Every constructor enforces it. Zero values are valid: `IPv4Network{}` = `0.0.0.0/0`, `IPv6Network{}` = `::/0`, `IPNetwork{}` = `::/0`.
 - `IPNetwork` stores IPv4 **IPv4-mapped**: addr `::ffff:a.b.c.d`, mask `ffff:ffff:ffff:ffff:ffff:ffff:M`. Invariant: `is4 ⇒ network.IsIPv4MappedIPv6()`. Every operation delegates to the 128-bit form and stays correct, `Prefix()` subtracts 96 for IPv4. Cross-family: relational ops are false, `Intersection`/`Merge` return `ok=false`, `Compare` orders IPv4 before IPv6.
 - Mask semantics, contiguity, `Prefix() (int, bool)`, `ToContiguous()` (plain network), `LastAddr()`, adjacency, merge, lowest-mask-bit variants, `SupernetFor`, `Difference` (exactly popcount(m2 &^ m1) pairwise-disjoint networks), host-index iteration order — all exactly as documented in `../netip/src/net.rs`. Differences from Rust are listed in `.roadmap/00-overview.md` ("Deliberate divergences"). The CIDR suffix after `/` is strict (digits only, no leading zeros, no `+`), `%zone` in parse input is an error.

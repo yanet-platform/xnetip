@@ -1,6 +1,9 @@
 package xnetip
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrParse reports text that is not an address or network in any accepted
 // form.
@@ -23,3 +26,17 @@ var ErrAddrFamilyMismatch = errors.New("address family mismatch")
 // Only the IPv6 parsers return it: net/netip accepts the zone, so the
 // rejection is this package's own and wraps the sentinel alone.
 var ErrZone = errors.New("zone not allowed")
+
+// wrapParseError builds the error the parsers and checked constructors
+// return: the function name with the input echoed, then the cause.
+//
+// The sentinel is one of the exported errors of this package and the
+// detail, if not nil, is the underlying net/netip error. Both are
+// wrapped, so errors.Is matches the sentinel while the message keeps the
+// exact reason net/netip gave.
+func wrapParseError(function, input string, sentinel, detail error) error {
+	if detail == nil {
+		return fmt.Errorf("xnetip.%s(%q): %w", function, input, sentinel)
+	}
+	return fmt.Errorf("xnetip.%s(%q): %w: %w", function, input, sentinel, detail)
+}
