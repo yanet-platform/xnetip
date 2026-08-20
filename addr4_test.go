@@ -3,6 +3,7 @@ package xnetip_test
 import (
 	"cmp"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/netip"
@@ -388,6 +389,155 @@ func BenchmarkIPv4Addr_AppendTo_Longest(b *testing.B) {
 	for b.Loop() {
 		bytesSink = address.AppendTo(buffer[:0])
 	}
+}
+
+// verifies that the marshalled text is exactly the dotted-decimal string
+// form of the address, with a nil error.
+func Test_IPv4Addr_MarshalText_EmitsStringForm(t *testing.T) {
+	address := xnetip.MustParseIPv4Addr("10.0.0.1")
+	got, err := address.MarshalText()
+	require.NoError(t, err)
+	require.Equal(t, []byte("10.0.0.1"), got)
+}
+
+// verifies that the zero value marshals as the unspecified address rather
+// than as empty text, because the zero value is a real address.
+func Test_IPv4Addr_MarshalText_ZeroValueIsUnspecified(t *testing.T) {
+	var zero xnetip.IPv4Addr
+	got, err := zero.MarshalText()
+	require.NoError(t, err)
+	require.Equal(t, "0.0.0.0", string(got))
+}
+
+// verifies that the appending marshal form writes the text after the
+// buffer's existing content rather than overwriting it.
+func Test_IPv4Addr_AppendText_AppendsAfterExistingContent(t *testing.T) {
+	address := xnetip.MustParseIPv4Addr("10.0.0.1")
+	got, err := address.AppendText([]byte("x="))
+	require.NoError(t, err)
+	require.Equal(t, "x=10.0.0.1", string(got))
+}
+
+// verifies that unmarshalling accepts what the parser accepts and stores
+// the parsed address into the receiver.
+func Test_IPv4Addr_UnmarshalText_AcceptsValidText(t *testing.T) {
+	var address xnetip.IPv4Addr
+	require.NoError(t, address.UnmarshalText([]byte("192.168.0.1")))
+	require.Equal(t, xnetip.MustParseIPv4Addr("192.168.0.1"), address)
+}
+
+// verifies that empty text is a parse error and leaves the receiver
+// untouched.
+//
+// This diverges from net/netip on purpose: there the zero value marks an
+// invalid address, here it is the valid unspecified address, so empty
+// text must not silently decode into it.
+func Test_IPv4Addr_UnmarshalText_RejectsEmptyText(t *testing.T) {
+	address := xnetip.MustParseIPv4Addr("10.0.0.1")
+	err := address.UnmarshalText([]byte(""))
+	require.ErrorIs(t, err, xnetip.ErrParse)
+	require.Equal(t, xnetip.MustParseIPv4Addr("10.0.0.1"), address)
+}
+
+// verifies that text the parser rejects fails unmarshalling and leaves
+// the receiver untouched, whatever the reason for the rejection.
+func Test_IPv4Addr_UnmarshalText_RejectsInvalidText(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{name: "leading zero octet", input: "01.2.3.4"},
+		{name: "IPv6 literal", input: "2001:db8::1"},
+		{name: "leading space", input: " 1.2.3.4"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			address := xnetip.MustParseIPv4Addr("10.0.0.1")
+			require.Error(t, address.UnmarshalText([]byte(tc.input)))
+			require.Equal(t, xnetip.MustParseIPv4Addr("10.0.0.1"), address)
+		})
+	}
+}
+
+// verifies that a failed unmarshal does not clobber a previously stored
+// address.
+func Test_IPv4Addr_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
+	address := xnetip.MustParseIPv4Addr("10.0.0.1")
+	require.Error(t, address.UnmarshalText([]byte("x")))
+	require.Equal(t, xnetip.MustParseIPv4Addr("10.0.0.1"), address)
+}
+
+// verifies that a struct field of the address type round-trips through
+// JSON as a quoted dotted-decimal string.
+func Test_IPv4Addr_MarshalText_JSONRoundTripsStructField(t *testing.T) {
+	type record struct{ A xnetip.IPv4Addr }
+	original := record{A: xnetip.MustParseIPv4Addr("10.0.0.1")}
+	encoded, err := json.Marshal(original)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"A":"10.0.0.1"}`, string(encoded))
+	var decoded record
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, original, decoded)
+}
+
+// verifies that a JSON number does not decode into the address type,
+// which accepts text only.
+func Test_IPv4Addr_UnmarshalText_JSONRejectsNumber(t *testing.T) {
+	var decoded struct{ A xnetip.IPv4Addr }
+	require.Error(t, json.Unmarshal([]byte(`{"A":1}`), &decoded))
+}
+
+// verifies that unmarshalling the marshalled text yields the address
+// back, for every address.
+func Test_IPv4Addr_MarshalText_RoundTripsThroughUnmarshal(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		text, err := address.MarshalText()
+		require.NoError(t, err)
+		var decoded xnetip.IPv4Addr
+		require.NoError(t, decoded.UnmarshalText(text))
+		require.Equal(t, address, decoded)
+	})
+}
+
+// verifies that the marshalled text and the string form agree on every
+// address.
+func Test_IPv4Addr_MarshalText_AgreesWithString(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		text, err := address.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, address.String(), string(text))
+	})
+}
+
+// verifies that the marshalled text is byte for byte what net/netip
+// marshals for the same four octets.
+func Test_IPv4Addr_MarshalText_MatchesNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		want, wantErr := netip.AddrFrom4(address.As4()).MarshalText()
+		require.NoError(t, wantErr)
+		got, err := address.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+}
+
+// verifies that marshalling allocates exactly once, for the returned
+// text itself, even in the longest form.
+func Test_IPv4Addr_MarshalText_AllocatesOnce(t *testing.T) {
+	address := xnetip.MustParseIPv4Addr("255.255.255.255")
+	allocs := int(testing.AllocsPerRun(100, func() { bytesSink, errSink = address.MarshalText() }))
+	require.Equal(t, 1, allocs)
+}
+
+// verifies that the appending marshal form into a buffer with enough
+// capacity does not allocate.
+func Test_IPv4Addr_AppendText_DoesNotAllocate(t *testing.T) {
+	address := xnetip.MustParseIPv4Addr("255.255.255.255")
+	buffer := make([]byte, 0, 32)
+	requireNoAllocs(t, func() { bytesSink, errSink = address.AppendText(buffer[:0]) })
 }
 
 // verifies that dotted-decimal text of four octets in range parses to the

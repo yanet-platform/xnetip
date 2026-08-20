@@ -70,6 +70,40 @@ func (m IPv4Addr) AppendTo(b []byte) []byte {
 	return netip.AddrFrom4(m.As4()).AppendTo(b)
 }
 
+// MarshalText implements encoding.TextMarshaler.
+//
+// The text is exactly String(): dotted decimal without padding. The
+// error is always nil, and the single allocation is the returned slice,
+// sized upfront for the longest form. The zero value marshals as
+// "0.0.0.0", not as empty text, because it is a real address.
+func (m IPv4Addr) MarshalText() ([]byte, error) {
+	return m.AppendText(make([]byte, 0, len("255.255.255.255")))
+}
+
+// AppendText implements encoding.TextAppender by appending the text of
+// MarshalText to b.
+//
+// It is the allocation-free variant of MarshalText, and the error is
+// always nil.
+func (m IPv4Addr) AppendText(b []byte) ([]byte, error) {
+	return m.AppendTo(b), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+//
+// The text must be accepted by ParseIPv4Addr, and on error the receiver
+// is left untouched. Unlike netip.Addr, empty text is an error rather
+// than the zero value, because the zero IPv4Addr is the valid address
+// 0.0.0.0 and an absent field must not silently decode into it.
+func (m *IPv4Addr) UnmarshalText(text []byte) error {
+	address, err := ParseIPv4Addr(string(text))
+	if err != nil {
+		return err
+	}
+	*m = address
+	return nil
+}
+
 // ParseIPv4Addr parses s as a dotted-decimal IPv4 address ("192.168.0.1").
 //
 // The accepted grammar is the IPv4 grammar of net/netip: four decimal
