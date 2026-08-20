@@ -4,6 +4,7 @@ import (
 	"math/bits"
 	"net/netip"
 	"strconv"
+	"strings"
 )
 
 // IPv4Network is an IPv4 network: an address and a mask of arbitrary
@@ -92,6 +93,103 @@ func IPv4NetworkFromAddr(addr netip.Addr) (IPv4Network, error) {
 // Pairing an address with it keeps every address bit, so a host route
 // is normalized by construction.
 var ipv4AllBits = ipv4AddrFromBits(^uint32(0))
+
+// ParseIPv4Network parses an IPv4 network in CIDR, explicit-mask or
+// bare address notation.
+//
+// Accepted forms are "10.0.0.0/8", "10.0.0.0/255.0.0.0" (the mask may
+// be non-contiguous, "10.0.0.0/255.0.255.0") and "10.0.0.1" (a host
+// route, "/32"). The address is normalized under the mask, so
+// "10.0.0.1/8" is the network "10.0.0.0/8". The prefix length after
+// "/" is one or more decimal digits with no sign and no leading zero,
+// at most 32. Errors wrap ErrAddrFamilyMismatch (an IPv6 literal),
+// ErrCIDROverflow, ErrInvalidMask or, for text that is not an address
+// in any form, ErrParse together with the net/netip cause.
+func ParseIPv4Network(s string) (IPv4Network, error) {
+	addrText, suffix, hasSuffix := strings.Cut(s, "/")
+	addr, err := netip.ParseAddr(addrText)
+	if err != nil {
+		return IPv4Network{}, wrapParseError("ParseIPv4Network", s, ErrParse, err)
+	}
+	return parseIPv4NetworkParts("ParseIPv4Network", s, addr, suffix, hasSuffix)
+}
+
+// parseIPv4NetworkParts finishes a network parse whose address part
+// is already parsed.
+//
+// Errors carry the given parser name and echo the full input. The
+// suffix is read as a strict prefix length first and as a dotted
+// mask second, so a digits-only suffix past the limit is an overflow,
+// never a mask attempt. A missing suffix is a host route.
+func parseIPv4NetworkParts(function, input string, addr netip.Addr, suffix string, hasSuffix bool) (IPv4Network, error) {
+	addrKernel, ok := ipv4AddrFromNetip(addr)
+	if !ok {
+		return IPv4Network{}, wrapParseError(function, input, ErrAddrFamilyMismatch, nil)
+	}
+	if !hasSuffix {
+		return IPv4Network{addr: addrKernel, mask: ipv4AllBits}, nil
+	}
+	bits, isPrefixForm, ok := parsePrefixLenText(suffix, 32)
+	switch {
+	case ok:
+		return fromBits4(addrKernel, ipv4MaskFromPrefix(bits)), nil
+	case isPrefixForm:
+		return IPv4Network{}, wrapParseError(function, input, ErrCIDROverflow, nil)
+	}
+	mask, err := netip.ParseAddr(suffix)
+	if err != nil {
+		return IPv4Network{}, wrapParseError(function, input, ErrInvalidMask, err)
+	}
+	maskKernel, ok := ipv4AddrFromNetip(mask)
+	if !ok {
+		return IPv4Network{}, wrapParseError(function, input, ErrInvalidMask, ErrAddrFamilyMismatch)
+	}
+	return fromBits4(addrKernel, maskKernel), nil
+}
+
+// parsePrefixLenText reads a network suffix as a prefix length under
+// the strict grammar.
+//
+// The grammar is one or more ASCII digits, no sign, no leading zero
+// unless the whole text is "0". A text of that shape is in prefix
+// form and never falls back to a
+// mask parse, so ok is false with isPrefixForm true when the value
+// exceeds limit. Any other text is not in prefix form and both results
+// are false. Accumulation stops at the first excess digit, which keeps
+// the value small however long the text runs.
+func parsePrefixLenText(text string, limit int) (bits int, isPrefixForm, ok bool) {
+	if text == "" || (len(text) > 1 && text[0] == '0') {
+		return 0, false, false
+	}
+	value := 0
+	overflow := false
+	for idx := range len(text) {
+		digit := text[idx]
+		if digit < '0' || digit > '9' {
+			return 0, false, false
+		}
+		if !overflow {
+			value = value*10 + int(digit-'0')
+			overflow = value > limit
+		}
+	}
+	if overflow {
+		return 0, true, false
+	}
+	return value, true, true
+}
+
+// MustParseIPv4Network calls ParseIPv4Network and panics on error.
+//
+// It is intended for tests and package-level constants built from
+// literals.
+func MustParseIPv4Network(s string) IPv4Network {
+	network, err := ParseIPv4Network(s)
+	if err != nil {
+		panic(err)
+	}
+	return network
+}
 
 // Addr returns the network address (already normalized by the mask) as
 // an Is4 netip.Addr.

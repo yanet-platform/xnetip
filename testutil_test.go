@@ -309,6 +309,22 @@ var genIPNetwork = rapid.Custom(func(t *rapid.T) xnetip.IPNetwork {
 	return xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
 })
 
+// digitsOnly reports whether text is non-empty and all ASCII digits.
+//
+// This is the shape a CIDR suffix must have for the std-parity checks
+// of the parser fuzz suites.
+func digitsOnly(text string) bool {
+	if text == "" {
+		return false
+	}
+	for idx := range len(text) {
+		if text[idx] < '0' || text[idx] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // Sinks keep the measured closures' results alive, so the compiler cannot
 // optimise the work under test away.
 var (
@@ -321,4 +337,5 @@ var (
 	ipNetworkSink xnetip.IPNetwork
 	addrSink      netip.Addr
 	okSink        bool
+	errSink       error
 )

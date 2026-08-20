@@ -37,6 +37,15 @@ var ErrZone = errors.New("zone not allowed")
 // point.
 var ErrCIDROverflow = errors.New("prefix length out of range")
 
+// ErrInvalidMask reports network text whose part after "/" is neither
+// a prefix length nor a mask address of the network's family.
+//
+// The network parsers return it, together with the underlying cause
+// when one exists: the net/netip error for a suffix that is no address
+// at all, ErrAddrFamilyMismatch for a mask of the other family, ErrZone
+// for a mask carrying a zone suffix.
+var ErrInvalidMask = errors.New("invalid network mask")
+
 // wrapParseError builds the error the parsers and checked constructors
 // return: the function name with the input echoed, then the cause.
 //
