@@ -60,3 +60,15 @@ func (m IPv4Network) Mask() netip.Addr {
 func (m IPv4Network) Bits() (addr, mask uint32) {
 	return m.addr.Bits(), m.mask.Bits()
 }
+
+// ToIPv6Mapped returns this network as an IPv4-mapped IPv6 network.
+//
+// The address becomes ::ffff:a.b.c.d and the mask keeps the upper 96
+// bits set, so the result pins the mapped prefix and carries the IPv4
+// mask, contiguous or not, in its low 32 bits. Set relations are
+// preserved: two IPv4 networks contain or intersect each other exactly
+// when their mapped forms do. IPv6Network.ToIPv4Mapped inverts it.
+func (m IPv4Network) ToIPv6Mapped() IPv6Network {
+	addrHi, addrLo := m.addr.ToIPv6Mapped().Bits()
+	return IPv6NetworkFromBits(addrHi, addrLo, ^uint64(0), 0xffffffff_00000000|uint64(m.mask.Bits()))
+}

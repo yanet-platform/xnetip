@@ -216,3 +216,82 @@ func Test_IPv4Network_Constructors_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { addrSink = network.Addr() })
 	requireNoAllocs(t, func() { addrSink = network.Mask() })
 }
+
+// verifies that lifting a network into IPv6 space maps the address to
+// ::ffff:a.b.c.d and pins the upper 96 mask bits.
+//
+// The IPv4 mask travels verbatim in the low 32 bits of the result,
+// contiguous or not, so the mapped form encodes the same address set.
+func Test_IPv4Network_ToIPv6Mapped_MapsAddressAndMask(t *testing.T) {
+	cases := []struct {
+		name     string
+		addr     string
+		mask     string
+		wantAddr string
+		wantMask string
+	}{
+		{name: "contiguous /24", addr: "192.168.1.0", mask: "255.255.255.0", wantAddr: "::ffff:c0a8:100", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"},
+		{name: "address normalized before mapping", addr: "192.168.1.42", mask: "255.255.252.0", wantAddr: "::ffff:c0a8:0", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fc00"},
+		{name: "universe maps to the mapped /96", addr: "0.0.0.0", mask: "0.0.0.0", wantAddr: "::ffff:0:0", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff::"},
+		{name: "host route maps to a /128", addr: "10.1.2.3", mask: "255.255.255.255", wantAddr: "::ffff:a01:203", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+		{name: "mask 255.255.0.255 keeps its hole", addr: "192.168.0.1", mask: "255.255.0.255", wantAddr: "::ffff:c0a8:1", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff"},
+		{name: "alternating mask carries verbatim", addr: "170.85.170.85", mask: "170.85.170.85", wantAddr: "::ffff:aa55:aa55", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:aa55:aa55"},
+		{name: "single-bit mask carries verbatim", addr: "0.0.0.1", mask: "0.0.0.1", wantAddr: "::ffff:0:1", wantMask: "ffff:ffff:ffff:ffff:ffff:ffff:0:1"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, err := xnetip.IPv4NetworkFrom(
+				netip.MustParseAddr(testCase.addr),
+				netip.MustParseAddr(testCase.mask),
+			)
+			require.NoError(t, err)
+			expected, err := xnetip.IPv6NetworkFrom(
+				netip.MustParseAddr(testCase.wantAddr),
+				netip.MustParseAddr(testCase.wantMask),
+			)
+			require.NoError(t, err)
+			require.Equal(t, expected, network.ToIPv6Mapped())
+		})
+	}
+}
+
+// verifies that the mapped form of an alternating non-contiguous mask
+// lands bit-exactly in the low words of the 128-bit halves.
+func Test_IPv4Network_ToIPv6Mapped_AlternatingBits(t *testing.T) {
+	network, err := xnetip.IPv4NetworkFrom(
+		netip.MustParseAddr("170.85.170.85"),
+		netip.MustParseAddr("170.85.170.85"),
+	)
+	require.NoError(t, err)
+	addrHi, addrLo, maskHi, maskLo := network.ToIPv6Mapped().Bits()
+	require.Equal(t, uint64(0), addrHi)
+	require.Equal(t, uint64(0x0000ffff_aa55aa55), addrLo)
+	require.Equal(t, ^uint64(0), maskHi)
+	require.Equal(t, uint64(0xffffffff_aa55aa55), maskLo)
+}
+
+// verifies that every mapped network pins the upper 96 mask bits and
+// puts the address in ::ffff:0:0/96.
+//
+// The low 32 bits of each half must carry the IPv4 address and mask
+// words verbatim, which is what makes the mapping invertible.
+func Test_IPv4Network_ToIPv6Mapped_UpperBitsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		addrBits, maskBits := network.Bits()
+		addrHi, addrLo, maskHi, maskLo := network.ToIPv6Mapped().Bits()
+		require.Equal(t, uint64(0), addrHi)
+		require.Equal(t, uint64(0xffff), addrLo>>32)
+		require.Equal(t, ^uint64(0), maskHi)
+		require.Equal(t, uint64(0xffffffff), maskLo>>32)
+		require.Equal(t, addrBits, uint32(addrLo))
+		require.Equal(t, maskBits, uint32(maskLo))
+	})
+}
+
+// verifies that the mapping allocates nothing, per the allocation-free
+// runtime contract.
+func Test_IPv4Network_ToIPv6Mapped_AllocationFree(t *testing.T) {
+	network := xnetip.IPv4NetworkFromBits(0xC0A80001, 0xFFFF00FF)
+	requireNoAllocs(t, func() { network6Sink = network.ToIPv6Mapped() })
+}
