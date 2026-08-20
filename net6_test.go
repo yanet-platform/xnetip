@@ -1713,6 +1713,156 @@ func Test_IPv6Network_IsDisjoint_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { okSink = left.IsDisjoint(right) })
 }
 
+// verifies that adjacency needs the same mask and exactly one
+// differing masked bit, anywhere in the mask.
+//
+// Identical networks are not adjacent, different masks never are, and
+// differing bits at positions 63 and 64 pin the borrow across the
+// half boundary in the single-bit test.
+func Test_IPv6Network_IsAdjacent_ContiguousAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  bool
+	}{
+		{name: "contiguous siblings", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8:1::/48"), want: true},
+		{name: "contiguous siblings reversed", left: xnetip.MustParseIPv6Network("2001:db8:1::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/48"), want: true},
+		{name: "identical", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/48"), want: false},
+		{name: "different masks", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: false},
+		{name: "same mask, two differing bits", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8:5::/48"), want: false},
+		{name: "adjacent at the top mask bit", left: xnetip.MustParseIPv6Network("::/2"), right: xnetip.MustParseIPv6Network("8000::/2"), want: true},
+		{name: "differing at bit 64, mask /64", left: xnetip.MustParseIPv6Network("2001:db8:0:0::/64"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/64"), want: true},
+		{name: "differing at bit 63, mask /65", left: xnetip.MustParseIPv6Network("2001:db8::/65"), right: xnetip.MustParseIPv6Network("2001:db8:0:0:8000::/65"), want: true},
+		{name: "differing at bit 64, mask /65", left: xnetip.MustParseIPv6Network("2001:db8::/65"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/65"), want: true},
+		{name: "differing at bits 63 and 64 together, mask /65", left: xnetip.MustParseIPv6Network("2001:db8::/65"), right: xnetip.MustParseIPv6Network("2001:db8:0:1:8000::/65"), want: false},
+		{name: "host routes differing in bit 0", left: xnetip.MustParseIPv6Network("2001:db8::/128"), right: xnetip.MustParseIPv6Network("2001:db8::1/128"), want: true},
+		{name: "host routes differing in bit 127", left: xnetip.MustParseIPv6Network("::1/128"), right: xnetip.MustParseIPv6Network("8000::1/128"), want: true},
+		{name: "default route with itself", left: xnetip.MustParseIPv6Network("::/0"), right: xnetip.MustParseIPv6Network("::/0"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacent(testCase.right))
+		})
+	}
+}
+
+// verifies that adjacency of non-contiguous networks counts only
+// masked bits, wherever the differing bit sits in the pattern.
+func Test_IPv6Network_IsAdjacent_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  bool
+	}{
+		{name: "two-run mask, differing in the low run", left: xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), right: xnetip.MustParseIPv6Network("2a02:6b8:c00::1235:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), want: true},
+		{name: "two-run mask, differing in the low run reversed", left: xnetip.MustParseIPv6Network("2a02:6b8:c00::1235:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), right: xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), want: true},
+		{name: "two-run mask, differing at the bottom of the high run", left: xnetip.MustParseIPv6Network("::/ffff:ffff::ffff"), right: xnetip.MustParseIPv6Network("0:1::/ffff:ffff::ffff"), want: true},
+		{name: "two-run mask, differing in the lowest masked bit", left: xnetip.MustParseIPv6Network("::/ffff:ffff::ffff"), right: xnetip.MustParseIPv6Network("::1/ffff:ffff::ffff"), want: true},
+		{name: "pattern mask, two differing bits", left: xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff"), right: xnetip.MustParseIPv6Network("2001:300::1/ffff:ff00::ffff"), want: false},
+		{name: "pattern mask, one differing bit", left: xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff"), right: xnetip.MustParseIPv6Network("2001:100::1/ffff:ff00::ffff"), want: true},
+		{name: "straddling hole, differing bit inside the low run", left: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ffff:0:0:ffff::"), right: xnetip.MustParseIPv6Network("2001:db8::1:0:0/ffff:ffff:ffff:0:0:ffff::"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacent(testCase.right))
+		})
+	}
+}
+
+// verifies that adjacency is symmetric, irreflexive and impossible
+// across different masks.
+func Test_IPv6Network_IsAdjacent_SymmetryAndMaskProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		require.Equal(t, left.IsAdjacent(right), right.IsAdjacent(left))
+		require.False(t, left.IsAdjacent(left))
+		if left.Mask() != right.Mask() {
+			require.False(t, left.IsAdjacent(right))
+		}
+	})
+}
+
+// verifies that flipping one masked address bit always produces an
+// adjacent sibling.
+//
+// Random pairs are almost never adjacent, so the positive case is
+// constructed: any network with a non-empty mask is adjacent to its
+// image under a single masked-bit flip, the flips at bits 63 and 64
+// included whenever the mask offers them.
+func Test_IPv6Network_IsAdjacent_ConstructedSiblingProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		maskBytes := network.Mask().As16()
+		maskHi := binary.BigEndian.Uint64(maskBytes[:8])
+		maskLo := binary.BigEndian.Uint64(maskBytes[8:])
+		if maskHi|maskLo == 0 {
+			return
+		}
+		setBits := []int{}
+		for bit := range 64 {
+			if maskLo&(1<<bit) != 0 {
+				setBits = append(setBits, bit)
+			}
+			if maskHi&(1<<bit) != 0 {
+				setBits = append(setBits, bit+64)
+			}
+		}
+		bit := rapid.SampledFrom(setBits).Draw(t, "bit")
+		addrBytes := network.Addr().As16()
+		addrHi := binary.BigEndian.Uint64(addrBytes[:8])
+		addrLo := binary.BigEndian.Uint64(addrBytes[8:])
+		if bit < 64 {
+			addrLo ^= uint64(1) << bit
+		} else {
+			addrHi ^= uint64(1) << (bit - 64)
+		}
+		sibling, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(addrHi, addrLo),
+			netipAddrFrom6Bits(maskHi, maskLo),
+		)
+		require.NoError(t, err)
+		require.True(t, network.IsAdjacent(sibling))
+		require.True(t, sibling.IsAdjacent(network))
+	})
+}
+
+// verifies that the predicate allocates nothing.
+func Test_IPv6Network_IsAdjacent_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff")
+	right := xnetip.MustParseIPv6Network("2001:100::1/ffff:ff00::ffff")
+	requireNoAllocs(t, func() { okSink = left.IsAdjacent(right) })
+}
+
+func BenchmarkIPv6Network_IsAdjacent_Contiguous(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/48")
+	right := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacent(right)
+	}
+}
+
+func BenchmarkIPv6Network_IsAdjacent_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff")
+	right := xnetip.MustParseIPv6Network("2001:100::1/ffff:ff00::ffff")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacent(right)
+	}
+}
+
+func BenchmarkIPv6Network_IsAdjacent_NonAdjacent(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/48")
+	right := xnetip.MustParseIPv6Network("2001:db8:5::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacent(right)
+	}
+}
+
 // verifies that exactly the masks made of leading ones followed by
 // zeros are contiguous, the all-zero and all-ones masks included.
 //

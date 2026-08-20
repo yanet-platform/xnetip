@@ -302,6 +302,39 @@ func (m IPv6Network) IsDisjoint(other IPv6Network) bool {
 	return !m.Intersects(other)
 }
 
+// IsAdjacent reports whether the two networks share a mask and differ
+// in exactly one masked bit.
+//
+// Adjacent networks merge into a single network by dropping the
+// differing bit from the mask. Identical networks are not adjacent,
+// and networks with different masks are never adjacent. The differing
+// bit may sit anywhere in the mask, so merging two contiguous
+// networks that are adjacent at a non-boundary bit yields a
+// non-contiguous mask. Works with non-contiguous masks.
+func (m IPv6Network) IsAdjacent(other IPv6Network) bool {
+	_, ok := m.adjacentBit(other)
+	return ok
+}
+
+// adjacentBit returns the single bit in which the addresses of two
+// same-mask networks differ.
+//
+// ok is false when the masks differ or the addresses differ in zero
+// or more than one bit. Both addresses are normalized, so their
+// difference can hold only masked bits and needs no extra masking.
+func (m IPv6Network) adjacentBit(other IPv6Network) (uint128, bool) {
+	if m.mask != other.mask {
+		return uint128{}, false
+	}
+	// Exactly one differing bit means the difference is a power of
+	// two: non-zero, and clearing its lowest set bit leaves zero.
+	diff := m.addr.bits.Xor(other.addr.bits)
+	if !diff.IsPowerOfTwo() {
+		return uint128{}, false
+	}
+	return diff, true
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //
