@@ -2239,3 +2239,156 @@ func Test_ContiguousFromPrefix_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { contiguousSink, okSink = xnetip.ContiguousFromPrefix(prefix4) })
 	requireNoAllocs(t, func() { contiguousSink, okSink = xnetip.ContiguousFromPrefix(prefix6) })
 }
+
+// verifies that a lifted IPv4 block lands in the IPv4 family of the
+// family-agnostic instantiation with the same addresses.
+func Test_ContiguousFrom4_LiftsIntoIPv4Family(t *testing.T) {
+	lifted := xnetip.ContiguousFrom4(mustContiguous4(t, "10.0.0.0/24"))
+	require.Equal(t, mustContiguous(t, "10.0.0.0/24"), lifted)
+	require.True(t, lifted.Network().Is4())
+	require.Equal(t, "10.0.0.0/24", lifted.String())
+}
+
+// verifies that a lifted IPv6 block lands in the IPv6 family of the
+// family-agnostic instantiation with the same addresses.
+func Test_ContiguousFrom6_LiftsIntoIPv6Family(t *testing.T) {
+	lifted := xnetip.ContiguousFrom6(mustContiguous6(t, "2001:db8::/32"))
+	require.Equal(t, mustContiguous(t, "2001:db8::/32"), lifted)
+	require.True(t, lifted.Network().Is6())
+	require.Equal(t, "2001:db8::/32", lifted.String())
+}
+
+// verifies that the universe and host route boundaries of both
+// families lift with their family preserved.
+func Test_ContiguousFrom_LiftBoundaries(t *testing.T) {
+	require.Equal(t, mustContiguous(t, "0.0.0.0/0"), xnetip.ContiguousFrom4(mustContiguous4(t, "0.0.0.0/0")))
+	require.Equal(t, mustContiguous(t, "10.0.0.1/32"), xnetip.ContiguousFrom4(mustContiguous4(t, "10.0.0.1/32")))
+	require.Equal(t, mustContiguous(t, "::/0"), xnetip.ContiguousFrom6(mustContiguous6(t, "::/0")))
+	require.Equal(t, mustContiguous(t, "2001:db8::1/128"), xnetip.ContiguousFrom6(mustContiguous6(t, "2001:db8::1/128")))
+}
+
+// verifies that splitting a lifted IPv4 block hands the original
+// block back.
+func Test_ContiguousIPv4_SplitsLiftedBlock(t *testing.T) {
+	original := mustContiguous4(t, "10.0.0.0/24")
+	back, ok := xnetip.ContiguousIPv4(xnetip.ContiguousFrom4(original))
+	require.True(t, ok)
+	require.Equal(t, original, back)
+}
+
+// verifies that splitting a lifted IPv6 block hands the original
+// block back.
+func Test_ContiguousIPv6_SplitsLiftedBlock(t *testing.T) {
+	original := mustContiguous6(t, "2001:db8::/32")
+	back, ok := xnetip.ContiguousIPv6(xnetip.ContiguousFrom6(original))
+	require.True(t, ok)
+	require.Equal(t, original, back)
+}
+
+// verifies that a split against the other family refuses with the
+// zero block.
+func Test_ContiguousIPv4_WrongFamilyIsFalse(t *testing.T) {
+	block, ok := xnetip.ContiguousIPv4(mustContiguous(t, "2001:db8::/32"))
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network4]{}, block)
+	block6, ok := xnetip.ContiguousIPv6(mustContiguous(t, "10.0.0.0/24"))
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network6]{}, block6)
+}
+
+// verifies that a lifted IPv4-mapped IPv6 block stays IPv6: the IPv4
+// split refuses it and the IPv6 split hands it back.
+func Test_ContiguousFrom6_MappedStaysIPv6(t *testing.T) {
+	mapped := mustContiguous6(t, "::ffff:10.0.0.0/104")
+	lifted := xnetip.ContiguousFrom6(mapped)
+	_, ok := xnetip.ContiguousIPv4(lifted)
+	require.False(t, ok)
+	back, ok := xnetip.ContiguousIPv6(lifted)
+	require.True(t, ok)
+	require.Equal(t, mapped, back)
+}
+
+// verifies that lift then split is the identity on every IPv4 block
+// and that the lift equals the two-step through the exact wrap.
+func Test_ContiguousFrom4_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := genContiguous4.Draw(t, "block")
+		lifted := xnetip.ContiguousFrom4(block)
+		twoStep, ok := xnetip.ContiguousFrom(xnetip.NetworkFrom4(block.Network()))
+		require.True(t, ok)
+		require.Equal(t, twoStep, lifted)
+		back, ok := xnetip.ContiguousIPv4(lifted)
+		require.True(t, ok)
+		require.Equal(t, block, back)
+	})
+}
+
+// verifies that lift then split is the identity on every IPv6 block
+// and that the lift equals the two-step through the exact wrap.
+func Test_ContiguousFrom6_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := genContiguous6.Draw(t, "block")
+		lifted := xnetip.ContiguousFrom6(block)
+		twoStep, ok := xnetip.ContiguousFrom(xnetip.NetworkFrom6(block.Network()))
+		require.True(t, ok)
+		require.Equal(t, twoStep, lifted)
+		back, ok := xnetip.ContiguousIPv6(lifted)
+		require.True(t, ok)
+		require.Equal(t, block, back)
+	})
+}
+
+// verifies that exactly one split accepts every family-agnostic
+// block and that lifting the accepted half restores the original.
+func Test_ContiguousSplit_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := genContiguous.Draw(t, "block")
+		block4, ok4 := xnetip.ContiguousIPv4(block)
+		block6, ok6 := xnetip.ContiguousIPv6(block)
+		require.NotEqual(t, ok4, ok6)
+		if ok4 {
+			require.Equal(t, block, xnetip.ContiguousFrom4(block4))
+			return
+		}
+		require.Equal(t, block, xnetip.ContiguousFrom6(block6))
+	})
+}
+
+// verifies that every blind rewrap of the lifts and splits holds a
+// contiguous mask, revalidating through the exact wrap.
+func Test_ContiguousFamily_RewrapsRevalidateProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		lifted4 := xnetip.ContiguousFrom4(genContiguous4.Draw(t, "block4"))
+		rewrapped, ok := xnetip.ContiguousFrom(lifted4.Network())
+		require.True(t, ok)
+		require.Equal(t, lifted4, rewrapped)
+		lifted6 := xnetip.ContiguousFrom6(genContiguous6.Draw(t, "block6"))
+		rewrapped, ok = xnetip.ContiguousFrom(lifted6.Network())
+		require.True(t, ok)
+		require.Equal(t, lifted6, rewrapped)
+		block := genContiguous.Draw(t, "block")
+		if split4, ok := xnetip.ContiguousIPv4(block); ok {
+			rewrapped4, ok := xnetip.ContiguousFrom(split4.Network())
+			require.True(t, ok)
+			require.Equal(t, split4, rewrapped4)
+		}
+		if split6, ok := xnetip.ContiguousIPv6(block); ok {
+			rewrapped6, ok := xnetip.ContiguousFrom(split6.Network())
+			require.True(t, ok)
+			require.Equal(t, split6, rewrapped6)
+		}
+	})
+}
+
+// verifies that the lifts and the splits are allocation-free in both
+// directions.
+func Test_ContiguousFamily_AllocationFree(t *testing.T) {
+	block4 := mustContiguous4(t, "10.0.0.0/24")
+	block6 := mustContiguous6(t, "2001:db8::/32")
+	lifted4 := xnetip.ContiguousFrom4(block4)
+	lifted6 := xnetip.ContiguousFrom6(block6)
+	requireNoAllocs(t, func() { contiguousSink = xnetip.ContiguousFrom4(block4) })
+	requireNoAllocs(t, func() { contiguousSink = xnetip.ContiguousFrom6(block6) })
+	requireNoAllocs(t, func() { contiguous4Sink, okSink = xnetip.ContiguousIPv4(lifted4) })
+	requireNoAllocs(t, func() { contiguous6Sink, okSink = xnetip.ContiguousIPv6(lifted6) })
+}

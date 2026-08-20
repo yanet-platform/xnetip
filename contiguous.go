@@ -18,6 +18,56 @@ func ContiguousFrom[T network[T]](network T) (Contiguous[T], bool) {
 	return Contiguous[T]{network: network}, true
 }
 
+// ContiguousFrom4 returns the Network instantiation holding an IPv4
+// block, mirroring NetworkFrom4.
+//
+// The lift is total and preserves the address set. The lifted mask
+// gains the 96 leading one bits that pin the IPv4-mapped storage
+// form on top of its own run, which is a leading run again, so the
+// result wraps without revalidation. The inverse of ContiguousIPv4.
+func ContiguousFrom4(block Contiguous[Network4]) Contiguous[Network] {
+	return Contiguous[Network]{network: NetworkFrom4(block.network)}
+}
+
+// ContiguousFrom6 returns the Network instantiation holding an IPv6
+// block, mirroring NetworkFrom6.
+//
+// The lift is total: the network is carried verbatim with its mask
+// unchanged, an IPv4-mapped block stays IPv6, so the result wraps
+// without revalidation. The inverse of ContiguousIPv6.
+func ContiguousFrom6(block Contiguous[Network6]) Contiguous[Network] {
+	return Contiguous[Network]{network: NetworkFrom6(block.network)}
+}
+
+// ContiguousIPv4 returns the IPv4 block, ok is false for an IPv6 one
+// — the free-function twin of Network.IPv4.
+//
+// On ok the unwrap drops exactly the 96 leading one bits that pin
+// the IPv4-mapped storage form, leaving the mask's own leading run,
+// so the result wraps without revalidation. The inverse of
+// ContiguousFrom4.
+func ContiguousIPv4(block Contiguous[Network]) (Contiguous[Network4], bool) {
+	network, ok := block.network.IPv4()
+	if !ok {
+		return Contiguous[Network4]{}, false
+	}
+	return Contiguous[Network4]{network: network}, true
+}
+
+// ContiguousIPv6 returns the IPv6 block, ok is false for an IPv4 one
+// — the free-function twin of Network.IPv6.
+//
+// On ok the network is carried verbatim with its mask unchanged, so
+// the result wraps without revalidation. The inverse of
+// ContiguousFrom6.
+func ContiguousIPv6(block Contiguous[Network]) (Contiguous[Network6], bool) {
+	network, ok := block.network.IPv6()
+	if !ok {
+		return Contiguous[Network6]{}, false
+	}
+	return Contiguous[Network6]{network: network}, true
+}
+
 // ContiguousFromCIDR4 returns the block of addr with the top bits
 // bits masked, host bits cleared.
 //
