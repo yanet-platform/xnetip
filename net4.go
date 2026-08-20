@@ -369,6 +369,57 @@ func (m IPv4Network) adjacentBit(other IPv4Network) (uint32, bool) {
 	return diff, true
 }
 
+// Merge returns the single network whose address set is the union of
+// the two inputs, and false when no such network exists.
+//
+// The union is a single network in exactly two cases: the masks are
+// equal and the addresses differ in at most one bit (the result drops
+// that bit from the mask, a duplicate merges to itself), or one
+// network contains the other (the result is the larger one). The
+// differing bit may be any masked bit, so merging two contiguous
+// networks adjacent at a non-boundary bit yields a non-contiguous
+// mask. Works with non-contiguous masks.
+func (m IPv4Network) Merge(other IPv4Network) (IPv4Network, bool) {
+	a1, m1 := m.addr.Bits(), m.mask.Bits()
+	a2, m2 := other.addr.Bits(), other.mask.Bits()
+	if m1 == m2 {
+		// A zero or single-bit difference merges through one formula.
+		//
+		// The difference is dropped from the mask and cleared from
+		// the address, which yields the sibling union, or the input
+		// itself unchanged when the difference is zero (a duplicate).
+		diff := a1 ^ a2
+		if diff&(diff-1) != 0 {
+			return IPv4Network{}, false
+		}
+		mask := m1 ^ diff
+		return IPv4Network{
+			addr: ipv4AddrFromBits(a1 & mask),
+			mask: ipv4AddrFromBits(mask),
+		}, true
+	}
+	// With unequal masks only containment remains.
+	//
+	// The common mask decides which side can be the container: the
+	// container's mask must be the subset, and the contained address
+	// must then match it on every container bit. Incomparable masks
+	// reject without an address probe.
+	common := m1 & m2
+	if common == m2 {
+		if a1&m2 == a2 {
+			return other, true
+		}
+		return IPv4Network{}, false
+	}
+	if common == m1 {
+		if a2&m1 == a1 {
+			return m, true
+		}
+		return IPv4Network{}, false
+	}
+	return IPv4Network{}, false
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //
