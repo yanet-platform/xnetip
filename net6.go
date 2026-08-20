@@ -47,6 +47,29 @@ func fromBits6(addr, mask ipv6Addr) IPv6Network {
 	}
 }
 
+// IPv6NetworkFromCIDR returns the network of addr with the top bits
+// bits masked.
+//
+// Host bits of addr are cleared: 2001:db8::1 with 64 gives
+// 2001:db8::/64, the same network netip.Prefix.Masked would report.
+// The address must be Is6 (an IPv4-mapped address is IPv6 and converts
+// as its 16-byte form, a zone is dropped silently) — an Is4 address or
+// the invalid zero netip.Addr is rejected with ErrAddrFamilyMismatch —
+// and bits must be in the range 0 through 128, otherwise
+// ErrCIDROverflow is returned.
+func IPv6NetworkFromCIDR(addr netip.Addr, bits int) (IPv6Network, error) {
+	addrKernel, ok := ipv6AddrFromNetip(addr)
+	if !ok {
+		input := cidrInput(addr, bits)
+		return IPv6Network{}, wrapParseError("IPv6NetworkFromCIDR", input, ErrAddrFamilyMismatch, nil)
+	}
+	if bits < 0 || bits > 128 {
+		input := cidrInput(addr, bits)
+		return IPv6Network{}, wrapParseError("IPv6NetworkFromCIDR", input, ErrCIDROverflow, nil)
+	}
+	return fromBits6(addrKernel, ipv6Addr{uint128MaskFromPrefix(bits)}), nil
+}
+
 // Addr returns the network address (already normalized by the mask) as
 // an Is6 netip.Addr.
 func (m IPv6Network) Addr() netip.Addr {
