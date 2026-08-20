@@ -259,6 +259,38 @@ func (m IPv4Network) Contains(other IPv4Network) bool {
 	return a2&m1 == a1 && m2&m1 == m1
 }
 
+// Intersection returns the network of addresses common to m and other.
+//
+// The intersection of two networks is always a single network: its
+// mask is the union of both masks and its address the union of both
+// addresses. ok is false when the networks are disjoint, which happens
+// exactly when they disagree on a bit position both masks constrain.
+// Masks may be non-contiguous. When one network contains the other the
+// result is the contained one, and a network intersected with itself
+// is itself.
+func (m IPv4Network) Intersection(other IPv4Network) (IPv4Network, bool) {
+	// The disjointness test compares the addresses on the doubly
+	// constrained bits alone.
+	//
+	// With this network as `(a1, m1)` and the other as `(a2, m2)`, the
+	// sets are disjoint exactly when `a1&m2 != a2&m1`: a bit set in
+	// only one mask is free on the other side and cannot conflict.
+	a1, m1 := m.addr.Bits(), m.mask.Bits()
+	a2, m2 := other.addr.Bits(), other.mask.Bits()
+	if a1&m2 != a2&m1 {
+		return IPv4Network{}, false
+	}
+	// The raw construction is exact, no masking AND is needed.
+	//
+	// Every set bit of either address lies inside its own mask and
+	// thus inside the union mask, so the union address is already
+	// normalized.
+	return IPv4Network{
+		addr: ipv4AddrFromBits(a1 | a2),
+		mask: ipv4AddrFromBits(m1 | m2),
+	}, true
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //
