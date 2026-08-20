@@ -291,6 +291,19 @@ func (m IPv4Network) Intersection(other IPv4Network) (IPv4Network, bool) {
 	}, true
 }
 
+// Intersects reports whether the two networks share at least one
+// address.
+//
+// Two networks intersect when their addresses agree on every bit that
+// both masks constrain. The check is equivalent to Intersection
+// returning ok, and holds for non-contiguous masks. A network always
+// intersects itself and the unspecified network 0.0.0.0/0 intersects
+// everything.
+func (m IPv4Network) Intersects(other IPv4Network) bool {
+	_, ok := m.Intersection(other)
+	return ok
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //

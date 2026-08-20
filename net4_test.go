@@ -1103,6 +1103,189 @@ func BenchmarkIPv4Network_Intersection_NonContiguous(b *testing.B) {
 	}
 }
 
+// verifies that contiguous networks intersect exactly when one
+// contains the other or they are equal prefixes of a common address.
+//
+// A network always intersects itself, the universe intersects
+// everything, and two host routes intersect only when equal.
+func Test_IPv4Network_Intersects_ContiguousAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  bool
+	}{
+		{name: "overlapping contiguous", left: xnetip.MustParseIPv4Network("192.168.0.0/16"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: true},
+		{name: "overlapping contiguous reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: true},
+		{name: "disjoint contiguous", left: xnetip.MustParseIPv4Network("192.168.0.0/16"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: false},
+		{name: "disjoint contiguous reversed", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
+		{name: "self", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: true},
+		{name: "unspecified with anything", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: true},
+		{name: "anything with unspecified", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: true},
+		{name: "unspecified with itself", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: true},
+		{name: "equal host routes", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: true},
+		{name: "different host routes", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.2/32"), want: false},
+		{name: "host route inside a block", left: xnetip.MustParseIPv4Network("10.0.0.1/32"), right: xnetip.MustParseIPv4Network("10.0.0.0/8"), want: true},
+		{name: "block around a host route", left: xnetip.MustParseIPv4Network("10.0.0.0/8"), right: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: true},
+		{name: "all-ones host route vs the universe", left: xnetip.MustParseIPv4Network("255.255.255.255/32"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.Intersects(testCase.right))
+		})
+	}
+}
+
+// verifies that non-contiguous networks intersect exactly when their
+// addresses agree on every doubly constrained bit.
+//
+// Masks sharing no set bit always intersect whatever the addresses,
+// while a single shared constrained bit that differs keeps the
+// networks apart.
+func Test_IPv4Network_Intersects_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  bool
+	}{
+		{name: "pattern overlaps block", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0"), want: true},
+		{name: "pattern overlaps block reversed", left: xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), want: true},
+		{name: "pattern disjoint from block", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("11.0.0.0/255.0.0.0"), want: false},
+		{name: "two patterns meeting in one address", left: xnetip.MustParseIPv4Network("10.0.10.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.0.0.5/255.0.0.255"), want: true},
+		{name: "alternating masks always intersect", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("0.170.0.170/85.170.85.170"), want: true},
+		{name: "same pattern mask, different fixed octet", left: xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.2/255.0.0.255"), want: false},
+		{name: "pattern vs host route matching it", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.42.0.99/32"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.Intersects(testCase.right))
+		})
+	}
+}
+
+// verifies that the predicate is symmetric.
+func Test_IPv4Network_Intersects_SymmetryProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		require.Equal(t, left.Intersects(right), right.Intersects(left))
+	})
+}
+
+// verifies that the predicate answers exactly whether the
+// intersection exists.
+func Test_IPv4Network_Intersects_EquivalentToIntersectionProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		_, ok := left.Intersection(right)
+		require.Equal(t, ok, left.Intersects(right))
+	})
+}
+
+// verifies that every network intersects itself and the universe
+// intersects every network.
+func Test_IPv4Network_Intersects_ReflexiveAndUniverseProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		require.True(t, network.Intersects(network))
+		require.True(t, xnetip.IPv4Network{}.Intersects(network))
+	})
+}
+
+// verifies that containment implies intersection.
+func Test_IPv4Network_Intersects_ContainmentImpliesIntersectionProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outer := genIPv4Network.Draw(t, "outer")
+		inner := genIPv4Network.Draw(t, "inner")
+		if outer.Contains(inner) {
+			require.True(t, outer.Intersects(inner))
+		}
+	})
+}
+
+// verifies that the predicate equals shared membership on networks
+// confined to the top octet.
+//
+// Both masks live in the top eight bits, so enumerating the 256
+// patterns there is exhaustive: the networks intersect exactly when
+// some address belongs to both.
+func Test_IPv4Network_Intersects_BruteForceMembershipProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		leftAddr := uint32(rapid.IntRange(0, 255).Draw(t, "left addr"))
+		leftMask := uint32(rapid.IntRange(0, 255).Draw(t, "left mask"))
+		rightAddr := uint32(rapid.IntRange(0, 255).Draw(t, "right addr"))
+		rightMask := uint32(rapid.IntRange(0, 255).Draw(t, "right mask"))
+		left, err := xnetip.IPv4NetworkFrom(
+			netipAddrFrom4Bits(leftAddr<<24),
+			netipAddrFrom4Bits(leftMask<<24),
+		)
+		require.NoError(t, err)
+		right, err := xnetip.IPv4NetworkFrom(
+			netipAddrFrom4Bits(rightAddr<<24),
+			netipAddrFrom4Bits(rightMask<<24),
+		)
+		require.NoError(t, err)
+		want := false
+		for x := uint32(0); x <= 255; x++ {
+			if x&leftMask == leftAddr&leftMask && x&rightMask == rightAddr&rightMask {
+				want = true
+				break
+			}
+		}
+		require.Equal(t, want, left.Intersects(right))
+	})
+}
+
+// verifies that on contiguous networks the predicate agrees with the
+// net/netip overlap rule.
+func Test_IPv4Network_Intersects_MatchesNetipOverlapsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		leftPrefix := genIPv4Prefix.Draw(t, "left").Masked()
+		rightPrefix := genIPv4Prefix.Draw(t, "right").Masked()
+		left, ok := xnetip.IPv4NetworkFromPrefix(leftPrefix)
+		require.True(t, ok)
+		right, ok := xnetip.IPv4NetworkFromPrefix(rightPrefix)
+		require.True(t, ok)
+		require.Equal(t, leftPrefix.Overlaps(rightPrefix), left.Intersects(right))
+	})
+}
+
+// verifies that the predicate allocates nothing.
+func Test_IPv4Network_Intersects_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255")
+	right := xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0")
+	requireNoAllocs(t, func() { okSink = left.Intersects(right) })
+}
+
+func BenchmarkIPv4Network_Intersects_Contiguous(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("192.168.0.0/16")
+	right := xnetip.MustParseIPv4Network("192.168.1.0/24")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.Intersects(right)
+	}
+}
+
+func BenchmarkIPv4Network_Intersects_Disjoint(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("192.168.0.0/16")
+	right := xnetip.MustParseIPv4Network("10.0.0.0/8")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.Intersects(right)
+	}
+}
+
+func BenchmarkIPv4Network_Intersects_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("10.0.0.1/255.0.0.255")
+	right := xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.0")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.Intersects(right)
+	}
+}
+
 // verifies that exactly the masks made of leading ones followed by
 // zeros are contiguous, the all-zero and all-ones masks included.
 func Test_IPv4Network_IsContiguous_LeadingOnesRunOnly(t *testing.T) {
