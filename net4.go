@@ -3,6 +3,7 @@ package xnetip
 import (
 	"math/bits"
 	"net/netip"
+	"strconv"
 )
 
 // IPv4Network is an IPv4 network: an address and a mask of arbitrary
@@ -144,6 +145,30 @@ func (m IPv4Network) PrefixLen() (int, bool) {
 	// The mask's leading ones are its complement's leading zeros, and
 	// after the contiguity check that run is the whole mask.
 	return bits.LeadingZeros32(^m.mask.Bits()), true
+}
+
+// String returns the text form of the network, see AppendTo.
+func (m IPv4Network) String() string {
+	// The buffer covers the longest form (a dotted mask, 31 bytes),
+	// so the string conversion is the only allocation.
+	var buffer [31]byte
+	return string(m.AppendTo(buffer[:0]))
+}
+
+// AppendTo appends the text form of the network to b and returns the
+// extended buffer.
+//
+// A contiguous network is written as "addr/prefix", a non-contiguous
+// one as "addr/mask" with the mask in dotted-decimal form. The suffix
+// is always present, so a host route is written with "/32". The output
+// parses back with ParseIPv4Network.
+func (m IPv4Network) AppendTo(b []byte) []byte {
+	b = m.addr.AppendTo(b)
+	b = append(b, '/')
+	if prefix, ok := m.PrefixLen(); ok {
+		return strconv.AppendInt(b, int64(prefix), 10)
+	}
+	return m.mask.AppendTo(b)
 }
 
 // ToIPv6Mapped returns this network as an IPv4-mapped IPv6 network.

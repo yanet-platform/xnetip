@@ -6,6 +6,8 @@ import (
 	"math/bits"
 	"net/netip"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -887,5 +889,154 @@ func BenchmarkIPv4Network_PrefixLen_Mixed(b *testing.B) {
 		for _, network := range networks {
 			intSink, okSink = network.PrefixLen()
 		}
+	}
+}
+
+// verifies that a contiguous network prints as address/prefix with the
+// suffix always present: a host route keeps /32 and the universe /0.
+func Test_IPv4Network_String_ContiguousUsesPrefixForm(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+		want    string
+	}{
+		{name: "host route keeps /32", network: mustIPv4Network(t, "127.0.0.1", "255.255.255.255"), want: "127.0.0.1/32"},
+		{name: "CIDR", network: mustIPv4Network(t, "10.0.0.0", "255.255.255.0"), want: "10.0.0.0/24"},
+		{name: "universe", network: mustIPv4Network(t, "0.0.0.0", "0.0.0.0"), want: "0.0.0.0/0"},
+		{name: "zero value", network: xnetip.IPv4Network{}, want: "0.0.0.0/0"},
+		{name: "all ones", network: mustIPv4Network(t, "255.255.255.255", "255.255.255.255"), want: "255.255.255.255/32"},
+		{name: "normalized before print", network: mustIPv4Network(t, "10.0.0.1", "255.0.0.0"), want: "10.0.0.0/8"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.String())
+		})
+	}
+}
+
+// verifies that a non-contiguous network prints its mask in dotted
+// decimal, because no prefix length can describe it.
+func Test_IPv4Network_String_NonContiguousUsesDottedMask(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+		want    string
+	}{
+		{name: "geo-style", network: mustIPv4Network(t, "10.0.1.0", "255.0.255.0"), want: "10.0.1.0/255.0.255.0"},
+		{name: "two-run", network: mustIPv4Network(t, "192.168.0.1", "255.255.0.255"), want: "192.168.0.1/255.255.0.255"},
+		{name: "alternating", network: mustIPv4Network(t, "170.85.170.85", "170.85.170.85"), want: "170.85.170.85/170.85.170.85"},
+		{name: "trailing ones only", network: mustIPv4Network(t, "0.0.0.1", "0.0.0.255"), want: "0.0.0.1/0.0.0.255"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.String())
+		})
+	}
+}
+
+// verifies that appending writes after the caller's bytes and leaves
+// them intact.
+func Test_IPv4Network_AppendTo_KeepsExistingBytes(t *testing.T) {
+	network := mustIPv4Network(t, "10.0.0.0", "255.255.255.0")
+	require.Equal(t, "net=10.0.0.0/24", string(network.AppendTo([]byte("net="))))
+}
+
+// verifies that a buffer with enough capacity is extended in place,
+// without growing to a new backing array.
+func Test_IPv4Network_AppendTo_ReusesSizedBuffer(t *testing.T) {
+	network := mustIPv4Network(t, "10.0.0.0", "255.255.255.0")
+	buffer := make([]byte, 0, 32)
+	extended := network.AppendTo(buffer)
+	require.Equal(t, "10.0.0.0/24", string(extended))
+	require.Equal(t, cap(buffer), cap(extended))
+}
+
+// verifies that the text splits at a single slash into the network
+// address and the decimal prefix length or the dotted mask.
+func Test_IPv4Network_String_ShapeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		text := network.String()
+		require.Equal(t, 1, strings.Count(text, "/"))
+		slash := strings.IndexByte(text, '/')
+		addr, err := netip.ParseAddr(text[:slash])
+		require.NoError(t, err)
+		require.True(t, addr.Is4())
+		require.Equal(t, network.Addr(), addr)
+		if prefix, ok := network.PrefixLen(); ok {
+			require.Equal(t, strconv.Itoa(prefix), text[slash+1:])
+		} else {
+			require.Equal(t, network.Mask().String(), text[slash+1:])
+		}
+	})
+}
+
+// verifies that appending to an empty buffer yields the same bytes the
+// string form has, and that drawn buffer content survives untouched.
+func Test_IPv4Network_AppendTo_MatchesStringProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		prefix := rapid.SliceOf(rapid.Byte()).Draw(t, "buffer")
+		require.Equal(t, network.String(), string(network.AppendTo(nil)))
+		extended := network.AppendTo(slices.Clone(prefix))
+		require.True(t, bytes.Equal(prefix, extended[:len(prefix)]))
+		require.Equal(t, network.String(), string(extended[len(prefix):]))
+	})
+}
+
+// verifies that the contiguous form is byte-identical to the netip
+// prefix rendering of the same network.
+func Test_IPv4Network_String_MatchesNetipPrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		prefix, ok := network.PrefixLen()
+		if !ok {
+			return
+		}
+		require.Equal(t, netip.PrefixFrom(network.Addr(), prefix).String(), network.String())
+	})
+}
+
+// verifies that appending into a buffer with enough capacity allocates
+// nothing, whatever the mask's shape.
+func Test_IPv4Network_AppendTo_AllocationFree(t *testing.T) {
+	contiguous := mustIPv4Network(t, "10.0.0.0", "255.255.255.0")
+	nonContiguous := mustIPv4Network(t, "192.168.0.1", "255.255.0.255")
+	buffer := make([]byte, 0, 64)
+	requireNoAllocs(t, func() { bytesSink = contiguous.AppendTo(buffer[:0]) })
+	requireNoAllocs(t, func() { bytesSink = nonContiguous.AppendTo(buffer[:0]) })
+}
+
+// verifies that rendering to a string costs exactly the one string
+// conversion, pinning any formatting regression that adds more.
+func Test_IPv4Network_String_SingleAllocation(t *testing.T) {
+	contiguous := mustIPv4Network(t, "10.0.0.0", "255.255.255.0")
+	nonContiguous := mustIPv4Network(t, "192.168.0.1", "255.255.0.255")
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = contiguous.String() })))
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = nonContiguous.String() })))
+}
+
+func BenchmarkIPv4Network_String_CIDR(b *testing.B) {
+	network := mustIPv4Network(b, "10.0.0.0", "255.0.0.0")
+	b.ReportAllocs()
+	for b.Loop() {
+		stringSink = network.String()
+	}
+}
+
+func BenchmarkIPv4Network_String_NonContiguous(b *testing.B) {
+	network := mustIPv4Network(b, "192.168.0.1", "255.255.0.255")
+	b.ReportAllocs()
+	for b.Loop() {
+		stringSink = network.String()
+	}
+}
+
+func BenchmarkIPv4Network_AppendTo_CIDR(b *testing.B) {
+	network := mustIPv4Network(b, "10.0.0.0", "255.0.0.0")
+	buffer := make([]byte, 0, 32)
+	b.ReportAllocs()
+	for b.Loop() {
+		bytesSink = network.AppendTo(buffer[:0])
 	}
 }

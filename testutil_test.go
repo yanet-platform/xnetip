@@ -313,6 +313,7 @@ var genIPNetwork = rapid.Custom(func(t *rapid.T) xnetip.IPNetwork {
 // optimise the work under test away.
 var (
 	wordSink      uint32
+	stringSink    string
 	intSink       int
 	bytesSink     []byte
 	networkSink   xnetip.IPv4Network
