@@ -104,6 +104,17 @@ func (m IPAddr) Netip() netip.Addr {
 	return m.addr.Netip()
 }
 
+// ToIPv6Mapped returns the address as an IPv6 address: IPv4 becomes its
+// mapped form ::ffff:a.b.c.d, IPv6 is returned unchanged.
+//
+// The result holds exactly the 16-byte form of the address, so the
+// method is the typed counterpart of As16 and the inverse direction of
+// Unmap for IPv4 values. It mirrors IPv4Addr.ToIPv6Mapped at the
+// family-agnostic level, total and allocation-free.
+func (m IPAddr) ToIPv6Mapped() IPv6Addr {
+	return m.addr
+}
+
 // IsUnspecified reports whether the address is the unspecified address
 // of its family, 0.0.0.0 or ::.
 //

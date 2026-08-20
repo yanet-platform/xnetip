@@ -1223,3 +1223,113 @@ func Test_IPAddr_Predicates_DoNotAllocate(t *testing.T) {
 		ipAddrSink, boolSink = address.Prev()
 	})
 }
+
+// verifies that an IPv4 address maps into ::ffff:a.b.c.d.
+func Test_IPAddr_ToIPv6Mapped_MapsIPv4(t *testing.T) {
+	mapped := mustParseIPAddr4(t, "192.168.1.0").ToIPv6Mapped()
+	require.Equal(t, xnetip.MustParseIPv6Addr("::ffff:c0a8:100"), mapped)
+}
+
+// verifies that the mapping keeps every octet, not only the aligned
+// ones.
+func Test_IPAddr_ToIPv6Mapped_MapsNonTrivialOctets(t *testing.T) {
+	mapped := mustParseIPAddr4(t, "192.168.0.1").ToIPv6Mapped()
+	require.Equal(t, xnetip.MustParseIPv6Addr("::ffff:c0a8:1"), mapped)
+}
+
+// verifies that the IPv4 zero address maps into the mapped zero, not
+// into ::.
+func Test_IPAddr_ToIPv6Mapped_MapsIPv4Zero(t *testing.T) {
+	mapped := mustParseIPAddr4(t, "0.0.0.0").ToIPv6Mapped()
+	require.Equal(t, xnetip.MustParseIPv6Addr("::ffff:0.0.0.0"), mapped)
+}
+
+// verifies that an IPv6 address passes through unchanged.
+func Test_IPAddr_ToIPv6Mapped_IPv6Identity(t *testing.T) {
+	six := xnetip.MustParseIPv6Addr("2001:db8::")
+	require.Equal(t, six, xnetip.IPAddrFrom6(six).ToIPv6Mapped())
+}
+
+// verifies that an IPv6 address with bits in both halves passes through
+// unchanged.
+func Test_IPAddr_ToIPv6Mapped_IPv6IdentityNonTrivial(t *testing.T) {
+	six := xnetip.MustParseIPv6Addr("2a02:6b8:c00::1234:abcd:0:0")
+	require.Equal(t, six, xnetip.IPAddrFrom6(six).ToIPv6Mapped())
+}
+
+// verifies that a mapped address kept in the IPv6 family passes through
+// unchanged.
+func Test_IPAddr_ToIPv6Mapped_MappedAsIPv6Identity(t *testing.T) {
+	six := xnetip.MustParseIPv6Addr("::ffff:1.2.3.4")
+	require.Equal(t, six, xnetip.IPAddrFrom6(six).ToIPv6Mapped())
+}
+
+// verifies that the zero value maps to the IPv6 unspecified address.
+func Test_IPAddr_ToIPv6Mapped_ZeroValue(t *testing.T) {
+	require.Equal(t, xnetip.IPv6Addr{}, xnetip.IPAddr{}.ToIPv6Mapped())
+}
+
+// verifies that the mapped view holds exactly the 16-byte form of the
+// address, for an IPv4 value in particular.
+func Test_IPAddr_ToIPv6Mapped_AgreesWithAs16(t *testing.T) {
+	address := mustParseIPAddr4(t, "1.2.3.4")
+	require.Equal(t, address.As16(), address.ToIPv6Mapped().As16())
+}
+
+// verifies that the mapped view keeps the 16-byte form of every
+// address and agrees with the netip 16-byte form, which is also mapped.
+func Test_IPAddr_ToIPv6Mapped_MatchesAs16AndNetip(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		mapped := address.ToIPv6Mapped()
+		require.Equal(t, address.As16(), mapped.As16())
+		require.Equal(t, toNetipAddr(address).As16(), mapped.As16())
+	})
+}
+
+// verifies that the mapped view of an IPv4 value is 4in6 and extracts
+// back to the same IPv4 address.
+func Test_IPAddr_ToIPv6Mapped_RoundTripsIPv4(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		if !address.Is4() {
+			t.Skip("IPv6 value")
+		}
+		mapped := address.ToIPv6Mapped()
+		require.True(t, mapped.Is4In6())
+		extracted, ok := mapped.ToIPv4Mapped()
+		require.True(t, ok)
+		expected, ok := address.IPv4()
+		require.True(t, ok)
+		require.Equal(t, expected, extracted)
+	})
+}
+
+// verifies that the mapped view of an IPv6 value is the value itself.
+func Test_IPAddr_ToIPv6Mapped_IdentityOnIPv6(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		if !address.Is6() {
+			t.Skip("IPv4 value")
+		}
+		six, ok := address.IPv6()
+		require.True(t, ok)
+		require.Equal(t, six, address.ToIPv6Mapped())
+	})
+}
+
+// verifies that re-entering the family-agnostic type through the mapped
+// view lands on the same canonical form as the original address.
+func Test_IPAddr_ToIPv6Mapped_ThenUnmap_AgreesWithUnmap(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPAddr.Draw(t, "address")
+		reentered := xnetip.IPAddrFrom6(address.ToIPv6Mapped())
+		require.Equal(t, address.Unmap(), reentered.Unmap())
+	})
+}
+
+// verifies that the mapped view does not allocate.
+func Test_IPAddr_ToIPv6Mapped_DoesNotAllocate(t *testing.T) {
+	address := mustParseIPAddr4(t, "192.0.2.1")
+	requireNoAllocs(t, func() { ipv6AddrSink = address.ToIPv6Mapped() })
+}
