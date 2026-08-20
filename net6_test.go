@@ -1443,6 +1443,205 @@ func BenchmarkIPv6Network_Intersection_NonContiguous(b *testing.B) {
 	}
 }
 
+// verifies that contiguous networks intersect exactly when one
+// contains the other or they are equal prefixes of a common address.
+//
+// A network always intersects itself, the universe intersects
+// everything, two host routes intersect only when equal, and sibling
+// blocks split at bit 64 pin the half boundary.
+func Test_IPv6Network_Intersects_ContiguousAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  bool
+	}{
+		{name: "overlapping contiguous", left: xnetip.MustParseIPv6Network("2001:db8::/32"), right: xnetip.MustParseIPv6Network("2001:db8:1::/48"), want: true},
+		{name: "overlapping contiguous reversed", left: xnetip.MustParseIPv6Network("2001:db8:1::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: true},
+		{name: "disjoint contiguous", left: xnetip.MustParseIPv6Network("2001:db8::/32"), right: xnetip.MustParseIPv6Network("fe80::/10"), want: false},
+		{name: "disjoint contiguous reversed", left: xnetip.MustParseIPv6Network("fe80::/10"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: false},
+		{name: "self", left: xnetip.MustParseIPv6Network("2001:db8::/32"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: true},
+		{name: "unspecified with anything", left: xnetip.MustParseIPv6Network("::/0"), right: xnetip.MustParseIPv6Network("2001:db8:1::/48"), want: true},
+		{name: "anything with unspecified", left: xnetip.MustParseIPv6Network("2001:db8:1::/48"), right: xnetip.MustParseIPv6Network("::/0"), want: true},
+		{name: "equal host routes", left: xnetip.MustParseIPv6Network("2001:db8::1/128"), right: xnetip.MustParseIPv6Network("2001:db8::1/128"), want: true},
+		{name: "different host routes", left: xnetip.MustParseIPv6Network("2001:db8::1/128"), right: xnetip.MustParseIPv6Network("2001:db8::2/128"), want: false},
+		{name: "blocks differing only in the low half", left: xnetip.MustParseIPv6Network("2001:db8::/64"), right: xnetip.MustParseIPv6Network("2001:db8:0:0:8000::/65"), want: true},
+		{name: "blocks differing at bit 64", left: xnetip.MustParseIPv6Network("2001:db8:0:0::/64"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/64"), want: false},
+		{name: "all-ones host route vs the universe", left: xnetip.MustParseIPv6Network("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128"), right: xnetip.MustParseIPv6Network("::/0"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.Intersects(testCase.right))
+		})
+	}
+}
+
+// verifies that non-contiguous networks intersect exactly when their
+// addresses agree on every doubly constrained bit.
+//
+// Masks sharing no set bit always intersect whatever the addresses,
+// a bit constrained by only one side never separates, and a single
+// doubly constrained group that differs keeps the networks apart —
+// including when the free hole straddles bit 64.
+func Test_IPv6Network_Intersects_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  bool
+	}{
+		{name: "pattern overlaps block", left: xnetip.MustParseIPv6Network("2001::1/ffff::ffff"), right: xnetip.MustParseIPv6Network("2001:1::/32"), want: true},
+		{name: "pattern overlaps block reversed", left: xnetip.MustParseIPv6Network("2001:1::/32"), right: xnetip.MustParseIPv6Network("2001::1/ffff::ffff"), want: true},
+		{name: "pattern disjoint from block", left: xnetip.MustParseIPv6Network("2001::1/ffff::ffff"), right: xnetip.MustParseIPv6Network("2002::/16"), want: false},
+		{name: "alternating masks always intersect", left: xnetip.MustParseIPv6Network("aa00:0:aa00:0:aa00:0:aa00:0/ff00:ff:ff00:ff:ff00:ff:ff00:ff"), right: xnetip.MustParseIPv6Network("bb:0:bb:0:bb:0:bb:0/ff:ff00:ff:ff00:ff:ff00:ff:ff00"), want: true},
+		{name: "same pattern mask, different fixed low group", left: xnetip.MustParseIPv6Network("2001::1/ffff::ffff"), right: xnetip.MustParseIPv6Network("2001::2/ffff::ffff"), want: false},
+		{name: "hole straddling the boundary, disagreeing constrained group", left: xnetip.MustParseIPv6Network("2001:db8::1:0:0/ffff:ffff:ffff:0:0:ffff::"), right: xnetip.MustParseIPv6Network("2001:db8:0:1:1:2::/ffff:ffff:ffff:ffff:ffff:ffff::"), want: false},
+		{name: "hole straddling the boundary, agreeing constrained groups", left: xnetip.MustParseIPv6Network("2001:db8::1:0:0/ffff:ffff:ffff:0:0:ffff::"), right: xnetip.MustParseIPv6Network("2001:db8:0:1:1:1::/ffff:ffff:ffff:ffff:ffff:ffff::"), want: true},
+		{name: "two-run mask vs contiguous containing it", left: xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), right: xnetip.MustParseIPv6Network("2a02:6b8::/32"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.Intersects(testCase.right))
+		})
+	}
+}
+
+// verifies that the predicate is symmetric.
+func Test_IPv6Network_Intersects_SymmetryProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		require.Equal(t, left.Intersects(right), right.Intersects(left))
+	})
+}
+
+// verifies that the predicate answers exactly whether the
+// intersection exists.
+func Test_IPv6Network_Intersects_EquivalentToIntersectionProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		_, ok := left.Intersection(right)
+		require.Equal(t, ok, left.Intersects(right))
+	})
+}
+
+// verifies that every network intersects itself and the universe
+// intersects every network.
+func Test_IPv6Network_Intersects_ReflexiveAndUniverseProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		require.True(t, network.Intersects(network))
+		require.True(t, xnetip.IPv6Network{}.Intersects(network))
+	})
+}
+
+// verifies that containment implies intersection.
+func Test_IPv6Network_Intersects_ContainmentImpliesIntersectionProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outer := genIPv6Network.Draw(t, "outer")
+		inner := genIPv6Network.Draw(t, "inner")
+		if outer.Contains(inner) {
+			require.True(t, outer.Intersects(inner))
+		}
+	})
+}
+
+// verifies that the predicate equals shared membership on networks
+// confined to the top group.
+//
+// Both masks live in the top eight bits, so enumerating the 256
+// patterns there is exhaustive: the networks intersect exactly when
+// some address belongs to both.
+func Test_IPv6Network_Intersects_BruteForceMembershipProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		leftAddr := uint64(rapid.IntRange(0, 255).Draw(t, "left addr"))
+		leftMask := uint64(rapid.IntRange(0, 255).Draw(t, "left mask"))
+		rightAddr := uint64(rapid.IntRange(0, 255).Draw(t, "right addr"))
+		rightMask := uint64(rapid.IntRange(0, 255).Draw(t, "right mask"))
+		left, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(leftAddr<<56, 0),
+			netipAddrFrom6Bits(leftMask<<56, 0),
+		)
+		require.NoError(t, err)
+		right, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(rightAddr<<56, 0),
+			netipAddrFrom6Bits(rightMask<<56, 0),
+		)
+		require.NoError(t, err)
+		want := false
+		for x := uint64(0); x <= 255; x++ {
+			if x&leftMask == leftAddr&leftMask && x&rightMask == rightAddr&rightMask {
+				want = true
+				break
+			}
+		}
+		require.Equal(t, want, left.Intersects(right))
+	})
+}
+
+// verifies that lifting two IPv4 networks into IPv6 space preserves
+// intersection, the property dual-stack comparisons rely on.
+func Test_IPv6Network_Intersects_IPv4MappedEquivalenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		require.Equal(
+			t,
+			left.Intersects(right),
+			left.ToIPv6Mapped().Intersects(right.ToIPv6Mapped()),
+		)
+	})
+}
+
+// verifies that on contiguous networks the predicate agrees with the
+// net/netip overlap rule.
+func Test_IPv6Network_Intersects_MatchesNetipOverlapsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		leftPrefix := genIPv6Prefix.Draw(t, "left").Masked()
+		rightPrefix := genIPv6Prefix.Draw(t, "right").Masked()
+		left, ok := xnetip.IPv6NetworkFromPrefix(leftPrefix)
+		require.True(t, ok)
+		right, ok := xnetip.IPv6NetworkFromPrefix(rightPrefix)
+		require.True(t, ok)
+		require.Equal(t, leftPrefix.Overlaps(rightPrefix), left.Intersects(right))
+	})
+}
+
+// verifies that the predicate allocates nothing.
+func Test_IPv6Network_Intersects_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseIPv6Network("2001::1/ffff::ffff")
+	right := xnetip.MustParseIPv6Network("2001:1::/32")
+	requireNoAllocs(t, func() { okSink = left.Intersects(right) })
+}
+
+func BenchmarkIPv6Network_Intersects_Contiguous(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/32")
+	right := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.Intersects(right)
+	}
+}
+
+func BenchmarkIPv6Network_Intersects_Disjoint(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/32")
+	right := xnetip.MustParseIPv6Network("fe80::/10")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.Intersects(right)
+	}
+}
+
+func BenchmarkIPv6Network_Intersects_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001::1/ffff::ffff")
+	right := xnetip.MustParseIPv6Network("2001:1::/32")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.Intersects(right)
+	}
+}
+
 // verifies that exactly the masks made of leading ones followed by
 // zeros are contiguous, the all-zero and all-ones masks included.
 //

@@ -281,6 +281,19 @@ func (m IPv6Network) Intersection(other IPv6Network) (IPv6Network, bool) {
 	}, true
 }
 
+// Intersects reports whether the two networks share at least one
+// address.
+//
+// Two networks intersect when their addresses agree on every bit that
+// both masks constrain. The check is equivalent to Intersection
+// returning ok, and holds for non-contiguous masks. A network always
+// intersects itself and the unspecified network ::/0 intersects
+// everything.
+func (m IPv6Network) Intersects(other IPv6Network) bool {
+	_, ok := m.Intersection(other)
+	return ok
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //
