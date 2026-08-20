@@ -336,6 +336,7 @@ var (
 	network6Sink  xnetip.IPv6Network
 	ipNetworkSink xnetip.IPNetwork
 	addrSink      netip.Addr
+	prefixSink    netip.Prefix
 	okSink        bool
 	errSink       error
 )

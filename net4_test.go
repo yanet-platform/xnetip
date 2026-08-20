@@ -1609,3 +1609,199 @@ func Test_IPv4Network_MarshalText_SingleAllocation(t *testing.T) {
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = contiguous.MarshalText() })))
 	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = nonContiguous.MarshalText() })))
 }
+
+// verifies that a valid IPv4 netip.Prefix converts into the network
+// with the same address set, host bits cleared.
+func Test_IPv4NetworkFromPrefix_ConvertsValidPrefixes(t *testing.T) {
+	cases := []struct {
+		name   string
+		prefix netip.Prefix
+		want   xnetip.IPv4Network
+	}{
+		{
+			name:   "already masked /8",
+			prefix: netip.MustParsePrefix("10.0.0.0/8"),
+			want:   xnetip.MustParseIPv4Network("10.0.0.0/8"),
+		},
+		{
+			name:   "host bits cleared",
+			prefix: netip.MustParsePrefix("10.1.2.3/8"),
+			want:   xnetip.MustParseIPv4Network("10.0.0.0/8"),
+		},
+		{
+			name:   "/0 is the zero value",
+			prefix: netip.MustParsePrefix("0.0.0.0/0"),
+			want:   xnetip.IPv4Network{},
+		},
+		{
+			name:   "host route /32",
+			prefix: netip.MustParsePrefix("10.0.0.1/32"),
+			want:   xnetip.MustParseIPv4Network("10.0.0.1/32"),
+		},
+		{
+			name:   "unmasked PrefixFrom input",
+			prefix: netip.PrefixFrom(netip.MustParseAddr("192.168.1.7"), 24),
+			want:   xnetip.MustParseIPv4Network("192.168.1.0/24"),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, ok := xnetip.IPv4NetworkFromPrefix(testCase.prefix)
+			require.True(t, ok)
+			require.Equal(t, testCase.want, network)
+		})
+	}
+}
+
+// verifies that the invalid zero prefix and any prefix whose address
+// is not Is4, the IPv4-mapped form included, are rejected.
+func Test_IPv4NetworkFromPrefix_RejectsInvalidAndForeignFamily(t *testing.T) {
+	cases := []struct {
+		name   string
+		prefix netip.Prefix
+	}{
+		{name: "invalid zero prefix", prefix: netip.Prefix{}},
+		{name: "IPv6 prefix", prefix: netip.MustParsePrefix("2001:db8::/32")},
+		{name: "IPv4-mapped prefix is IPv6", prefix: netip.MustParsePrefix("::ffff:10.0.0.0/104")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network, ok := xnetip.IPv4NetworkFromPrefix(testCase.prefix)
+			require.False(t, ok)
+			require.Equal(t, xnetip.IPv4Network{}, network)
+		})
+	}
+}
+
+// verifies that a contiguous network converts to the already-masked
+// netip.Prefix carrying the same address set.
+func Test_IPv4Network_Prefix_ContiguousForms(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+		want    netip.Prefix
+	}{
+		{
+			name:    "/24",
+			network: xnetip.MustParseIPv4Network("192.168.0.0/24"),
+			want:    netip.MustParsePrefix("192.168.0.0/24"),
+		},
+		{
+			name:    "universe /0",
+			network: xnetip.MustParseIPv4Network("0.0.0.0/0"),
+			want:    netip.MustParsePrefix("0.0.0.0/0"),
+		},
+		{
+			name:    "host route /32 is a single IP",
+			network: xnetip.MustParseIPv4Network("10.0.0.1/32"),
+			want:    netip.MustParsePrefix("10.0.0.1/32"),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.True(t, ok)
+			require.Equal(t, testCase.want, prefix)
+			require.Equal(t, prefix.Masked(), prefix)
+		})
+	}
+	singleIP, ok := xnetip.MustParseIPv4Network("10.0.0.1/32").Prefix()
+	require.True(t, ok)
+	require.True(t, singleIP.IsSingleIP())
+}
+
+// verifies that a non-contiguous mask has no prefix form and answers
+// the invalid zero netip.Prefix.
+func Test_IPv4Network_Prefix_NonContiguousHasNone(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+	}{
+		{name: "two runs", network: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")},
+		{name: "alternating", network: xnetip.MustParseIPv4Network("170.85.170.85/170.85.170.85")},
+		{name: "single low bit", network: xnetip.MustParseIPv4Network("0.0.0.0/0.0.0.1")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prefix, ok := testCase.network.Prefix()
+			require.False(t, ok)
+			require.Equal(t, netip.Prefix{}, prefix)
+		})
+	}
+}
+
+// verifies that any valid IPv4 prefix converts and converts back to
+// its masked self, with the result normalized and contiguous.
+func Test_IPv4NetworkFromPrefix_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		stdPrefix := genIPv4Prefix.Draw(t, "prefix")
+		network, ok := xnetip.IPv4NetworkFromPrefix(stdPrefix)
+		require.True(t, ok)
+		require.True(t, network.IsContiguous())
+		require.Equal(t, stdPrefix.Masked().Addr(), network.Addr())
+		back, ok := network.Prefix()
+		require.True(t, ok)
+		require.Equal(t, stdPrefix.Masked(), back)
+	})
+}
+
+// verifies that a prefix form exists exactly for contiguous masks,
+// whatever the drawn mask shape.
+func Test_IPv4Network_Prefix_SomeIffContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		prefix, ok := network.Prefix()
+		require.Equal(t, network.IsContiguous(), ok)
+		if !ok {
+			require.Equal(t, netip.Prefix{}, prefix)
+		}
+	})
+}
+
+// verifies that a contiguous network survives the round trip through
+// netip.Prefix unchanged.
+func Test_IPv4Network_Prefix_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		stdPrefix, ok := network.Prefix()
+		if !ok {
+			return
+		}
+		back, ok := xnetip.IPv4NetworkFromPrefix(stdPrefix)
+		require.True(t, ok)
+		require.Equal(t, network, back)
+	})
+}
+
+// verifies that the converted prefix length agrees with the network's
+// own prefix length, the net/netip view of the same mask.
+func Test_IPv4Network_Prefix_BitsMatchPrefixLenProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		stdPrefix, ok := network.Prefix()
+		if !ok {
+			return
+		}
+		bits, bitsOk := network.PrefixLen()
+		require.True(t, bitsOk)
+		require.Equal(t, bits, stdPrefix.Bits())
+	})
+}
+
+// verifies that both conversion directions allocate nothing on any
+// outcome.
+func Test_IPv4NetworkFromPrefix_AllocationFree(t *testing.T) {
+	valid := netip.MustParsePrefix("10.0.0.0/8")
+	foreign := netip.MustParsePrefix("2001:db8::/32")
+	requireNoAllocs(t, func() { networkSink, okSink = xnetip.IPv4NetworkFromPrefix(valid) })
+	requireNoAllocs(t, func() { networkSink, okSink = xnetip.IPv4NetworkFromPrefix(foreign) })
+}
+
+// verifies that converting out to a netip.Prefix allocates nothing,
+// whatever the mask's shape.
+func Test_IPv4Network_Prefix_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseIPv4Network("192.168.0.0/24")
+	nonContiguous := xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0")
+	requireNoAllocs(t, func() { prefixSink, okSink = contiguous.Prefix() })
+	requireNoAllocs(t, func() { prefixSink, okSink = nonContiguous.Prefix() })
+}
