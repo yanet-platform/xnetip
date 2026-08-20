@@ -166,11 +166,81 @@ var genIPv4Prefix = rapid.Custom(func(t *rapid.T) netip.Prefix {
 	return netip.PrefixFrom(address, bits)
 })
 
+// genIPv6Network draws an IPv6 network through the total integer
+// constructor, asserting every draw normalized.
+//
+// The address is uniform and the mask comes from fixed-weight shapes:
+// contiguous prefixes of every length, random patterns, the alternating
+// patterns, the all-zero universe mask, the all-ones host route, the
+// two half-word masks and two-run masks whose set runs straddle bit 64
+// — the IPv6-specific shape that catches a half-word mixup, drawn
+// explicitly because shrinking rarely lands on it. The normalization
+// assertion makes every property test that draws a network inherit the
+// invariant check of the type's birth session.
+var genIPv6Network = rapid.Custom(func(t *rapid.T) xnetip.IPv6Network {
+	addrHi := rapid.Uint64().Draw(t, "addr hi")
+	addrLo := rapid.Uint64().Draw(t, "addr lo")
+	var maskHi, maskLo uint64
+	switch rapid.IntRange(0, 9).Draw(t, "mask shape") {
+	case 0, 1, 2:
+		prefix := rapid.IntRange(0, 128).Draw(t, "prefix")
+		if prefix <= 64 {
+			maskHi = ^uint64(0) << (64 - prefix)
+		} else {
+			maskHi = ^uint64(0)
+			maskLo = ^uint64(0) << (128 - prefix)
+		}
+	case 3, 4:
+		maskHi = rapid.Uint64().Draw(t, "mask hi")
+		maskLo = rapid.Uint64().Draw(t, "mask lo")
+	case 5:
+		alternating := rapid.SampledFrom([]uint64{0xAAAAAAAAAAAAAAAA, 0x5555555555555555}).Draw(t, "alternating")
+		maskHi, maskLo = alternating, alternating
+	case 6:
+		maskHi, maskLo = 0, 0
+	case 7:
+		maskHi, maskLo = ^uint64(0), ^uint64(0)
+	case 8:
+		if rapid.Bool().Draw(t, "high half") {
+			maskHi = ^uint64(0)
+		} else {
+			maskLo = ^uint64(0)
+		}
+	default:
+		straddleHigh := rapid.IntRange(1, 32).Draw(t, "straddle bits above 64")
+		straddleLow := rapid.IntRange(1, 32).Draw(t, "straddle bits below 64")
+		maskHi = 0xFF00000000000000 | ^uint64(0)>>(64-straddleHigh)
+		maskLo = ^uint64(0) << (64 - straddleLow)
+	}
+	network := xnetip.IPv6NetworkFromBits(addrHi, addrLo, maskHi, maskLo)
+	networkAddrHi, networkAddrLo, networkMaskHi, networkMaskLo := network.Bits()
+	require.Equal(t, networkAddrHi&networkMaskHi, networkAddrHi, "network high half not normalized")
+	require.Equal(t, networkAddrLo&networkMaskLo, networkAddrLo, "network low half not normalized")
+	require.Equal(t, maskHi, networkMaskHi, "mask high half not preserved")
+	require.Equal(t, maskLo, networkMaskLo, "mask low half not preserved")
+	return network
+})
+
+// genIPv6Prefix draws a valid Is6 netip.Prefix with the address left
+// unmasked and the length uniform over 0 through 128.
+//
+// It exists for differential tests against net/netip on contiguous
+// networks: the prefix carries the same information as a contiguous
+// network, with std as the oracle for normalization, containment and
+// formatting.
+var genIPv6Prefix = rapid.Custom(func(t *rapid.T) netip.Prefix {
+	address := genNetipAddr6.Draw(t, "addr")
+	bits := rapid.IntRange(0, 128).Draw(t, "bits")
+	return netip.PrefixFrom(address, bits)
+})
+
 // Sinks keep the measured closures' results alive, so the compiler cannot
 // optimise the work under test away.
 var (
-	wordSink    uint32
-	bytesSink   []byte
-	networkSink xnetip.IPv4Network
-	addrSink    netip.Addr
+	wordSink     uint32
+	word64Sink   uint64
+	bytesSink    []byte
+	networkSink  xnetip.IPv4Network
+	network6Sink xnetip.IPv6Network
+	addrSink     netip.Addr
 )

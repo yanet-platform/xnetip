@@ -1,0 +1,68 @@
+package xnetip
+
+import "net/netip"
+
+// IPv6Network is an IPv6 network: an address and a mask of arbitrary
+// shape.
+//
+// The mask need not be contiguous (ffff:0:ffff:: is a valid mask). The
+// address is always normalized, every bit outside the mask is zero, so
+// two values describing the same address set compare equal with ==. The
+// zero value is ::/0, the network of every IPv6 address. Values are
+// immutable and safe to copy.
+type IPv6Network struct {
+	addr ipv6Addr
+	mask ipv6Addr
+}
+
+// IPv6NetworkFrom returns the network with the given address and mask.
+//
+// The address is normalized by the mask:
+// 2a02:6b8:c00:1:2:3:4:5/ffff:ffff:ff00:: becomes
+// 2a02:6b8:c00::/ffff:ffff:ff00::. Any mask bit pattern is accepted.
+// Both arguments must be Is6 addresses (an IPv4-mapped address is IPv6
+// and converts as its 16-byte form, a zone is dropped silently): an Is4
+// address or the invalid zero netip.Addr is rejected with
+// ErrAddrFamilyMismatch.
+func IPv6NetworkFrom(addr, mask netip.Addr) (IPv6Network, error) {
+	addrKernel, addrOk := ipv6AddrFromNetip(addr)
+	maskKernel, maskOk := ipv6AddrFromNetip(mask)
+	if !addrOk || !maskOk {
+		input := addr.String() + "/" + mask.String()
+		return IPv6Network{}, wrapParseError("IPv6NetworkFrom", input, ErrAddrFamilyMismatch, nil)
+	}
+	addrHi, addrLo := addrKernel.Bits()
+	maskHi, maskLo := maskKernel.Bits()
+	return IPv6NetworkFromBits(addrHi, addrLo, maskHi, maskLo), nil
+}
+
+// IPv6NetworkFromBits returns the network for host-order address and
+// mask halves, high 64 bits first.
+//
+// The address is normalized by the mask, as in IPv6NetworkFrom. It is
+// the total integer fast path: every input is a valid network.
+func IPv6NetworkFromBits(addrHi, addrLo, maskHi, maskLo uint64) IPv6Network {
+	mask := uint128FromHalves(maskHi, maskLo)
+	return IPv6Network{
+		addr: ipv6Addr{uint128FromHalves(addrHi, addrLo).And(mask)},
+		mask: ipv6Addr{mask},
+	}
+}
+
+// Addr returns the network address (already normalized by the mask) as
+// an Is6 netip.Addr.
+func (m IPv6Network) Addr() netip.Addr {
+	return m.addr.Netip()
+}
+
+// Mask returns the network mask as an Is6 netip.Addr.
+func (m IPv6Network) Mask() netip.Addr {
+	return m.mask.Netip()
+}
+
+// Bits returns the address and the mask as host-order 64-bit halves.
+func (m IPv6Network) Bits() (addrHi, addrLo, maskHi, maskLo uint64) {
+	addrHi, addrLo = m.addr.Bits()
+	maskHi, maskLo = m.mask.Bits()
+	return addrHi, addrLo, maskHi, maskLo
+}
