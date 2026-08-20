@@ -115,6 +115,19 @@ func (m IPv4Network) Compare(other IPv4Network) int {
 	return m.mask.Compare(other.mask)
 }
 
+// IsContiguous reports whether the mask is a CIDR prefix mask: a run
+// of leading one bits followed only by zero bits.
+//
+// The all-zero mask (/0) and the all-ones mask (/32) are both
+// contiguous. Any mask with a one bit after a zero bit, such as
+// 255.0.255.0, is not.
+func (m IPv4Network) IsContiguous() bool {
+	mask := m.mask.Bits()
+	// The or with the predecessor fills exactly the trailing zeros:
+	// all ones iff no zero sits above the lowest set bit, zero wraps.
+	return mask|(mask-1) == ^uint32(0)
+}
+
 // ToIPv6Mapped returns this network as an IPv4-mapped IPv6 network.
 //
 // The address becomes ::ffff:a.b.c.d and the mask keeps the upper 96

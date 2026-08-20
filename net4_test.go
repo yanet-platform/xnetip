@@ -647,3 +647,107 @@ func BenchmarkIPv4Network_SortFunc_1024(b *testing.B) {
 		slices.SortFunc(networks, xnetip.IPv4Network.Compare)
 	}
 }
+
+// verifies that exactly the masks made of leading ones followed by
+// zeros are contiguous, the all-zero and all-ones masks included.
+func Test_IPv4Network_IsContiguous_LeadingOnesRunOnly(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+		want    bool
+	}{
+		{name: "universe /0", network: mustIPv4Network(t, "0.0.0.0", "0.0.0.0"), want: true},
+		{name: "/19", network: mustIPv4Network(t, "213.180.192.0", "255.255.224.0"), want: true},
+		{name: "/24", network: mustIPv4Network(t, "192.168.0.0", "255.255.255.0"), want: true},
+		{name: "single leading bit /1", network: mustIPv4Network(t, "128.0.0.0", "128.0.0.0"), want: true},
+		{name: "/31", network: mustIPv4Network(t, "10.0.0.2", "255.255.255.254"), want: true},
+		{name: "host route /32", network: mustIPv4Network(t, "10.0.0.1", "255.255.255.255"), want: true},
+		{name: "zero value is the universe", network: xnetip.IPv4Network{}, want: true},
+		{name: "top bit clear, rest set", network: mustIPv4Network(t, "0.0.0.0", "127.255.255.255"), want: false},
+		{name: "trailing-only bits", network: mustIPv4Network(t, "0.0.0.1", "0.0.0.255"), want: false},
+		{name: "hole in the third octet", network: mustIPv4Network(t, "213.180.0.192", "255.255.0.255"), want: false},
+		{name: "two runs", network: mustIPv4Network(t, "192.168.0.1", "255.0.255.0"), want: false},
+		{name: "leading zero octet", network: mustIPv4Network(t, "0.0.0.0", "0.255.255.255"), want: false},
+		{name: "alternating", network: mustIPv4Network(t, "170.85.170.85", "170.85.170.85"), want: false},
+		{name: "single isolated bit in the middle", network: mustIPv4Network(t, "0.0.0.0", "0.0.1.0"), want: false},
+		{name: "bench non-contiguous shape", network: mustIPv4Network(t, "192.168.0.1", "255.255.0.255"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.IsContiguous())
+		})
+	}
+}
+
+// verifies that the predicate agrees with the brute-force bit scan:
+// contiguous means no one bit after a zero bit, top to bottom.
+func Test_IPv4Network_IsContiguous_MatchesBitScanProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		maskBytes := network.Mask().As4()
+		maskBits := binary.BigEndian.Uint32(maskBytes[:])
+		want := true
+		seenZero := false
+		for idx := range 32 {
+			bit := maskBits>>(31-idx)&1 == 1
+			if bit && seenZero {
+				want = false
+			}
+			if !bit {
+				seenZero = true
+			}
+		}
+		require.Equal(t, want, network.IsContiguous())
+	})
+}
+
+// verifies that every network built from a prefix length is
+// contiguous and round-trips its length through the netip oracle.
+func Test_IPv4Network_IsContiguous_PrefixMasksAreContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr")
+		bits := rapid.IntRange(0, 32).Draw(t, "bits")
+		network, err := xnetip.IPv4NetworkFromCIDR(addr, bits)
+		require.NoError(t, err)
+		require.True(t, network.IsContiguous())
+		require.Equal(t, bits, netip.PrefixFrom(network.Addr(), bits).Bits())
+	})
+}
+
+// verifies that clearing a non-final bit of a leading run of two or
+// more ones breaks contiguity: some run bit stays below the hole.
+func Test_IPv4Network_IsContiguous_HolePunchedMaskProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefix := rapid.IntRange(2, 32).Draw(t, "prefix")
+		hole := rapid.IntRange(0, prefix-2).Draw(t, "hole")
+		maskBits := ^uint32(0) << (32 - prefix) &^ (uint32(1) << (31 - hole))
+		network, err := xnetip.IPv4NetworkFrom(
+			genNetipAddr4.Draw(t, "addr"),
+			netipAddrFrom4Bits(maskBits),
+		)
+		require.NoError(t, err)
+		require.False(t, network.IsContiguous())
+	})
+}
+
+// verifies that the predicate allocates nothing.
+func Test_IPv4Network_IsContiguous_AllocationFree(t *testing.T) {
+	network := mustIPv4Network(t, "192.168.0.0", "255.255.0.0")
+	requireNoAllocs(t, func() { okSink = network.IsContiguous() })
+}
+
+func BenchmarkIPv4Network_IsContiguous_Contiguous(b *testing.B) {
+	network := mustIPv4Network(b, "192.168.0.0", "255.255.0.0")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = network.IsContiguous()
+	}
+}
+
+func BenchmarkIPv4Network_IsContiguous_NonContiguous(b *testing.B) {
+	network := mustIPv4Network(b, "192.168.0.1", "255.255.0.255")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = network.IsContiguous()
+	}
+}
