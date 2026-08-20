@@ -3463,3 +3463,329 @@ func Test_IPv6Network_NumHostBits_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { intSink = contiguous.NumHostBits() })
 	requireNoAllocs(t, func() { intSink = nonContiguous.NumHostBits() })
 }
+
+// ipv6NetworkBits returns the network's address and mask as host-order
+// 64-bit halves, the form the bit-level oracles compute in.
+func ipv6NetworkBits(network xnetip.IPv6Network) (addrHi, addrLo, maskHi, maskLo uint64) {
+	addrBytes := network.Addr().As16()
+	maskBytes := network.Mask().As16()
+	addrHi = binary.BigEndian.Uint64(addrBytes[:8])
+	addrLo = binary.BigEndian.Uint64(addrBytes[8:])
+	maskHi = binary.BigEndian.Uint64(maskBytes[:8])
+	maskLo = binary.BigEndian.Uint64(maskBytes[8:])
+	return addrHi, addrLo, maskHi, maskLo
+}
+
+// mergeReferenceIPv6 is the simple merge oracle.
+//
+// Equal networks merge to themselves, equal-mask single-bit siblings
+// drop the differing bit through the adjacency predicate, and
+// containment either way returns the container.
+func mergeReferenceIPv6(t require.TestingT, left, right xnetip.IPv6Network) (xnetip.IPv6Network, bool) {
+	if left == right {
+		return left, true
+	}
+	if left.Mask() == right.Mask() {
+		if !left.IsAdjacent(right) {
+			return xnetip.IPv6Network{}, false
+		}
+		leftAddrHi, leftAddrLo, leftMaskHi, leftMaskLo := ipv6NetworkBits(left)
+		rightAddrHi, rightAddrLo, _, _ := ipv6NetworkBits(right)
+		maskHi := leftMaskHi ^ (leftAddrHi ^ rightAddrHi)
+		maskLo := leftMaskLo ^ (leftAddrLo ^ rightAddrLo)
+		merged, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(leftAddrHi&maskHi, leftAddrLo&maskLo),
+			netipAddrFrom6Bits(maskHi, maskLo),
+		)
+		require.NoError(t, err)
+		return merged, true
+	}
+	if left.Contains(right) {
+		return left, true
+	}
+	if right.Contains(left) {
+		return right, true
+	}
+	return xnetip.IPv6Network{}, false
+}
+
+// verifies that merging succeeds exactly for duplicates, single-bit
+// siblings and containment, and returns the union network.
+//
+// The half-boundary rows pin the single-bit test and the xor across
+// bit 64, where the difference or the reduced mask crosses the
+// 64-bit halves of the word.
+func Test_IPv6Network_Merge_UnitAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  xnetip.IPv6Network
+		ok    bool
+	}{
+		{name: "identical", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/48"), want: xnetip.MustParseIPv6Network("2001:db8::/48"), ok: true},
+		{name: "contiguous siblings", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8:1::/48"), want: xnetip.MustParseIPv6Network("2001:db8::/47"), ok: true},
+		{name: "contiguous siblings reversed", left: xnetip.MustParseIPv6Network("2001:db8:1::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/48"), want: xnetip.MustParseIPv6Network("2001:db8::/47"), ok: true},
+		{name: "containment returns the container", left: xnetip.MustParseIPv6Network("2001:db8::/32"), right: xnetip.MustParseIPv6Network("2001:db8:1::/48"), want: xnetip.MustParseIPv6Network("2001:db8::/32"), ok: true},
+		{name: "containment reversed", left: xnetip.MustParseIPv6Network("2001:db8:1::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: xnetip.MustParseIPv6Network("2001:db8::/32"), ok: true},
+		{name: "same mask, two differing bits", left: xnetip.MustParseIPv6Network("2001:db8::/48"), right: xnetip.MustParseIPv6Network("2001:db8:5::/48"), ok: false},
+		{name: "comparable masks, address mismatch", left: xnetip.MustParseIPv6Network("2001:db8::/32"), right: xnetip.MustParseIPv6Network("2001:beef:1::/48"), ok: false},
+		{name: "comparable masks, address mismatch reversed", left: xnetip.MustParseIPv6Network("2001:beef:1::/48"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), ok: false},
+		{name: "/64 siblings at bit 64", left: xnetip.MustParseIPv6Network("2001:db8:0:0::/64"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/64"), want: xnetip.MustParseIPv6Network("2001:db8::/63"), ok: true},
+		{name: "/65 siblings at bit 63", left: xnetip.MustParseIPv6Network("2001:db8::/65"), right: xnetip.MustParseIPv6Network("2001:db8:0:0:8000::/65"), want: xnetip.MustParseIPv6Network("2001:db8::/64"), ok: true},
+		{name: "/65 siblings at bit 64 give a non-contiguous mask", left: xnetip.MustParseIPv6Network("2001:db8::/65"), right: xnetip.MustParseIPv6Network("2001:db8:0:1::/65"), want: xnetip.MustParseIPv6Network("2001:db8::/ffff:ffff:ffff:fffe:8000::"), ok: true},
+		{name: "host routes differing in bit 0", left: xnetip.MustParseIPv6Network("2001:db8::/128"), right: xnetip.MustParseIPv6Network("2001:db8::1/128"), want: xnetip.MustParseIPv6Network("2001:db8::/127"), ok: true},
+		{name: "default route absorbs any network", left: xnetip.MustParseIPv6Network("::/0"), right: xnetip.MustParseIPv6Network("2001:db8::/32"), want: xnetip.MustParseIPv6Network("::/0"), ok: true},
+		{name: "top-bit siblings give the default route", left: xnetip.MustParseIPv6Network("::/1"), right: xnetip.MustParseIPv6Network("8000::/1"), want: xnetip.MustParseIPv6Network("::/0"), ok: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			merged, ok := testCase.left.Merge(testCase.right)
+			require.Equal(t, testCase.ok, ok)
+			require.Equal(t, testCase.want, merged)
+		})
+	}
+}
+
+// verifies that merging follows the mask bit pattern: only comparable
+// masks or single-bit siblings combine, wherever the bits sit.
+func Test_IPv6Network_Merge_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv6Network
+		right xnetip.IPv6Network
+		want  xnetip.IPv6Network
+		ok    bool
+	}{
+		{name: "pattern siblings at bit 104", left: xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff"), right: xnetip.MustParseIPv6Network("2001:100::1/ffff:ff00::ffff"), want: xnetip.MustParseIPv6Network("2001::1/ffff:fe00::ffff"), ok: true},
+		{name: "pattern siblings at bit 104 reversed", left: xnetip.MustParseIPv6Network("2001:100::1/ffff:ff00::ffff"), right: xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff"), want: xnetip.MustParseIPv6Network("2001::1/ffff:fe00::ffff"), ok: true},
+		{name: "pattern with two differing bits", left: xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff"), right: xnetip.MustParseIPv6Network("2001:300::1/ffff:ff00::ffff"), ok: false},
+		{name: "two-run siblings in the low run", left: xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), right: xnetip.MustParseIPv6Network("2a02:6b8:c00::1235:0:0/ffff:ffff:ff00::ffff:ffff:0:0"), want: xnetip.MustParseIPv6Network("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:fffe:0:0"), ok: true},
+		{name: "incomparable non-contiguous masks", left: xnetip.MustParseIPv6Network("2001:db8::1/ffff:0:ffff::"), right: xnetip.MustParseIPv6Network("2001:db8::1/0:ffff:ffff::"), ok: false},
+		{name: "two-run mask contains a contiguous block", left: xnetip.MustParseIPv6Network("2a02:6b8::5:6:0:0/ffff:ffff::ffff:ffff:0:0"), right: xnetip.MustParseIPv6Network("2a02:6b8:1:2:5:6::/96"), want: xnetip.MustParseIPv6Network("2a02:6b8::5:6:0:0/ffff:ffff::ffff:ffff:0:0"), ok: true},
+		{name: "two-run mask contains a contiguous block reversed", left: xnetip.MustParseIPv6Network("2a02:6b8:1:2:5:6::/96"), right: xnetip.MustParseIPv6Network("2a02:6b8::5:6:0:0/ffff:ffff::ffff:ffff:0:0"), want: xnetip.MustParseIPv6Network("2a02:6b8::5:6:0:0/ffff:ffff::ffff:ffff:0:0"), ok: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			merged, ok := testCase.left.Merge(testCase.right)
+			require.Equal(t, testCase.ok, ok)
+			require.Equal(t, testCase.want, merged)
+		})
+	}
+}
+
+// verifies that the nine reference pairs, one per branch of the case
+// analysis, agree with the simple oracle.
+func Test_IPv6Network_Merge_ReferenceFixedCases(t *testing.T) {
+	cases := [][2]string{
+		{"2001:db8::/48", "2001:db8::/48"},
+		{"2001:db8::/48", "2001:db8:1::/48"},
+		{"2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0", "2a02:6b8:c00::1235:0:0/ffff:ffff:ff00::ffff:ffff:0:0"},
+		{"2001:db8::/48", "2001:db8:5::/48"},
+		{"2001:db8::/32", "2001:db8:1::/48"},
+		{"2001:db8:1::/48", "2001:db8::/32"},
+		{"2001:db8::/32", "2001:beef:1::/48"},
+		{"2001:beef:1::/48", "2001:db8::/32"},
+		{"2001:db8::1/ffff:0:ffff::", "2001:db8::1/0:ffff:ffff::"},
+	}
+	for _, pair := range cases {
+		left := xnetip.MustParseIPv6Network(pair[0])
+		right := xnetip.MustParseIPv6Network(pair[1])
+		wantNetwork, wantOK := mergeReferenceIPv6(t, left, right)
+		merged, ok := left.Merge(right)
+		require.Equal(t, wantOK, ok, "pair %v", pair)
+		require.Equal(t, wantNetwork, merged, "pair %v", pair)
+	}
+}
+
+// verifies that merging agrees with the simple oracle on random pairs.
+func Test_IPv6Network_Merge_MatchesReferenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		wantNetwork, wantOK := mergeReferenceIPv6(t, left, right)
+		merged, ok := left.Merge(right)
+		require.Equal(t, wantOK, ok)
+		require.Equal(t, wantNetwork, merged)
+	})
+}
+
+// verifies that merging is commutative in both the value and the flag.
+func Test_IPv6Network_Merge_CommutativityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		leftMerged, leftOK := left.Merge(right)
+		rightMerged, rightOK := right.Merge(left)
+		require.Equal(t, leftOK, rightOK)
+		require.Equal(t, leftMerged, rightMerged)
+	})
+}
+
+// verifies that a network merged with itself is itself: aggregation
+// leans on this path to absorb duplicates.
+func Test_IPv6Network_Merge_SelfIsSelfProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		merged, ok := network.Merge(network)
+		require.True(t, ok)
+		require.Equal(t, network, merged)
+	})
+}
+
+// verifies that a successful merge contains both inputs and returns a
+// normalized network.
+func Test_IPv6Network_Merge_ResultContainsBothAndNormalizedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		merged, ok := left.Merge(right)
+		if !ok {
+			return
+		}
+		require.True(t, merged.Contains(left))
+		require.True(t, merged.Contains(right))
+		addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(merged)
+		require.Equal(t, addrHi, addrHi&maskHi)
+		require.Equal(t, addrLo, addrLo&maskLo)
+	})
+}
+
+// verifies on an 8-bit model, networks confined to the top octet, that
+// a successful merge holds exactly the union of the two address sets.
+func Test_IPv6Network_Merge_MembershipBruteForceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		leftAddr := uint64(rapid.IntRange(0, 255).Draw(t, "left addr")) << 56
+		leftMask := uint64(rapid.IntRange(0, 255).Draw(t, "left mask")) << 56
+		rightAddr := uint64(rapid.IntRange(0, 255).Draw(t, "right addr")) << 56
+		rightMask := uint64(rapid.IntRange(0, 255).Draw(t, "right mask")) << 56
+		left, err := xnetip.IPv6NetworkFrom(netipAddrFrom6Bits(leftAddr, 0), netipAddrFrom6Bits(leftMask, 0))
+		require.NoError(t, err)
+		right, err := xnetip.IPv6NetworkFrom(netipAddrFrom6Bits(rightAddr, 0), netipAddrFrom6Bits(rightMask, 0))
+		require.NoError(t, err)
+		merged, ok := left.Merge(right)
+		mergedAddrHi, _, mergedMaskHi, _ := ipv6NetworkBits(merged)
+		for x := range uint64(256) {
+			candidate := x << 56
+			inLeft := candidate&leftMask == leftAddr&leftMask
+			inRight := candidate&rightMask == rightAddr&rightMask
+			inMerged := ok && candidate&mergedMaskHi == mergedAddrHi
+			require.Equal(t, ok && (inLeft || inRight), inMerged, "member 0x%016x", candidate)
+		}
+	})
+}
+
+// verifies that flipping any single masked bit builds a sibling whose
+// merge drops exactly that bit from the mask.
+//
+// The drawn bit ranges over every set mask bit, so masks straddling
+// the halves exercise flips at bits 63 and 64 alongside the ends.
+func Test_IPv6Network_Merge_ConstructedSiblingProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(network)
+		if maskHi|maskLo == 0 {
+			return
+		}
+		setBits := []int{}
+		for bit := range 128 {
+			if bit < 64 && maskLo&(1<<bit) != 0 || bit >= 64 && maskHi&(1<<(bit-64)) != 0 {
+				setBits = append(setBits, bit)
+			}
+		}
+		bit := rapid.SampledFrom(setBits).Draw(t, "bit")
+		var bitHi, bitLo uint64
+		if bit < 64 {
+			bitLo = 1 << bit
+		} else {
+			bitHi = 1 << (bit - 64)
+		}
+		sibling, err := xnetip.IPv6NetworkFrom(
+			netipAddrFrom6Bits(addrHi^bitHi, addrLo^bitLo),
+			netipAddrFrom6Bits(maskHi, maskLo),
+		)
+		require.NoError(t, err)
+		merged, ok := network.Merge(sibling)
+		require.True(t, ok)
+		require.Equal(t, netipAddrFrom6Bits(maskHi&^bitHi, maskLo&^bitLo), merged.Mask())
+		require.Equal(t, netipAddrFrom6Bits(addrHi&^bitHi, addrLo&^bitLo), merged.Addr())
+	})
+}
+
+// verifies that equal masks with neither adjacency nor equality never
+// merge: the differing bits are two or more.
+func Test_IPv6Network_Merge_SameMaskNotAdjacentNotIdenticalProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv6Network.Draw(t, "left")
+		right := genIPv6Network.Draw(t, "right")
+		if left.Mask() != right.Mask() || left == right || left.IsAdjacent(right) {
+			return
+		}
+		_, ok := left.Merge(right)
+		require.False(t, ok)
+	})
+}
+
+// verifies that merging allocates nothing on any branch.
+func Test_IPv6Network_Merge_AllocationFree(t *testing.T) {
+	sibling := xnetip.MustParseIPv6Network("2001:db8::/48")
+	buddy := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	container := xnetip.MustParseIPv6Network("2001:db8::/32")
+	contained := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	requireNoAllocs(t, func() { network6Sink, okSink = sibling.Merge(buddy) })
+	requireNoAllocs(t, func() { network6Sink, okSink = container.Merge(contained) })
+}
+
+func BenchmarkIPv6Network_Merge_EqualMaskAdjacent(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/48")
+	right := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, okSink = left.Merge(right)
+	}
+}
+
+func BenchmarkIPv6Network_Merge_EqualMaskNonMergeable(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/48")
+	right := xnetip.MustParseIPv6Network("2001:db8:5::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, okSink = left.Merge(right)
+	}
+}
+
+func BenchmarkIPv6Network_Merge_Containment(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/32")
+	right := xnetip.MustParseIPv6Network("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, okSink = left.Merge(right)
+	}
+}
+
+func BenchmarkIPv6Network_Merge_ComparableMasksAddressMismatch(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::/32")
+	right := xnetip.MustParseIPv6Network("2001:beef:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, okSink = left.Merge(right)
+	}
+}
+
+func BenchmarkIPv6Network_Merge_IncomparableMasks(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001:db8::1/ffff:0:ffff::")
+	right := xnetip.MustParseIPv6Network("2001:db8::1/0:ffff:ffff::")
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, okSink = left.Merge(right)
+	}
+}
+
+func BenchmarkIPv6Network_Merge_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseIPv6Network("2001::1/ffff:ff00::ffff")
+	right := xnetip.MustParseIPv6Network("2001:100::1/ffff:ff00::ffff")
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, okSink = left.Merge(right)
+	}
+}
