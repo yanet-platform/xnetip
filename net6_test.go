@@ -5777,3 +5777,163 @@ func BenchmarkNetwork6_SupernetFor_1024xNonContiguous(b *testing.B) {
 		network6Sink = nets[0].SupernetFor(nets[1:])
 	}
 }
+
+// verifies that the mask is truncated at its first zero bit and the
+// address re-normalized under the leading run.
+func Test_Network6_ToContiguous_TruncatesAtFirstZeroBit(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "geo mask", input: "2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0", want: "2001:db8::/40"},
+		{name: "already contiguous", input: "2001:db8::/32", want: "2001:db8::/32"},
+		{name: "universe", input: "::/0", want: "::/0"},
+		{name: "host route", input: "2001:db8::1/128", want: "2001:db8::1/128"},
+		{name: "run ends at bit 64", input: "2001:db8:1:2:3:4:5:6/ffff:ffff:ffff:ffff:0:ffff::", want: "2001:db8:1:2::/64"},
+		{name: "run crosses bit 64", input: "2001:db8:1:2:3:4:5:6/ffff:ffff:ffff:ffff:ff00:0:ffff:0", want: "2001:db8:1:2::/72"},
+		{name: "hole right below bit 64", input: "2001:db8:1:2:3:4:5:6/ffff:ffff:ffff:fffe:ffff::", want: "2001:db8:1:2::/63"},
+		{name: "mask with empty leading run", input: "::1/::ffff", want: "::/0"},
+		{name: "mapped network keeps its run", input: "::ffff:192.168.0.1/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff0f", want: "::ffff:192.168.0.0/120"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseNetwork6(testCase.input)
+			require.Equal(t, xnetip.MustParseContiguous6(testCase.want), network.ToContiguous())
+		})
+	}
+}
+
+// verifies that the zero network truncates to the zero wrapper.
+func Test_Network6_ToContiguous_ZeroValue(t *testing.T) {
+	require.Equal(t, xnetip.Contiguous[xnetip.Network6]{}, xnetip.Network6{}.ToContiguous())
+}
+
+// verifies that a non-contiguous mask keeps only its leading run of
+// ones.
+func Test_Network6_ToContiguous_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "alternating groups keep the first", input: "2001:0:db8:0:1:0:2:0/ffff:0:ffff:0:ffff:0:ffff:0", want: "2001::/16"},
+		{name: "high run then low run keeps the high one", input: "2a02:6b8::1234:0:0/ffff:ffff::ffff:ffff:0:0", want: "2a02:6b8::/32"},
+		{name: "single leading bit then noise keeps one bit", input: "8000::1/8000::1", want: "8000::/1"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseNetwork6(testCase.input)
+			require.Equal(t, xnetip.MustParseContiguous6(testCase.want), network.ToContiguous())
+		})
+	}
+}
+
+// verifies that the wrapped result of every truncation satisfies the
+// contiguity its type claims, pinning the blind wrap.
+func Test_Network6_ToContiguous_ResultContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		require.True(t, network.ToContiguous().Network().IsContiguous())
+	})
+}
+
+// verifies that truncating an already truncated network changes
+// nothing.
+func Test_Network6_ToContiguous_IdempotentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		block := network.ToContiguous()
+		require.Equal(t, block, block.Network().ToContiguous())
+	})
+}
+
+// verifies that the result's prefix length equals the number of
+// leading one bits of the input mask.
+func Test_Network6_ToContiguous_PrefixIsLeadingOnesProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		prefixLen, ok := network.ToContiguous().Network().PrefixLen()
+		require.True(t, ok)
+		count := 0
+	counting:
+		for _, octet := range network.Mask().As16() {
+			for bit := 7; bit >= 0; bit-- {
+				if octet&(1<<bit) == 0 {
+					break counting
+				}
+				count++
+			}
+		}
+		require.Equal(t, count, prefixLen)
+	})
+}
+
+// verifies that the block always contains the network it widened.
+func Test_Network6_ToContiguous_ContainsOriginalProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		require.True(t, network.ToContiguous().Network().Contains(network))
+	})
+}
+
+// verifies that on contiguous input the widening conversion equals
+// the exact one and changes nothing.
+func Test_Network6_ToContiguous_AgreesWithContiguousFromProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := genContiguous6.Draw(t, "block")
+		require.Equal(t, block, block.Network().ToContiguous())
+		exact, ok := xnetip.ContiguousFrom(block.Network())
+		require.True(t, ok)
+		require.Equal(t, exact, block.Network().ToContiguous())
+	})
+}
+
+// verifies that the truncated network holds no address bit outside
+// its mask.
+func Test_Network6_ToContiguous_ResultNormalizedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		addrHi, addrLo, maskHi, maskLo := ipv6NetworkBits(network.ToContiguous().Network())
+		require.Equal(t, addrHi&maskHi, addrHi)
+		require.Equal(t, addrLo&maskLo, addrLo)
+	})
+}
+
+// verifies that the result agrees with the std masked prefix of the
+// input address under the truncated length.
+func Test_Network6_ToContiguous_MatchesNetipMaskedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		block := network.ToContiguous()
+		prefixLen, ok := block.Network().PrefixLen()
+		require.True(t, ok)
+		prefix, ok := block.Network().Prefix()
+		require.True(t, ok)
+		require.Equal(t, netip.PrefixFrom(network.Addr(), prefixLen).Masked(), prefix)
+	})
+}
+
+// verifies that truncation allocates nothing for either mask shape.
+func Test_Network6_ToContiguous_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseNetwork6("2001:db8::/32")
+	nonContiguous := xnetip.MustParseNetwork6("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")
+	requireNoAllocs(t, func() { contiguous6Sink = contiguous.ToContiguous() })
+	requireNoAllocs(t, func() { contiguous6Sink = nonContiguous.ToContiguous() })
+}
+
+func BenchmarkNetwork6_ToContiguous_Contiguous(b *testing.B) {
+	network := xnetip.MustParseNetwork6("2001:db8::/32")
+	b.ReportAllocs()
+	for b.Loop() {
+		contiguous6Sink = network.ToContiguous()
+	}
+}
+
+func BenchmarkNetwork6_ToContiguous_NonContiguous(b *testing.B) {
+	network := xnetip.MustParseNetwork6("2001:db8::1/ffff:ffff:ff00::ffff:ffff:0:0")
+	b.ReportAllocs()
+	for b.Loop() {
+		contiguous6Sink = network.ToContiguous()
+	}
+}

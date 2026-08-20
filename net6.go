@@ -707,6 +707,21 @@ func (m Network6) Prefix() (netip.Prefix, bool) {
 	return netip.PrefixFrom(m.Addr(), bits), true
 }
 
+// ToContiguous returns the CIDR block whose mask is the leading run
+// of one bits of this mask, with the address normalized under it.
+//
+// A contiguous network comes back wrapped unchanged. For a
+// non-contiguous mask every one bit after the first zero bit is
+// cleared, so the block is spanned by the leading run and contains
+// every address of this network. The exact, non-widening conversion
+// is ContiguousFrom.
+func (m Network6) ToContiguous() Contiguous[Network6] {
+	// A mask rebuilt from the leading-ones count is a leading run by
+	// construction, so the result is wrapped without revalidation.
+	mask := addr6{uint128MaskFromPrefix(m.mask.bits.LeadingOnes())}
+	return Contiguous[Network6]{network: fromBits6(m.addr, mask)}
+}
+
 // String returns the text form of the network, see AppendTo.
 func (m Network6) String() string {
 	// The buffer covers the longest form (address and mask of 45
