@@ -888,3 +888,128 @@ func BenchmarkIPv6Network_SortFunc_1024(b *testing.B) {
 		slices.SortFunc(networks, xnetip.IPv6Network.Compare)
 	}
 }
+
+// verifies that exactly the masks made of leading ones followed by
+// zeros are contiguous, the all-zero and all-ones masks included.
+//
+// The 64-bit half boundary is the IPv6-specific trap: runs ending at,
+// crossing and holes straddling bit 64 must all classify correctly.
+func Test_IPv6Network_IsContiguous_LeadingOnesRunOnly(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    bool
+	}{
+		{name: "universe /0", network: mustIPv6Network(t, "::", "::"), want: true},
+		{name: "host route /128", network: mustIPv6Network(t, "::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: true},
+		{name: "/40", network: mustIPv6Network(t, "2a02:6b8:c00::", "ffff:ffff:ff00::"), want: true},
+		{name: "/127", network: mustIPv6Network(t, "2a02:6b8:c00:1:2:3:4:1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe"), want: true},
+		{name: "/128 with bits in both halves", network: mustIPv6Network(t, "2a02:6b8:c00:1:2:3:4:1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: true},
+		{name: "run ends exactly at the half boundary /64", network: mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff:ffff::"), want: true},
+		{name: "run crosses the half boundary /65", network: mustIPv6Network(t, "2001:db8::", "ffff:ffff:ffff:ffff:8000::"), want: true},
+		{name: "single leading bit /1", network: mustIPv6Network(t, "8000::", "8000::"), want: true},
+		{name: "zero value is the universe", network: xnetip.IPv6Network{}, want: true},
+		{name: "top bit clear, rest set", network: mustIPv6Network(t, "::", "7fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: false},
+		{name: "low half only", network: mustIPv6Network(t, "::", "::ffff:ffff:ffff:ffff"), want: false},
+		{name: "two runs", network: mustIPv6Network(t, "2a02:6b8:c00::f800:0:0", "ffff:ffff:ff00::ffff:ffff:0:0"), want: false},
+		{name: "second run crosses the half boundary", network: mustIPv6Network(t, "2a02:6b8:c00::f800:0:0", "ffff:ffff:ff00:0:ffff:f800::"), want: false},
+		{name: "hole exactly at bits 64..95", network: mustIPv6Network(t, "2a02:6b8:0:0:1234:5678::", "ffff:ffff:0:0:ffff:ffff:0:0"), want: false},
+		{name: "nibble-alternating low half", network: mustIPv6Network(t, "2a02:6b8:0:0:1234:5678::", "ffff:ffff:0:0:f0f0:f0f0:f0f0:f0f0"), want: false},
+		{name: "hole straddling bit 64", network: mustIPv6Network(t, "::", "ffff:ffff:ffff:fffe:8000::"), want: false},
+		{name: "bench non-contiguous shape", network: mustIPv6Network(t, "2001::1", "ffff::ffff"), want: false},
+		{name: "alternating groups", network: mustIPv6Network(t, "::", "ffff:0:ffff:0:ffff:0:ffff:0"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.IsContiguous())
+		})
+	}
+}
+
+// verifies that the predicate agrees with the brute-force bit scan:
+// contiguous means no one bit after a zero bit, top to bottom.
+func Test_IPv6Network_IsContiguous_MatchesBitScanProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		maskBytes := network.Mask().As16()
+		want := true
+		seenZero := false
+		for _, maskByte := range maskBytes {
+			for idx := range 8 {
+				bit := maskByte>>(7-idx)&1 == 1
+				if bit && seenZero {
+					want = false
+				}
+				if !bit {
+					seenZero = true
+				}
+			}
+		}
+		require.Equal(t, want, network.IsContiguous())
+	})
+}
+
+// verifies that every network built from a prefix length is
+// contiguous, the half boundary neighbourhood included.
+func Test_IPv6Network_IsContiguous_PrefixMasksAreContiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr6.Draw(t, "addr")
+		bits := rapid.OneOf(
+			rapid.IntRange(0, 128),
+			rapid.SampledFrom([]int{63, 64, 65}),
+		).Draw(t, "bits")
+		network, err := xnetip.IPv6NetworkFromCIDR(addr, bits)
+		require.NoError(t, err)
+		require.True(t, network.IsContiguous())
+		require.Equal(t, bits, netip.PrefixFrom(network.Addr(), bits).Bits())
+	})
+}
+
+// verifies that clearing a non-final bit of a leading run of two or
+// more ones breaks contiguity: some run bit stays below the hole.
+func Test_IPv6Network_IsContiguous_HolePunchedMaskProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefix := rapid.IntRange(2, 128).Draw(t, "prefix")
+		hole := rapid.IntRange(0, prefix-2).Draw(t, "hole")
+		var maskHi, maskLo uint64
+		if prefix <= 64 {
+			maskHi = ^uint64(0) << (64 - prefix)
+		} else {
+			maskHi = ^uint64(0)
+			maskLo = ^uint64(0) << (128 - prefix)
+		}
+		if hole < 64 {
+			maskHi &^= uint64(1) << (63 - hole)
+		} else {
+			maskLo &^= uint64(1) << (127 - hole)
+		}
+		network, err := xnetip.IPv6NetworkFrom(
+			genNetipAddr6.Draw(t, "addr"),
+			netipAddrFrom6Bits(maskHi, maskLo),
+		)
+		require.NoError(t, err)
+		require.False(t, network.IsContiguous())
+	})
+}
+
+// verifies that the predicate allocates nothing.
+func Test_IPv6Network_IsContiguous_AllocationFree(t *testing.T) {
+	network := mustIPv6Network(t, "2001:db8::", "ffff:ffff::")
+	requireNoAllocs(t, func() { okSink = network.IsContiguous() })
+}
+
+func BenchmarkIPv6Network_IsContiguous_Contiguous(b *testing.B) {
+	network := mustIPv6Network(b, "2001:db8::", "ffff:ffff::")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = network.IsContiguous()
+	}
+}
+
+func BenchmarkIPv6Network_IsContiguous_NonContiguous(b *testing.B) {
+	network := mustIPv6Network(b, "2001::1", "ffff::ffff")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = network.IsContiguous()
+	}
+}
