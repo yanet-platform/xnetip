@@ -312,6 +312,39 @@ func (m IPv4Network) IsDisjoint(other IPv4Network) bool {
 	return !m.Intersects(other)
 }
 
+// IsAdjacent reports whether the two networks share a mask and differ
+// in exactly one masked bit.
+//
+// Adjacent networks merge into a single network by dropping the
+// differing bit from the mask. Identical networks are not adjacent,
+// and networks with different masks are never adjacent. The differing
+// bit may sit anywhere in the mask, so merging two contiguous
+// networks that are adjacent at a non-boundary bit yields a
+// non-contiguous mask. Works with non-contiguous masks.
+func (m IPv4Network) IsAdjacent(other IPv4Network) bool {
+	_, ok := m.adjacentBit(other)
+	return ok
+}
+
+// adjacentBit returns the single bit in which the addresses of two
+// same-mask networks differ.
+//
+// ok is false when the masks differ or the addresses differ in zero
+// or more than one bit. Both addresses are normalized, so their
+// difference can hold only masked bits and needs no extra masking.
+func (m IPv4Network) adjacentBit(other IPv4Network) (uint32, bool) {
+	if m.mask != other.mask {
+		return 0, false
+	}
+	// Exactly one differing bit means the difference is a power of
+	// two: non-zero, and clearing its lowest set bit leaves zero.
+	diff := m.addr.Bits() ^ other.addr.Bits()
+	if diff == 0 || diff&(diff-1) != 0 {
+		return 0, false
+	}
+	return diff, true
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //

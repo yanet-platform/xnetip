@@ -1355,6 +1355,143 @@ func Test_IPv4Network_IsDisjoint_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { okSink = left.IsDisjoint(right) })
 }
 
+// verifies that adjacency needs the same mask and exactly one
+// differing masked bit, anywhere in the mask.
+//
+// Identical networks are not adjacent, different masks never are, and
+// the differing bit may sit above the contiguous boundary — those
+// siblings merge into a non-contiguous mask.
+func Test_IPv4Network_IsAdjacent_ContiguousAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  bool
+	}{
+		{name: "contiguous siblings", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: true},
+		{name: "contiguous siblings reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: true},
+		{name: "identical", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: false},
+		{name: "different masks", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
+		{name: "same mask, two differing bits", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.3.0/24"), want: false},
+		{name: "one differing bit above the boundary", left: xnetip.MustParseIPv4Network("10.0.0.0/24"), right: xnetip.MustParseIPv4Network("10.0.2.0/24"), want: true},
+		{name: "adjacent at the top mask bit", left: xnetip.MustParseIPv4Network("0.0.0.0/2"), right: xnetip.MustParseIPv4Network("128.0.0.0/2"), want: true},
+		{name: "host routes differing in bit 0", left: xnetip.MustParseIPv4Network("192.168.0.0/32"), right: xnetip.MustParseIPv4Network("192.168.0.1/32"), want: true},
+		{name: "host routes differing in bit 31", left: xnetip.MustParseIPv4Network("0.0.0.1/32"), right: xnetip.MustParseIPv4Network("128.0.0.1/32"), want: true},
+		{name: "host routes differing in two bits", left: xnetip.MustParseIPv4Network("10.0.0.0/32"), right: xnetip.MustParseIPv4Network("10.0.0.3/32"), want: false},
+		{name: "default route with itself", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: false},
+		{name: "all-ones host and its bit-31 neighbour", left: xnetip.MustParseIPv4Network("255.255.255.255/32"), right: xnetip.MustParseIPv4Network("127.255.255.255/32"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacent(testCase.right))
+		})
+	}
+}
+
+// verifies that adjacency of non-contiguous networks counts only
+// masked bits, wherever the differing bit sits in the pattern.
+func Test_IPv4Network_IsAdjacent_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  bool
+	}{
+		{name: "differing in a masked middle bit", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255"), want: true},
+		{name: "differing in a masked middle bit reversed", left: xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), want: true},
+		{name: "differing in the lowest masked bit", left: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), want: true},
+		{name: "same pattern mask, two differing bits", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.3.0.1/255.255.0.255"), want: false},
+		{name: "pattern vs contiguous of equal popcount", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.0/255.255.255.0"), want: false},
+		{name: "alternating mask, one differing bit", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("170.0.170.1/170.85.170.85"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacent(testCase.right))
+		})
+	}
+}
+
+// verifies that adjacency is symmetric, irreflexive and impossible
+// across different masks.
+func Test_IPv4Network_IsAdjacent_SymmetryAndMaskProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		require.Equal(t, left.IsAdjacent(right), right.IsAdjacent(left))
+		require.False(t, left.IsAdjacent(left))
+		if left.Mask() != right.Mask() {
+			require.False(t, left.IsAdjacent(right))
+		}
+	})
+}
+
+// verifies that flipping one masked address bit always produces an
+// adjacent sibling.
+//
+// Random pairs are almost never adjacent, so the positive case is
+// constructed: any network with a non-empty mask is adjacent to its
+// image under a single masked-bit flip.
+func Test_IPv4Network_IsAdjacent_ConstructedSiblingProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		maskBytes := network.Mask().As4()
+		maskBits := binary.BigEndian.Uint32(maskBytes[:])
+		if maskBits == 0 {
+			return
+		}
+		setBits := []int{}
+		for bit := range 32 {
+			if maskBits&(1<<bit) != 0 {
+				setBits = append(setBits, bit)
+			}
+		}
+		bit := rapid.SampledFrom(setBits).Draw(t, "bit")
+		addrBytes := network.Addr().As4()
+		addrBits := binary.BigEndian.Uint32(addrBytes[:])
+		sibling, err := xnetip.IPv4NetworkFrom(
+			netipAddrFrom4Bits(addrBits^uint32(1)<<bit),
+			netipAddrFrom4Bits(maskBits),
+		)
+		require.NoError(t, err)
+		require.True(t, network.IsAdjacent(sibling))
+		require.True(t, sibling.IsAdjacent(network))
+	})
+}
+
+// verifies that the predicate allocates nothing.
+func Test_IPv4Network_IsAdjacent_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
+	right := xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255")
+	requireNoAllocs(t, func() { okSink = left.IsAdjacent(right) })
+}
+
+func BenchmarkIPv4Network_IsAdjacent_Contiguous(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("192.168.0.0/24")
+	right := xnetip.MustParseIPv4Network("192.168.1.0/24")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacent(right)
+	}
+}
+
+func BenchmarkIPv4Network_IsAdjacent_NonAdjacent(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("192.168.0.0/24")
+	right := xnetip.MustParseIPv4Network("192.168.3.0/24")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacent(right)
+	}
+}
+
+func BenchmarkIPv4Network_IsAdjacent_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
+	right := xnetip.MustParseIPv4Network("10.1.0.1/255.255.0.255")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacent(right)
+	}
+}
+
 // verifies that exactly the masks made of leading ones followed by
 // zeros are contiguous, the all-zero and all-ones masks included.
 func Test_IPv4Network_IsContiguous_LeadingOnesRunOnly(t *testing.T) {
