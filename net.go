@@ -260,6 +260,25 @@ func (m IPNetwork) Compare(other IPNetwork) int {
 	return m.network.Compare(other.network)
 }
 
+// Contains reports whether every address of other is also an address
+// of m.
+//
+// Networks of different address families never contain each other.
+// Within a family the result is the family's Contains, so masks may
+// be non-contiguous and the usual rules apply: identical networks
+// contain each other, the family universe contains every network of
+// its family, a host route contains only itself.
+func (m IPNetwork) Contains(other IPNetwork) bool {
+	// The family check must come first: without it the IPv6 universe
+	// would contain the mapped storage form of every IPv4 network.
+	//
+	// For two IPv4 networks the 128-bit check of the stored forms is
+	// exact: mapped storage pins the top 96 address and mask bits to
+	// the same values on both sides, leaving exactly the IPv4 formula
+	// on the low 32 bits.
+	return m.is4 == other.is4 && m.network.Contains(other.network)
+}
+
 // IsContiguous reports whether the mask, in the network's own family,
 // is a CIDR prefix mask: leading one bits followed only by zero bits.
 //

@@ -1159,6 +1159,206 @@ func Test_IPNetwork_Compare_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { intSink = network4.Compare(network6) })
 }
 
+// verifies that containment delegates within a family and is false
+// across families.
+//
+// The family rule comes first: the IPv6 universe contains every IPv6
+// network, the IPv4-mapped ones included, but no IPv4 network, and an
+// IPv4-mapped IPv6 network never contains the IPv4 network with the
+// same bytes.
+func Test_IPNetwork_Contains_FamiliesAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		outer xnetip.IPNetwork
+		inner xnetip.IPNetwork
+		want  bool
+	}{
+		{name: "IPv4 nested", outer: xnetip.MustParseIPNetwork("192.168.0.0/16"), inner: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: true},
+		{name: "IPv4 nested reversed", outer: xnetip.MustParseIPNetwork("192.168.1.0/24"), inner: xnetip.MustParseIPNetwork("192.168.0.0/16"), want: false},
+		{name: "IPv6 nested", outer: xnetip.MustParseIPNetwork("2001:db8::/32"), inner: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: true},
+		{name: "IPv6 nested reversed", outer: xnetip.MustParseIPNetwork("2001:db8:1::/48"), inner: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
+		{name: "different families", outer: xnetip.MustParseIPNetwork("10.0.0.0/8"), inner: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
+		{name: "different families reversed", outer: xnetip.MustParseIPNetwork("2001:db8::/32"), inner: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv6 universe does not contain an IPv4 network", outer: xnetip.IPNetwork{}, inner: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv4 network does not contain the IPv6 universe", outer: xnetip.MustParseIPNetwork("10.0.0.0/8"), inner: xnetip.IPNetwork{}, want: false},
+		{name: "IPv6 universe contains a mapped IPv6 network", outer: xnetip.IPNetwork{}, inner: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), want: true},
+		{name: "mapped IPv6 network does not contain the universe", outer: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), inner: xnetip.IPNetwork{}, want: false},
+		{name: "IPv4 universe contains an IPv4 host", outer: xnetip.MustParseIPNetwork("0.0.0.0/0"), inner: xnetip.MustParseIPNetwork("127.0.0.1"), want: true},
+		{name: "IPv4 universe does not contain an IPv6 host", outer: xnetip.MustParseIPNetwork("0.0.0.0/0"), inner: xnetip.MustParseIPNetwork("::1"), want: false},
+		{name: "mapped IPv6 vs IPv4 with the same bytes", outer: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), inner: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv4 vs mapped IPv6 with the same bytes", outer: xnetip.MustParseIPNetwork("10.0.0.0/8"), inner: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), want: false},
+		{name: "IPv4 host contains itself", outer: xnetip.MustParseIPNetwork("10.0.0.1/32"), inner: xnetip.MustParseIPNetwork("10.0.0.1/32"), want: true},
+		{name: "IPv6 host contains itself", outer: xnetip.MustParseIPNetwork("::1/128"), inner: xnetip.MustParseIPNetwork("::1/128"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.outer.Contains(testCase.inner))
+		})
+	}
+}
+
+// verifies that non-contiguous containment of both families flows
+// through the wrapper.
+//
+// The family rule is unaffected by mask shape: a non-contiguous
+// pattern of one family never contains one of the other.
+func Test_IPNetwork_Contains_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		outer xnetip.IPNetwork
+		inner xnetip.IPNetwork
+		want  bool
+	}{
+		{name: "IPv4 pattern contains narrower pattern", outer: xnetip.MustParseIPNetwork("10.0.0.0/255.0.0.0"), inner: xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255"), want: true},
+		{name: "IPv4 narrower pattern does not contain wider", outer: xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255"), inner: xnetip.MustParseIPNetwork("10.0.0.0/255.0.0.0"), want: false},
+		{name: "IPv6 pattern contains narrower pattern", outer: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::"), inner: xnetip.MustParseIPNetwork("2001:db8::1/ffff:ffff::ffff"), want: true},
+		{name: "IPv6 narrower pattern does not contain wider", outer: xnetip.MustParseIPNetwork("2001:db8::1/ffff:ffff::ffff"), inner: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::"), want: false},
+		{name: "pattern 10.*.0.* contains matching host", outer: xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseIPNetwork("10.42.0.99"), want: true},
+		{name: "IPv4 pattern vs IPv6 pattern", outer: xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0"), inner: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::"), want: false},
+		{name: "IPv6 pattern vs IPv4 pattern", outer: xnetip.MustParseIPNetwork("2001:db8::/ffff:ffff::"), inner: xnetip.MustParseIPNetwork("10.0.0.0/255.0.255.0"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.outer.Contains(testCase.inner))
+		})
+	}
+}
+
+// verifies that wrapped IPv4 containment equals the concrete IPv4
+// answer, so the IPv4-mapped storage form preserves the relation.
+func Test_IPNetwork_Contains_AgreesWithIPv4Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outer := genIPv4Network.Draw(t, "outer")
+		inner := genIPv4Network.Draw(t, "inner")
+		require.Equal(
+			t,
+			outer.Contains(inner),
+			xnetip.IPNetworkFrom4(outer).Contains(xnetip.IPNetworkFrom4(inner)),
+		)
+	})
+}
+
+// verifies that wrapped IPv6 containment equals the concrete IPv6
+// answer.
+func Test_IPNetwork_Contains_AgreesWithIPv6Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outer := genIPv6Network.Draw(t, "outer")
+		inner := genIPv6Network.Draw(t, "inner")
+		require.Equal(
+			t,
+			outer.Contains(inner),
+			xnetip.IPNetworkFrom6(outer).Contains(xnetip.IPNetworkFrom6(inner)),
+		)
+	})
+}
+
+// verifies that networks of different families never contain each
+// other, whatever their masks.
+func Test_IPNetwork_Contains_CrossFamilyAlwaysFalseProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
+		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		require.False(t, network4.Contains(network6))
+		require.False(t, network6.Contains(network4))
+	})
+}
+
+// verifies that every network contains itself, whatever the family
+// and the mask shape.
+func Test_IPNetwork_Contains_ReflexiveProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		require.True(t, network.Contains(network))
+	})
+}
+
+// verifies that mutual containment holds exactly for equal networks.
+func Test_IPNetwork_Contains_AntisymmetryProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPNetwork.Draw(t, "left")
+		right := genIPNetwork.Draw(t, "right")
+		mutual := left.Contains(right) && right.Contains(left)
+		require.Equal(t, left == right, mutual)
+	})
+}
+
+// verifies that containment is transitive on random triples.
+func Test_IPNetwork_Contains_TransitivityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := genIPNetwork.Draw(t, "first")
+		second := genIPNetwork.Draw(t, "second")
+		third := genIPNetwork.Draw(t, "third")
+		if first.Contains(second) && second.Contains(third) {
+			require.True(t, first.Contains(third))
+		}
+	})
+}
+
+// verifies that on contiguous networks of either family containment
+// agrees with the net/netip rule.
+//
+// The oracle is the prefix pair: the outer prefix covers the inner
+// address and its length does not exceed the inner one. It answers
+// false across families exactly as the wrapper does, so mixed draws
+// stay in the comparison.
+func Test_IPNetwork_Contains_MatchesNetipPrefixProperty(t *testing.T) {
+	drawPrefix := func(t *rapid.T, label string) netip.Prefix {
+		if rapid.Bool().Draw(t, label+" is4") {
+			return genIPv4Prefix.Draw(t, label+" v4").Masked()
+		}
+		return genIPv6Prefix.Draw(t, label+" v6").Masked()
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		outerPrefix := drawPrefix(t, "outer")
+		innerPrefix := drawPrefix(t, "inner")
+		outer, ok := xnetip.IPNetworkFromPrefix(outerPrefix)
+		require.True(t, ok)
+		inner, ok := xnetip.IPNetworkFromPrefix(innerPrefix)
+		require.True(t, ok)
+		want := outerPrefix.Contains(innerPrefix.Addr()) && outerPrefix.Bits() <= innerPrefix.Bits()
+		require.Equal(t, want, outer.Contains(inner))
+	})
+}
+
+// verifies that the containment check allocates nothing in either
+// family and across families.
+func Test_IPNetwork_Contains_AllocationFree(t *testing.T) {
+	outer4 := xnetip.MustParseIPNetwork("10.0.0.0/8")
+	inner4 := xnetip.MustParseIPNetwork("10.1.0.0/16")
+	outer6 := xnetip.MustParseIPNetwork("2001:db8::/32")
+	inner6 := xnetip.MustParseIPNetwork("2001:db8:1::/48")
+	requireNoAllocs(t, func() { okSink = outer4.Contains(inner4) })
+	requireNoAllocs(t, func() { okSink = outer6.Contains(inner6) })
+	requireNoAllocs(t, func() { okSink = outer4.Contains(inner6) })
+}
+
+func BenchmarkIPNetwork_Contains_V4(b *testing.B) {
+	outer := xnetip.MustParseIPNetwork("10.0.0.0/8")
+	inner := xnetip.MustParseIPNetwork("10.1.0.0/16")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
+func BenchmarkIPNetwork_Contains_V6(b *testing.B) {
+	outer := xnetip.MustParseIPNetwork("2001:db8::/32")
+	inner := xnetip.MustParseIPNetwork("2001:db8:1::/48")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
+func BenchmarkIPNetwork_Contains_CrossFamily(b *testing.B) {
+	outer := xnetip.MustParseIPNetwork("10.0.0.0/8")
+	inner := xnetip.MustParseIPNetwork("2001:db8::/32")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
 // verifies that contiguity is judged in the network's own family, the
 // concrete types' positive and negative pins lifted through the wrap.
 func Test_IPNetwork_IsContiguous_JudgedInOwnFamily(t *testing.T) {
