@@ -179,3 +179,24 @@ func (m IPNetwork) Mask() netip.Addr {
 func (m IPNetwork) ToIPv6Mapped() IPv6Network {
 	return m.network
 }
+
+// ToCanonical returns the network in its canonical address family.
+//
+// An IPv4 network is returned unchanged. An IPv6 network that is
+// IPv4-mapped (address ::ffff:a.b.c.d and a mask whose top 96 bits are
+// all ones, see IPv6Network.IsIPv4MappedIPv6) collapses to the
+// equivalent IPv4 network, non-contiguous masks included. Any other
+// IPv6 network, including IPv4-compatible ::a.b.c.d addresses and
+// mapped addresses whose mask does not pin the top 96 bits, is
+// returned unchanged. The inverse of ToIPv6Mapped on mapped values.
+func (m IPNetwork) ToCanonical() IPNetwork {
+	if m.is4 {
+		return m
+	}
+	// The collapse is a flag flip: a mapped IPv6 network already
+	// holds the exact bits an IPv4 network is stored in.
+	if m.network.IsIPv4MappedIPv6() {
+		return IPNetwork{network: m.network, is4: true}
+	}
+	return m
+}

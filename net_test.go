@@ -941,3 +941,103 @@ func Test_IPNetwork_ToIPv6Mapped_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { network6Sink = network4.ToIPv6Mapped() })
 	requireNoAllocs(t, func() { network6Sink = network6.ToIPv6Mapped() })
 }
+
+// verifies that an IPv4 network and a non-mapped IPv6 network come
+// back unchanged while a mapped IPv6 network collapses to IPv4.
+func Test_IPNetwork_ToCanonical_CollapsesOnlyMappedIPv6(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPNetwork
+		want    xnetip.IPNetwork
+	}{
+		{name: "IPv4 unchanged", network: mustIPNetwork4(t, "192.168.0.0", "255.255.255.0"), want: mustIPNetwork4(t, "192.168.0.0", "255.255.255.0")},
+		{name: "mapped IPv6 contiguous collapses", network: mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: mustIPNetwork4(t, "192.168.1.0", "255.255.255.0")},
+		{name: "plain IPv6 unchanged", network: mustIPNetwork6(t, "2001:db8::", "ffff:ffff::"), want: mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")},
+		{name: "IPv4-compatible address is not mapped", network: mustIPNetwork6(t, "::c00a:2ff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustIPNetwork6(t, "::c00a:2ff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "mapped address under an unpinned mask stays IPv6", network: mustIPNetwork6(t, "::ffff:c0a8:1", "0:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustIPNetwork6(t, "::ffff:c0a8:1", "0:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "mapped universe collapses to the IPv4 universe", network: mustIPNetwork6(t, "::ffff:0:0", "ffff:ffff:ffff:ffff:ffff:ffff::"), want: mustIPNetwork4(t, "0.0.0.0", "0.0.0.0")},
+		{name: "mapped host route collapses", network: mustIPNetwork6(t, "::ffff:a00:1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustIPNetwork4(t, "10.0.0.1", "255.255.255.255")},
+		{name: "mask one bit short of the mapped pin stays IPv6", network: mustIPNetwork6(t, "::ffff:0:0", "ffff:ffff:ffff:ffff:ffff:fffe::"), want: mustIPNetwork6(t, "::fffe:0:0", "ffff:ffff:ffff:ffff:ffff:fffe::")},
+		{name: "IPv6 universe unchanged", network: mustIPNetwork6(t, "::", "::"), want: mustIPNetwork6(t, "::", "::")},
+		{name: "mapped with non-contiguous low mask collapses", network: mustIPNetwork6(t, "::ffff:c0a8:1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff"), want: mustIPNetwork4(t, "192.168.0.1", "255.255.0.255")},
+		{name: "hole inside the pinned region stays IPv6", network: mustIPNetwork6(t, "::ffff:c0a8:1", "ffff:0:ffff:ffff:ffff:ffff:ffff:ffff"), want: mustIPNetwork6(t, "::ffff:c0a8:1", "ffff:0:ffff:ffff:ffff:ffff:ffff:ffff")},
+		{name: "mapped with alternating low mask collapses", network: mustIPNetwork6(t, "::ffff:aa55:aa55", "ffff:ffff:ffff:ffff:ffff:ffff:aa55:aa55"), want: mustIPNetwork4(t, "170.85.170.85", "170.85.170.85")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.ToCanonical())
+		})
+	}
+}
+
+// verifies that canonicalizing twice equals canonicalizing once, for
+// networks of every family and mask shape.
+func Test_IPNetwork_ToCanonical_IdempotentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		canonical := network.ToCanonical()
+		require.Equal(t, canonical, canonical.ToCanonical())
+	})
+}
+
+// verifies that canonicalization preserves the IPv6 embedding: the
+// canonical form embeds into the same 128-bit network.
+func Test_IPNetwork_ToCanonical_PreservesEmbeddingProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		require.Equal(t, network.ToIPv6Mapped(), network.ToCanonical().ToIPv6Mapped())
+	})
+}
+
+// verifies that an IPv4 network survives the round trip through its
+// mapped IPv6 lift and back through canonicalization.
+func Test_IPNetwork_ToCanonical_RoundTripsMappedIPv4Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		lifted := xnetip.IPNetworkFrom6(xnetip.IPNetworkFrom4(network).ToIPv6Mapped())
+		require.Equal(t, xnetip.IPNetworkFrom4(network), lifted.ToCanonical())
+	})
+}
+
+// verifies that an IPv6 network collapses exactly when the concrete
+// mapped predicate holds, and collapses to the concrete truncation.
+func Test_IPNetwork_ToCanonical_AgreesWithConcretePredicateProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		canonical := xnetip.IPNetworkFrom6(network).ToCanonical()
+		require.Equal(t, network.IsIPv4MappedIPv6(), canonical.Is4())
+		if canonical.Is4() {
+			extracted, ok := canonical.IPv4()
+			require.True(t, ok)
+			truncated, ok := network.ToIPv4Mapped()
+			require.True(t, ok)
+			require.Equal(t, truncated, extracted)
+		}
+	})
+}
+
+// verifies the address half of the collapse against net/netip: a
+// collapsed network's address unmaps to Is4, an unmappable one blocks.
+func Test_IPNetwork_ToCanonical_MatchesNetipUnmapOnAddress(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		canonical := xnetip.IPNetworkFrom6(network).ToCanonical()
+		if canonical.Is4() {
+			require.True(t, network.Addr().Unmap().Is4())
+		}
+		if !network.Addr().Unmap().Is4() {
+			require.True(t, canonical.Is6())
+		}
+	})
+}
+
+// verifies that canonicalization allocates nothing for an IPv4, a
+// mapped IPv6 and a plain IPv6 network alike.
+func Test_IPNetwork_ToCanonical_AllocationFree(t *testing.T) {
+	network4 := mustIPNetwork4(t, "192.168.1.0", "255.255.255.0")
+	mapped := mustIPNetwork6(t, "::ffff:c0a8:100", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00")
+	network6 := mustIPNetwork6(t, "2001:db8::", "ffff:ffff::")
+	requireNoAllocs(t, func() { ipNetworkSink = network4.ToCanonical() })
+	requireNoAllocs(t, func() { ipNetworkSink = mapped.ToCanonical() })
+	requireNoAllocs(t, func() { ipNetworkSink = network6.ToCanonical() })
+}
