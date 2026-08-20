@@ -3176,3 +3176,185 @@ func BenchmarkIPv4Network_Merge_NonContiguous(b *testing.B) {
 		networkSink, okSink = left.Merge(right)
 	}
 }
+
+// isAdjacentByLowestMaskBitReferenceIPv4 is the simple oracle for the
+// lowest-mask-bit adjacency.
+//
+// It isolates the boundary bit with a trailing-zero count and a
+// shift, independent from the arithmetic isolation the
+// implementation uses. A zero mask has no boundary bit and never
+// qualifies.
+func isAdjacentByLowestMaskBitReferenceIPv4(left, right xnetip.IPv4Network) bool {
+	leftAddr, leftMask := ipv4NetworkBits(left)
+	rightAddr, rightMask := ipv4NetworkBits(right)
+	return leftMask == rightMask && leftMask != 0 &&
+		leftAddr^rightAddr == uint32(1)<<bits.TrailingZeros32(leftMask)
+}
+
+// verifies that only same-mask pairs differing in exactly the mask's
+// lowest set bit qualify, and adjacency at any higher bit is refused.
+func Test_IPv4Network_IsAdjacentByLowestMaskBit_ContiguousAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  bool
+	}{
+		{name: "CIDR siblings", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: true},
+		{name: "CIDR siblings reversed", left: xnetip.MustParseIPv4Network("192.168.1.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: true},
+		{name: "host routes differing in bit 0", left: xnetip.MustParseIPv4Network("192.168.0.0/32"), right: xnetip.MustParseIPv4Network("192.168.0.1/32"), want: true},
+		{name: "host routes differing in bit 0 reversed", left: xnetip.MustParseIPv4Network("192.168.0.1/32"), right: xnetip.MustParseIPv4Network("192.168.0.0/32"), want: true},
+		{name: "identical", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/24"), want: false},
+		{name: "different masks", left: xnetip.MustParseIPv4Network("192.168.0.0/24"), right: xnetip.MustParseIPv4Network("192.168.0.0/16"), want: false},
+		{name: "adjacent at the top mask bit, not the lowest", left: xnetip.MustParseIPv4Network("0.0.0.0/2"), right: xnetip.MustParseIPv4Network("128.0.0.0/2"), want: false},
+		{name: "adjacent one bit above the boundary", left: xnetip.MustParseIPv4Network("10.0.0.0/24"), right: xnetip.MustParseIPv4Network("10.0.2.0/24"), want: false},
+		{name: "default route with itself", left: xnetip.MustParseIPv4Network("0.0.0.0/0"), right: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: false},
+		{name: "/1 siblings at bit 31", left: xnetip.MustParseIPv4Network("0.0.0.0/1"), right: xnetip.MustParseIPv4Network("128.0.0.0/1"), want: true},
+		{name: "host routes differing in bit 1", left: xnetip.MustParseIPv4Network("10.0.0.0/32"), right: xnetip.MustParseIPv4Network("10.0.0.2/32"), want: false},
+		{name: "/31 siblings", left: xnetip.MustParseIPv4Network("10.0.0.0/31"), right: xnetip.MustParseIPv4Network("10.0.0.2/31"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacentByLowestMaskBit(testCase.right))
+		})
+	}
+}
+
+// verifies that for a non-contiguous mask only the lowest run's
+// boundary bit counts.
+//
+// A sibling differing at a higher run's boundary stays adjacent in
+// the plain sense but does not qualify here.
+func Test_IPv4Network_IsAdjacentByLowestMaskBit_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPv4Network
+		right xnetip.IPv4Network
+		want  bool
+	}{
+		{name: "two-run mask at its lowest bit", left: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), want: true},
+		{name: "two-run mask at its lowest bit reversed", left: xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), want: true},
+		{name: "two-run mask at the high run's boundary", left: xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255"), right: xnetip.MustParseIPv4Network("10.1.0.0/255.255.0.255"), want: false},
+		{name: "mask with lowest set bit 8, differing there", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("10.0.1.0/255.0.255.0"), want: true},
+		{name: "mask with lowest set bit 8, differing at bit 24", left: xnetip.MustParseIPv4Network("10.0.0.0/255.0.255.0"), right: xnetip.MustParseIPv4Network("11.0.0.0/255.0.255.0"), want: false},
+		{name: "alternating mask, differing at bit 0", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("170.0.170.1/170.85.170.85"), want: true},
+		{name: "alternating mask, differing at bit 2", left: xnetip.MustParseIPv4Network("170.0.170.0/170.85.170.85"), right: xnetip.MustParseIPv4Network("170.0.170.4/170.85.170.85"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.IsAdjacentByLowestMaskBit(testCase.right))
+		})
+	}
+}
+
+// verifies that the rejected higher-bit pairs of the unit tables are
+// still plainly adjacent: the predicate is a strict restriction.
+func Test_IPv4Network_IsAdjacentByLowestMaskBit_RejectedPairsStayAdjacent(t *testing.T) {
+	cases := [][2]string{
+		{"0.0.0.0/2", "128.0.0.0/2"},
+		{"10.0.0.0/24", "10.0.2.0/24"},
+		{"10.0.0.0/255.255.0.255", "10.1.0.0/255.255.0.255"},
+		{"10.0.0.0/255.0.255.0", "11.0.0.0/255.0.255.0"},
+	}
+	for _, pair := range cases {
+		left := xnetip.MustParseIPv4Network(pair[0])
+		right := xnetip.MustParseIPv4Network(pair[1])
+		require.True(t, left.IsAdjacent(right), "pair %v", pair)
+		require.False(t, left.IsAdjacentByLowestMaskBit(right), "pair %v", pair)
+	}
+}
+
+// verifies that the predicate agrees with the trailing-zeros oracle
+// on random pairs.
+func Test_IPv4Network_IsAdjacentByLowestMaskBit_MatchesReferenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		require.Equal(t, isAdjacentByLowestMaskBitReferenceIPv4(left, right), left.IsAdjacentByLowestMaskBit(right))
+	})
+}
+
+// verifies that the predicate implies plain adjacency, is symmetric
+// and is irreflexive.
+func Test_IPv4Network_IsAdjacentByLowestMaskBit_ImpliesAdjacentAndSymmetryProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPv4Network.Draw(t, "left")
+		right := genIPv4Network.Draw(t, "right")
+		if left.IsAdjacentByLowestMaskBit(right) {
+			require.True(t, left.IsAdjacent(right))
+		}
+		require.Equal(t, left.IsAdjacentByLowestMaskBit(right), right.IsAdjacentByLowestMaskBit(left))
+		require.False(t, left.IsAdjacentByLowestMaskBit(left))
+	})
+}
+
+// verifies that the buddy at the mask's lowest set bit qualifies and
+// a sibling at any higher set bit is adjacent but does not.
+func Test_IPv4Network_IsAdjacentByLowestMaskBit_BuddyConstructionProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		addrBits, maskBits := ipv4NetworkBits(network)
+		if maskBits == 0 {
+			return
+		}
+		lowest := maskBits & -maskBits
+		buddy, err := xnetip.IPv4NetworkFrom(
+			netipAddrFrom4Bits(addrBits^lowest),
+			netipAddrFrom4Bits(maskBits),
+		)
+		require.NoError(t, err)
+		require.True(t, network.IsAdjacentByLowestMaskBit(buddy))
+		require.True(t, buddy.IsAdjacentByLowestMaskBit(network))
+		higherBits := []int{}
+		for bit := range 32 {
+			if maskBits&(1<<bit) != 0 && uint32(1)<<bit != lowest {
+				higherBits = append(higherBits, bit)
+			}
+		}
+		if len(higherBits) == 0 {
+			return
+		}
+		bit := uint32(1) << rapid.SampledFrom(higherBits).Draw(t, "higher bit")
+		sibling, err := xnetip.IPv4NetworkFrom(
+			netipAddrFrom4Bits(addrBits^bit),
+			netipAddrFrom4Bits(maskBits),
+		)
+		require.NoError(t, err)
+		require.True(t, network.IsAdjacent(sibling))
+		require.False(t, network.IsAdjacentByLowestMaskBit(sibling))
+	})
+}
+
+// verifies that the predicate allocates nothing.
+func Test_IPv4Network_IsAdjacentByLowestMaskBit_AllocationFree(t *testing.T) {
+	left := xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255")
+	right := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
+	requireNoAllocs(t, func() { okSink = left.IsAdjacentByLowestMaskBit(right) })
+}
+
+func BenchmarkIPv4Network_IsAdjacentByLowestMaskBit_CIDRSiblings(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("192.168.0.0/24")
+	right := xnetip.MustParseIPv4Network("192.168.1.0/24")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacentByLowestMaskBit(right)
+	}
+}
+
+func BenchmarkIPv4Network_IsAdjacentByLowestMaskBit_AdjacentNonLowestBit(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("0.0.0.0/2")
+	right := xnetip.MustParseIPv4Network("128.0.0.0/2")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacentByLowestMaskBit(right)
+	}
+}
+
+func BenchmarkIPv4Network_IsAdjacentByLowestMaskBit_NonContiguous(b *testing.B) {
+	left := xnetip.MustParseIPv4Network("10.0.0.0/255.255.0.255")
+	right := xnetip.MustParseIPv4Network("10.0.0.1/255.255.0.255")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = left.IsAdjacentByLowestMaskBit(right)
+	}
+}

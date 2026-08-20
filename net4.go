@@ -420,6 +420,25 @@ func (m IPv4Network) Merge(other IPv4Network) (IPv4Network, bool) {
 	return IPv4Network{}, false
 }
 
+// IsAdjacentByLowestMaskBit reports whether the two networks share a
+// mask and differ in exactly the lowest set bit of that mask.
+//
+// It is the restriction of IsAdjacent to the boundary bit between a
+// block and its parent: every pair accepted here is adjacent, but
+// adjacency at any higher masked bit is rejected. Merging such a pair
+// never leaves the mask's structural class, so two contiguous
+// networks give a contiguous parent. Identical networks are not
+// adjacent, and the unspecified network /0 is never adjacent to
+// anything. For a two-run non-contiguous mask only the lower run's
+// boundary bit counts. Works with non-contiguous masks.
+func (m IPv4Network) IsAdjacentByLowestMaskBit(other IPv4Network) bool {
+	// The empty mask must be rejected explicitly: its isolated lowest
+	// set bit is zero, and two equal addresses differ by zero too.
+	a1, m1 := m.addr.Bits(), m.mask.Bits()
+	a2, m2 := other.addr.Bits(), other.mask.Bits()
+	return m1 == m2 && m1 != 0 && a1^a2 == m1&-m1
+}
+
 // IsContiguous reports whether the mask is a CIDR prefix mask: a run
 // of leading one bits followed only by zero bits.
 //
