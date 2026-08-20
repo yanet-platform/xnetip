@@ -1,6 +1,9 @@
 package xnetip
 
-import "net/netip"
+import (
+	"net/netip"
+	"strconv"
+)
 
 // IPv6Network is an IPv6 network: an address and a mask of arbitrary
 // shape.
@@ -143,6 +146,30 @@ func (m IPv6Network) PrefixLen() (int, bool) {
 		return 0, false
 	}
 	return m.mask.bits.LeadingOnes(), true
+}
+
+// String returns the text form of the network, see AppendTo.
+func (m IPv6Network) String() string {
+	// The buffer covers the longest form (address and mask of 45
+	// bytes each), so the string conversion is the only allocation.
+	var buffer [91]byte
+	return string(m.AppendTo(buffer[:0]))
+}
+
+// AppendTo appends the text form of the network to b and returns the
+// extended buffer.
+//
+// A contiguous network is written as "addr/prefix", a non-contiguous
+// one as "addr/mask" with the mask in the same compressed form as an
+// address. The suffix is always present, so a host route is written
+// with "/128". The output parses back with ParseIPv6Network.
+func (m IPv6Network) AppendTo(b []byte) []byte {
+	b = m.addr.AppendTo(b)
+	b = append(b, '/')
+	if prefix, ok := m.PrefixLen(); ok {
+		return strconv.AppendInt(b, int64(prefix), 10)
+	}
+	return m.mask.AppendTo(b)
 }
 
 // IsIPv4MappedIPv6 reports whether this network is an IPv4-mapped IPv6

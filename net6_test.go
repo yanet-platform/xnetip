@@ -1,11 +1,14 @@
 package xnetip_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"math/bits"
 	"net/netip"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -1165,5 +1168,158 @@ func BenchmarkIPv6Network_PrefixLen_Mixed(b *testing.B) {
 		for _, network := range networks {
 			intSink, okSink = network.PrefixLen()
 		}
+	}
+}
+
+// verifies that a contiguous network prints as address/prefix with the
+// suffix always present, in the compressed form net/netip renders.
+func Test_IPv6Network_String_ContiguousUsesPrefixForm(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    string
+	}{
+		{name: "host route keeps /128", network: mustIPv6Network(t, "2a02:6b8::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: "2a02:6b8::1/128"},
+		{name: "CIDR with inner zero groups", network: mustIPv6Network(t, "2a02:6b8:c00:0:1:2::", "ffff:ffff:ffff:ffff:ffff:ffff::"), want: "2a02:6b8:c00:0:1:2::/96"},
+		{name: "universe", network: mustIPv6Network(t, "::", "::"), want: "::/0"},
+		{name: "zero value", network: xnetip.IPv6Network{}, want: "::/0"},
+		{name: "loopback host keeps /128", network: mustIPv6Network(t, "::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: "::1/128"},
+		{name: "all ones", network: mustIPv6Network(t, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128"},
+		{name: "full form gets compressed", network: mustIPv6Network(t, "2001:db8:0:0:0:0:0:1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), want: "2001:db8::1/128"},
+		{name: "mapped network", network: mustIPv6Network(t, "::ffff:192.0.2.0", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ff00"), want: "::ffff:192.0.2.0/120"},
+		{name: "normalized before print", network: mustIPv6Network(t, "2a02:6b8:c00:1:2:3:4:5", "ffff:ffff:ff00::"), want: "2a02:6b8:c00::/40"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.String())
+		})
+	}
+}
+
+// verifies that a non-contiguous network prints its mask compressed
+// like an address, the IPv4-mapped-looking form included.
+func Test_IPv6Network_String_NonContiguousUsesMaskForm(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv6Network
+		want    string
+	}{
+		{name: "two runs, mask compressed", network: mustIPv6Network(t, "2a02:6b8:0:0:0:1234::", "ffff:ffff:0:0:ffff:ffff:0:0"), want: "2a02:6b8::1234:0:0/ffff:ffff::ffff:ffff:0:0"},
+		{name: "two runs, longer address", network: mustIPv6Network(t, "2a02:6b8:0:0:1234:5678::", "ffff:ffff:0:0:ffff:ffff:0:0"), want: "2a02:6b8::1234:5678:0:0/ffff:ffff::ffff:ffff:0:0"},
+		{name: "geo mask, address normalized", network: mustIPv6Network(t, "2001:db8::1", "ffff:ffff:ff00::ffff:ffff:0:0"), want: "2001:db8::/ffff:ffff:ff00:0:ffff:ffff::"},
+		{name: "alternating groups, nothing to compress", network: mustIPv6Network(t, "2001:0:db8::", "ffff:0:ffff:0:ffff:0:ffff:0"), want: "2001:0:db8::/ffff:0:ffff:0:ffff:0:ffff:0"},
+		{name: "mask that looks IPv4-mapped", network: mustIPv6Network(t, "::ffff:1.0.1.0", "::ffff:255.0.255.0"), want: "::ffff:1.0.1.0/::ffff:255.0.255.0"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.String())
+		})
+	}
+}
+
+// verifies that appending writes after the caller's bytes and leaves
+// them intact.
+func Test_IPv6Network_AppendTo_KeepsExistingBytes(t *testing.T) {
+	network := mustIPv6Network(t, "2001:db8::", "ffff:ffff::")
+	require.Equal(t, "net=2001:db8::/32", string(network.AppendTo([]byte("net="))))
+}
+
+// verifies that a buffer with enough capacity is extended in place,
+// without growing to a new backing array.
+func Test_IPv6Network_AppendTo_ReusesSizedBuffer(t *testing.T) {
+	network := mustIPv6Network(t, "2001:db8::", "ffff:ffff::")
+	buffer := make([]byte, 0, 96)
+	extended := network.AppendTo(buffer)
+	require.Equal(t, "2001:db8::/32", string(extended))
+	require.Equal(t, cap(buffer), cap(extended))
+}
+
+// verifies that the text splits at a single slash into the network
+// address and the decimal prefix length or the rendered mask.
+func Test_IPv6Network_String_ShapeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		text := network.String()
+		require.Equal(t, 1, strings.Count(text, "/"))
+		slash := strings.IndexByte(text, '/')
+		addr, err := netip.ParseAddr(text[:slash])
+		require.NoError(t, err)
+		require.True(t, addr.Is6())
+		require.Equal(t, network.Addr(), addr)
+		if prefix, ok := network.PrefixLen(); ok {
+			require.Equal(t, strconv.Itoa(prefix), text[slash+1:])
+		} else {
+			require.Equal(t, network.Mask().String(), text[slash+1:])
+		}
+	})
+}
+
+// verifies that appending to an empty buffer yields the same bytes the
+// string form has, and that drawn buffer content survives untouched.
+func Test_IPv6Network_AppendTo_MatchesStringProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		prefix := rapid.SliceOf(rapid.Byte()).Draw(t, "buffer")
+		require.Equal(t, network.String(), string(network.AppendTo(nil)))
+		extended := network.AppendTo(slices.Clone(prefix))
+		require.True(t, bytes.Equal(prefix, extended[:len(prefix)]))
+		require.Equal(t, network.String(), string(extended[len(prefix):]))
+	})
+}
+
+// verifies that the contiguous form is byte-identical to the netip
+// prefix rendering of the same network.
+func Test_IPv6Network_String_MatchesNetipPrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv6Network.Draw(t, "network")
+		prefix, ok := network.PrefixLen()
+		if !ok {
+			return
+		}
+		require.Equal(t, netip.PrefixFrom(network.Addr(), prefix).String(), network.String())
+	})
+}
+
+// verifies that appending into a buffer with enough capacity allocates
+// nothing, whatever the mask's shape.
+func Test_IPv6Network_AppendTo_AllocationFree(t *testing.T) {
+	contiguous := mustIPv6Network(t, "2001:db8::", "ffff:ffff::")
+	nonContiguous := mustIPv6Network(t, "2001:db8::", "ffff:ffff:ff00::ffff:ffff:0:0")
+	buffer := make([]byte, 0, 128)
+	requireNoAllocs(t, func() { bytesSink = contiguous.AppendTo(buffer[:0]) })
+	requireNoAllocs(t, func() { bytesSink = nonContiguous.AppendTo(buffer[:0]) })
+}
+
+// verifies that rendering to a string costs exactly the one string
+// conversion, pinning any formatting regression that adds more.
+func Test_IPv6Network_String_SingleAllocation(t *testing.T) {
+	contiguous := mustIPv6Network(t, "2001:db8::", "ffff:ffff::")
+	nonContiguous := mustIPv6Network(t, "2001:db8::", "ffff:ffff:ff00::ffff:ffff:0:0")
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = contiguous.String() })))
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = nonContiguous.String() })))
+}
+
+func BenchmarkIPv6Network_String_CIDR(b *testing.B) {
+	network := mustIPv6Network(b, "2001:db8::", "ffff:ffff::")
+	b.ReportAllocs()
+	for b.Loop() {
+		stringSink = network.String()
+	}
+}
+
+func BenchmarkIPv6Network_String_NonContiguous(b *testing.B) {
+	network := mustIPv6Network(b, "2001:db8::", "ffff:ffff:ff00::ffff:ffff:0:0")
+	b.ReportAllocs()
+	for b.Loop() {
+		stringSink = network.String()
+	}
+}
+
+func BenchmarkIPv6Network_AppendTo_CIDR(b *testing.B) {
+	network := mustIPv6Network(b, "2001:db8::", "ffff:ffff::")
+	buffer := make([]byte, 0, 96)
+	b.ReportAllocs()
+	for b.Loop() {
+		bytesSink = network.AppendTo(buffer[:0])
 	}
 }
