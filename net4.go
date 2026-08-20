@@ -222,6 +222,18 @@ func (m IPv4Network) Mask() netip.Addr {
 	return m.mask.Netip()
 }
 
+// LastAddr returns the greatest address in this network.
+//
+// For a contiguous network this is the broadcast address. For a
+// non-contiguous mask it is the network address with every host bit
+// set: masking that back yields the network address, so it is a
+// member, and no member can set a bit the mask clears beyond all of
+// them, so none is greater. Host bits need not form a trailing run
+// for either fact to hold. The result is an Is4 netip.Addr.
+func (m IPv4Network) LastAddr() netip.Addr {
+	return ipv4AddrFromBits(m.addr.Bits() | ^m.mask.Bits()).Netip()
+}
+
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
 // other.
 //

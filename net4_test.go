@@ -2645,3 +2645,134 @@ func Test_IPv4Network_Prefix_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { prefixSink, okSink = contiguous.Prefix() })
 	requireNoAllocs(t, func() { prefixSink, okSink = nonContiguous.Prefix() })
 }
+
+// verifies that the greatest member of a contiguous network is its
+// broadcast address, through the default-route and host-route extremes.
+func Test_IPv4Network_LastAddr_ContiguousBroadcast(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+		want    netip.Addr
+	}{
+		{name: "/24 broadcast", network: xnetip.MustParseIPv4Network("192.168.1.0/24"), want: netip.MustParseAddr("192.168.1.255")},
+		{name: "/24 broadcast in 10/8 space", network: xnetip.MustParseIPv4Network("10.0.0.0/24"), want: netip.MustParseAddr("10.0.0.255")},
+		{name: "/16 broadcast", network: xnetip.MustParseIPv4Network("172.16.0.0/16"), want: netip.MustParseAddr("172.16.255.255")},
+		{name: "/8 broadcast", network: xnetip.MustParseIPv4Network("127.0.0.0/8"), want: netip.MustParseAddr("127.255.255.255")},
+		{name: "host route is its own last address", network: xnetip.MustParseIPv4Network("10.0.0.1/32"), want: netip.MustParseAddr("10.0.0.1")},
+		{name: "all-ones host route", network: xnetip.MustParseIPv4Network("255.255.255.255/32"), want: netip.MustParseAddr("255.255.255.255")},
+		{name: "default route ends at all ones", network: xnetip.MustParseIPv4Network("0.0.0.0/0"), want: netip.MustParseAddr("255.255.255.255")},
+		{name: "zero value is the default route", network: xnetip.IPv4Network{}, want: netip.MustParseAddr("255.255.255.255")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.LastAddr())
+		})
+	}
+}
+
+// verifies that a non-contiguous mask sets every host bit wherever the
+// mask leaves a hole, not only in a trailing run.
+func Test_IPv4Network_LastAddr_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.IPv4Network
+		want    netip.Addr
+	}{
+		{name: "hole in the third octet", network: xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255"), want: netip.MustParseAddr("192.168.255.1")},
+		{name: "hole in the second octet", network: xnetip.MustParseIPv4Network("10.0.0.42/255.0.255.255"), want: netip.MustParseAddr("10.255.0.42")},
+		{name: "alternating mask fills the odd bits", network: xnetip.MustParseIPv4Network("0.0.0.0/170.170.170.170"), want: netip.MustParseAddr("85.85.85.85")},
+		{name: "single host bit in the middle", network: xnetip.MustParseIPv4Network("10.0.0.0/255.255.255.254"), want: netip.MustParseAddr("10.0.0.1")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.LastAddr())
+		})
+	}
+}
+
+// verifies that the result is a member of the network: masking it
+// yields the network address again.
+func Test_IPv4Network_LastAddr_MemberProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		lastBytes := network.LastAddr().As4()
+		maskBytes := network.Mask().As4()
+		last := binary.BigEndian.Uint32(lastBytes[:])
+		mask := binary.BigEndian.Uint32(maskBytes[:])
+		require.Equal(t, network.Addr(), netipAddrFrom4Bits(last&mask))
+	})
+}
+
+// verifies by brute force on small networks that no member exceeds
+// the last address and that the last address itself is enumerated.
+//
+// The mask is built by clearing at most 12 chosen positions, so every
+// host pattern can be deposited into those positions and the whole
+// membership enumerated.
+func Test_IPv4Network_LastAddr_MaximalByBruteForceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		hostBits := rapid.IntRange(0, 12).Draw(t, "host bits")
+		positions := rapid.SliceOfNDistinct(rapid.IntRange(0, 31), hostBits, hostBits, rapid.ID).Draw(t, "host positions")
+		mask := ^uint32(0)
+		for _, position := range positions {
+			mask &^= uint32(1) << position
+		}
+		network, err := xnetip.IPv4NetworkFrom(
+			genNetipAddr4.Draw(t, "addr"),
+			netipAddrFrom4Bits(mask),
+		)
+		require.NoError(t, err)
+		addrBytes := network.Addr().As4()
+		base := binary.BigEndian.Uint32(addrBytes[:])
+		last := network.LastAddr()
+		reached := false
+		for pattern := range 1 << hostBits {
+			member := base
+			for idx, position := range positions {
+				if pattern>>idx&1 == 1 {
+					member |= uint32(1) << position
+				}
+			}
+			require.LessOrEqual(t, netipAddrFrom4Bits(member).Compare(last), 0)
+			if netipAddrFrom4Bits(member) == last {
+				reached = true
+			}
+		}
+		require.True(t, reached, "last address never enumerated")
+	})
+}
+
+// verifies that the last address never sorts below the network address
+// and coincides with it exactly on a host route.
+func Test_IPv4Network_LastAddr_AtLeastAddrProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPv4Network.Draw(t, "network")
+		require.GreaterOrEqual(t, network.LastAddr().Compare(network.Addr()), 0)
+		fullMask := network.Mask() == netipAddrFrom4Bits(^uint32(0))
+		require.Equal(t, fullMask, network.LastAddr() == network.Addr())
+	})
+}
+
+// verifies against prefix arithmetic that a contiguous network's last
+// address is the network address with the trailing host run filled.
+func Test_IPv4Network_LastAddr_MatchesPrefixArithmeticProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := genNetipAddr4.Draw(t, "addr")
+		bits := rapid.IntRange(0, 32).Draw(t, "bits")
+		network, err := xnetip.IPv4NetworkFromCIDR(addr, bits)
+		require.NoError(t, err)
+		baseBytes := network.Addr().As4()
+		base := binary.BigEndian.Uint32(baseBytes[:])
+		want := base | ^uint32(0)>>uint(bits)
+		require.Equal(t, netipAddrFrom4Bits(want), network.LastAddr())
+	})
+}
+
+// verifies that the last address is computed without allocating,
+// whatever the mask's shape.
+func Test_IPv4Network_LastAddr_AllocationFree(t *testing.T) {
+	contiguous := xnetip.MustParseIPv4Network("192.168.1.0/24")
+	nonContiguous := xnetip.MustParseIPv4Network("192.168.0.1/255.255.0.255")
+	requireNoAllocs(t, func() { addrSink = contiguous.LastAddr() })
+	requireNoAllocs(t, func() { addrSink = nonContiguous.LastAddr() })
+}
