@@ -424,6 +424,36 @@ func (m IPNetwork) Merge(other IPNetwork) (IPNetwork, bool) {
 	return IPNetwork{network: network, is4: m.is4}, true
 }
 
+// MergeByLowestMaskBit merges two networks of the same family when
+// one contains the other or when they are lowest-mask-bit siblings.
+//
+// Networks of different families never merge and report false.
+// Within a family the result and the flag are exactly those of the
+// IPv4Network or IPv6Network method, and the result keeps the
+// operands' family. On ok=false the returned value is the zero
+// IPNetwork.
+func (m IPNetwork) MergeByLowestMaskBit(other IPNetwork) (IPNetwork, bool) {
+	// The family check must come first: without it the IPv6 universe
+	// would absorb the mapped storage form of every IPv4 network.
+	//
+	// For two IPv4 networks the 128-bit merge of the stored forms is
+	// exact: mapped storage pins the top 96 address and mask bits to
+	// the same values on both sides, so the lowest set bit of an
+	// equal non-zero mask, the sibling test and the containment
+	// probes all land in the low 32 bits, and the equal all-zero
+	// IPv4 masks resolve as equal networks. Either way the result is
+	// one of the inputs or their low-32 sibling union, a valid
+	// mapped network.
+	if m.is4 != other.is4 {
+		return IPNetwork{}, false
+	}
+	network, ok := m.network.MergeByLowestMaskBit(other.network)
+	if !ok {
+		return IPNetwork{}, false
+	}
+	return IPNetwork{network: network, is4: m.is4}, true
+}
+
 // IsContiguous reports whether the mask, in the network's own family,
 // is a CIDR prefix mask: leading one bits followed only by zero bits.
 //
