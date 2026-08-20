@@ -304,6 +304,99 @@ func Test_IPv6Addr_Netip_DoesNotAllocate(t *testing.T) {
 	requireNoAllocs(t, func() { netipAddrSink = address.Netip() })
 }
 
+// verifies the documentation example of the extraction: the mapped
+// address yields the four octets behind the ::ffff: prefix.
+func Test_IPv6Addr_ToIPv4Mapped_ExtractsDocumentationExample(t *testing.T) {
+	address, ok := xnetip.MustParseIPv6Addr("::ffff:192.10.2.255").ToIPv4Mapped()
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv4Addr("192.10.2.255"), address)
+}
+
+// verifies that the two ends of the mapped range extract cleanly.
+func Test_IPv6Addr_ToIPv4Mapped_ExtractsRangeEnds(t *testing.T) {
+	address, ok := xnetip.MustParseIPv6Addr("::ffff:0.0.0.0").ToIPv4Mapped()
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv4Addr("0.0.0.0"), address)
+	address, ok = xnetip.MustParseIPv6Addr("::ffff:255.255.255.255").ToIPv4Mapped()
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv4Addr("255.255.255.255"), address)
+}
+
+// verifies the extraction on the Rust crate's hex-group example.
+func Test_IPv6Addr_ToIPv4Mapped_MatchesCrateExample(t *testing.T) {
+	address, ok := xnetip.MustParseIPv6Addr("::ffff:c0a8:100").ToIPv4Mapped()
+	require.True(t, ok)
+	require.Equal(t, xnetip.MustParseIPv4Addr("192.168.1.0"), address)
+}
+
+// verifies that every address outside the mapped range is rejected with
+// the zero address and false.
+//
+// The rejected shapes are the unspecified address, loopback, the
+// deprecated IPv4-compatible form, near-miss prefixes around the mapped
+// one, the NAT64 well-known prefix and a plain global unicast address.
+func Test_IPv6Addr_ToIPv4Mapped_RejectsEverythingOutsideMappedRange(t *testing.T) {
+	rejected := []string{
+		"::",
+		"::1",
+		"::192.10.2.255",
+		"::fffe:1.2.3.4",
+		"::1:ffff:1.2.3.4",
+		"1::ffff:1.2.3.4",
+		"64:ff9b::1.2.3.4",
+		"2001:db8::1",
+	}
+	for _, text := range rejected {
+		address, ok := xnetip.MustParseIPv6Addr(text).ToIPv4Mapped()
+		require.False(t, ok, text)
+		require.Equal(t, xnetip.IPv4Addr{}, address, text)
+	}
+}
+
+// verifies that the extraction succeeds exactly on the mapped range and
+// that mapping the result back restores the input.
+func Test_IPv6Addr_ToIPv4Mapped_SucceedsIffIs4In6(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		mapped := genIPv6Addr.Draw(t, "address")
+		address, ok := mapped.ToIPv4Mapped()
+		require.Equal(t, mapped.Is4In6(), ok)
+		if ok {
+			require.Equal(t, mapped, address.ToIPv6Mapped())
+		}
+	})
+}
+
+// verifies that the extraction inverts the mapping for every IPv4
+// address.
+func Test_IPv6Addr_ToIPv4Mapped_InvertsToIPv6Mapped(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genIPv4Addr.Draw(t, "address")
+		back, ok := address.ToIPv6Mapped().ToIPv4Mapped()
+		require.True(t, ok)
+		require.Equal(t, address, back)
+	})
+}
+
+// verifies that the extraction agrees with netip.Addr.Unmap: it succeeds
+// exactly when unmapping lands on IPv4 and then agrees on the octets.
+func Test_IPv6Addr_ToIPv4Mapped_MatchesNetipUnmap(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		mapped := genIPv6Addr.Draw(t, "address")
+		address, ok := mapped.ToIPv4Mapped()
+		oracle := netip.AddrFrom16(mapped.As16()).Unmap()
+		require.Equal(t, oracle.Is4(), ok)
+		if ok {
+			require.Equal(t, oracle.As4(), address.As4())
+		}
+	})
+}
+
+// verifies that the extraction does not allocate.
+func Test_IPv6Addr_ToIPv4Mapped_DoesNotAllocate(t *testing.T) {
+	mapped := xnetip.MustParseIPv6Addr("::ffff:1.2.3.4")
+	requireNoAllocs(t, func() { ipv4AddrSink, boolSink = mapped.ToIPv4Mapped() })
+}
+
 // verifies that only :: is unspecified: the IPv4-mapped zero is a
 // different address and neither is global unicast.
 func Test_IPv6Addr_IsUnspecified_OnlyAllZeros(t *testing.T) {

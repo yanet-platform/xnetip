@@ -73,6 +73,19 @@ func (m IPv6Addr) Netip() netip.Addr {
 	return netip.AddrFrom16(m.As16())
 }
 
+// ToIPv4Mapped returns the IPv4 address embedded in an IPv4-mapped IPv6
+// address ::ffff:a.b.c.d, inverting IPv4Addr.ToIPv6Mapped.
+//
+// The second result is false for every address outside ::ffff:0:0/96,
+// including the deprecated IPv4-compatible form ::a.b.c.d (RFC 4291
+// section 2.5.5.1), which netip.Addr.Unmap does not unwrap either.
+func (m IPv6Addr) ToIPv4Mapped() (IPv4Addr, bool) {
+	if !m.Is4In6() {
+		return IPv4Addr{}, false
+	}
+	return IPv4AddrFromBits(uint32(m.bits.lo)), true
+}
+
 // IsUnspecified reports whether the address is ::.
 //
 // The IPv4-mapped ::ffff:0.0.0.0 is a different 128-bit value and is not
