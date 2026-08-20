@@ -294,6 +294,37 @@ func (m IPNetwork) AppendTo(b []byte) []byte {
 	return m.network.AppendTo(b)
 }
 
+// MarshalText implements encoding.TextMarshaler.
+//
+// The text is the String form of the network in its own address
+// family: an IPv4 network prints in dotted form even though it is
+// stored IPv4-mapped, an IPv6 network prints compressed. It never
+// fails and allocates only the returned slice.
+func (m IPNetwork) MarshalText() ([]byte, error) {
+	return m.AppendTo(make([]byte, 0, len("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"))), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+//
+// The text must be accepted by ParseIPNetwork, which detects the
+// family from the address part, so a zone suffix is rejected and
+// IPv4-mapped text stays IPv6. Empty text wraps ErrEmptyInput rather
+// than yielding the zero value the way it yields the invalid zero
+// netip.Prefix: the zero IPNetwork is the valid network ::/0, so empty
+// text would silently hide a missing field. The receiver is untouched
+// on any error.
+func (m *IPNetwork) UnmarshalText(text []byte) error {
+	if len(text) == 0 {
+		return wrapParseError("IPNetwork.UnmarshalText", "", ErrEmptyInput, nil)
+	}
+	network, err := ParseIPNetwork(string(text))
+	if err != nil {
+		return err
+	}
+	*m = network
+	return nil
+}
+
 // ToIPv6Mapped embeds the network into IPv6 address space.
 //
 // An IPv4 network is returned as its IPv4-mapped IPv6 network (address

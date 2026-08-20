@@ -3,6 +3,7 @@ package xnetip_test
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -1871,4 +1872,225 @@ func BenchmarkParseIPNetwork_Reject(b *testing.B) {
 	for b.Loop() {
 		ipNetworkSink, errSink = xnetip.ParseIPNetwork("hello")
 	}
+}
+
+// verifies that the marshaled text is the string form in the network's
+// own family: the IPv4-mapped storage form never leaks.
+func Test_IPNetwork_MarshalText_MatchesStringForm(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "IPv4 prints in dotted form", input: "77.88.0.0/16", want: "77.88.0.0/16"},
+		{name: "IPv4 host route keeps the suffix", input: "77.88.55.242", want: "77.88.55.242/32"},
+		{name: "IPv6 prefix", input: "2a02:6b8:c00::/40", want: "2a02:6b8:c00::/40"},
+		{name: "IPv6 host route", input: "2a02:6b8::2:242", want: "2a02:6b8::2:242/128"},
+		{name: "IPv4 universe is not the mapped form", input: "0.0.0.0/0", want: "0.0.0.0/0"},
+		{name: "IPv4 dotted contiguous mask contracts", input: "77.88.0.0/255.255.0.0", want: "77.88.0.0/16"},
+		{name: "IPv4 non-contiguous mask", input: "10.0.0.0/255.0.255.0", want: "10.0.0.0/255.0.255.0"},
+		{name: "IPv6 non-contiguous mask", input: "2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0", want: "2a02:6b8:c00::1234:0:0/ffff:ffff:ff00:0:ffff:ffff::"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			text, err := xnetip.MustParseIPNetwork(testCase.input).MarshalText()
+			require.NoError(t, err)
+			require.Equal(t, testCase.want, string(text))
+		})
+	}
+}
+
+// verifies that the zero value marshals as the IPv6 universe.
+func Test_IPNetwork_MarshalText_ZeroValueIsIPv6Universe(t *testing.T) {
+	text, err := xnetip.IPNetwork{}.MarshalText()
+	require.NoError(t, err)
+	require.Equal(t, "::/0", string(text))
+}
+
+// verifies that unmarshaling detects the family from the address part
+// and lands on the concrete network of that family.
+func Test_IPNetwork_UnmarshalText_SetsFamilyFromText(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		wantAddr string
+		wantMask string
+		want4    bool
+	}{
+		{name: "IPv4 text sets the IPv4 family", input: "192.168.0.0/24", wantAddr: "192.168.0.0", wantMask: "255.255.255.0", want4: true},
+		{name: "IPv6 text", input: "2001:db8::/32", wantAddr: "2001:db8::", wantMask: "ffff:ffff::", want4: false},
+		{name: "IPv4 non-contiguous mask sets the IPv4 family", input: "10.0.0.1/255.0.0.255", wantAddr: "10.0.0.1", wantMask: "255.0.0.255", want4: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var network xnetip.IPNetwork
+			require.NoError(t, network.UnmarshalText([]byte(testCase.input)))
+			if testCase.want4 {
+				require.Equal(t, mustIPNetwork4(t, testCase.wantAddr, testCase.wantMask), network)
+			} else {
+				require.Equal(t, mustIPNetwork6(t, testCase.wantAddr, testCase.wantMask), network)
+			}
+		})
+	}
+}
+
+// verifies that IPv4-mapped text unmarshals as an IPv6 network, never
+// collapsing into the IPv4 family.
+func Test_IPNetwork_UnmarshalText_MappedTextIsIPv6(t *testing.T) {
+	var network xnetip.IPNetwork
+	require.NoError(t, network.UnmarshalText([]byte("::ffff:10.0.0.0/104")))
+	require.True(t, network.Is6())
+	_, ok := network.IPv4()
+	require.False(t, ok)
+}
+
+// verifies that empty text is an error, because the zero value is the
+// valid universe network and must not appear out of a missing field.
+func Test_IPNetwork_UnmarshalText_EmptyTextIsError(t *testing.T) {
+	network := xnetip.MustParseIPNetwork("10.0.0.0/8")
+	err := network.UnmarshalText(nil)
+	require.ErrorIs(t, err, xnetip.ErrEmptyInput)
+	require.Equal(t, xnetip.MustParseIPNetwork("10.0.0.0/8"), network)
+}
+
+// verifies that a failed unmarshal reports the parser's sentinel and
+// leaves the receiver untouched.
+func Test_IPNetwork_UnmarshalText_KeepsReceiverOnError(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		sentinel error
+	}{
+		{name: "zone", input: "fe80::1%eth0/64", sentinel: xnetip.ErrZone},
+		{name: "cross-family mask", input: "1.2.3.4/ffff::", sentinel: xnetip.ErrInvalidMask},
+		{name: "prefix overflow", input: "10.0.0.0/33", sentinel: xnetip.ErrCIDROverflow},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseIPNetwork("192.168.0.0/24")
+			err := network.UnmarshalText([]byte(testCase.input))
+			require.ErrorIs(t, err, testCase.sentinel)
+			require.Equal(t, xnetip.MustParseIPNetwork("192.168.0.0/24"), network)
+		})
+	}
+}
+
+// verifies that a slice mixing both families round-trips through JSON
+// with each element's family preserved.
+func Test_IPNetwork_MarshalText_JSONMixedFamilies(t *testing.T) {
+	value := []xnetip.IPNetwork{
+		xnetip.MustParseIPNetwork("10.0.0.0/8"),
+		xnetip.MustParseIPNetwork("2001:db8::/32"),
+	}
+	encoded, err := json.Marshal(value)
+	require.NoError(t, err)
+	require.Equal(t, `["10.0.0.0/8","2001:db8::/32"]`, string(encoded))
+	var decoded []xnetip.IPNetwork
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, value, decoded)
+	require.True(t, decoded[0].Is4())
+	require.True(t, decoded[1].Is6())
+}
+
+// verifies that the type works as a JSON map key, which encoding/json
+// routes through the text marshaler pair.
+func Test_IPNetwork_MarshalText_JSONMapKeyRoundTrip(t *testing.T) {
+	value := map[xnetip.IPNetwork]int{xnetip.MustParseIPNetwork("10.0.0.0/8"): 1}
+	encoded, err := json.Marshal(value)
+	require.NoError(t, err)
+	require.Equal(t, `{"10.0.0.0/8":1}`, string(encoded))
+	var decoded map[xnetip.IPNetwork]int
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, value, decoded)
+}
+
+// verifies that unmarshaling the marshaled text recovers the network
+// exactly, the family flag included.
+func Test_IPNetwork_MarshalText_RoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		text, err := network.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, []byte(network.String()), text)
+		var back xnetip.IPNetwork
+		require.NoError(t, back.UnmarshalText(text))
+		require.Equal(t, network, back)
+	})
+}
+
+// verifies that the family-agnostic text never differs from the
+// concrete type's text for the same network.
+func Test_IPNetwork_MarshalText_AgreesWithConcreteTypesProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		if rapid.Bool().Draw(t, "is4") {
+			network := genIPv4Network.Draw(t, "network4")
+			concreteText, err := network.MarshalText()
+			require.NoError(t, err)
+			agnosticText, err := xnetip.IPNetworkFrom4(network).MarshalText()
+			require.NoError(t, err)
+			require.Equal(t, concreteText, agnosticText)
+		} else {
+			network := genIPv6Network.Draw(t, "network6")
+			concreteText, err := network.MarshalText()
+			require.NoError(t, err)
+			agnosticText, err := xnetip.IPNetworkFrom6(network).MarshalText()
+			require.NoError(t, err)
+			require.Equal(t, concreteText, agnosticText)
+		}
+	})
+}
+
+// verifies that a JSON round trip of a slice mixing families preserves
+// every element for every mask shape.
+func Test_IPNetwork_MarshalText_JSONRoundTripProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		value := rapid.SliceOfN(genIPNetwork, 0, 8).Draw(t, "networks")
+		encoded, err := json.Marshal(value)
+		require.NoError(t, err)
+		var decoded []xnetip.IPNetwork
+		require.NoError(t, json.Unmarshal(encoded, &decoded))
+		if len(value) == 0 {
+			require.Empty(t, decoded)
+			return
+		}
+		require.Equal(t, value, decoded)
+	})
+}
+
+// verifies that on contiguous networks of either family the marshaled
+// text is byte-identical to the netip prefix marshaling.
+func Test_IPNetwork_MarshalText_MatchesNetipPrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genIPNetwork.Draw(t, "network")
+		bits, ok := network.PrefixLen()
+		if !ok {
+			return
+		}
+		stdText, err := netip.PrefixFrom(network.Addr(), bits).MarshalText()
+		require.NoError(t, err)
+		text, err := network.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, stdText, text)
+	})
+}
+
+// verifies the deliberate divergence from std: empty text unmarshals
+// into a zero netip prefix but is an error here.
+//
+// The zero netip prefix is invalid and safe to produce, while the zero
+// network here is the whole IPv6 universe.
+func Test_IPNetwork_UnmarshalText_EmptyTextDivergesFromNetip(t *testing.T) {
+	var stdPrefix netip.Prefix
+	require.NoError(t, stdPrefix.UnmarshalText(nil))
+	var network xnetip.IPNetwork
+	require.Error(t, network.UnmarshalText(nil))
+}
+
+// verifies that marshaling allocates exactly the returned slice in
+// both families.
+func Test_IPNetwork_MarshalText_SingleAllocation(t *testing.T) {
+	network4 := xnetip.MustParseIPNetwork("10.0.0.0/8")
+	network6 := xnetip.MustParseIPNetwork("2001:db8::/32")
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = network4.MarshalText() })))
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { bytesSink, errSink = network6.MarshalText() })))
 }
