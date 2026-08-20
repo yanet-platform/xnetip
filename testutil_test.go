@@ -11,9 +11,13 @@
 package xnetip_test
 
 import (
+	"encoding/binary"
+	"math"
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/xnetip"
 	"pgregory.net/rapid"
 )
 
@@ -65,9 +69,108 @@ func (m *failRecorder) Errorf(string, ...any) { m.errors++ }
 
 func (m *failRecorder) FailNow() { m.failedNow = true }
 
+// genNetipAddr4 draws an Is4 netip.Addr: uniform 32-bit values, with one
+// draw in ten on a boundary or half-word pattern.
+//
+// The fixed shapes are the two extremes, the sign-bit split and the two
+// half-word masks, the patterns the network generators build masks from.
+// They are drawn explicitly because shrinking walks towards zero and
+// rarely stops at the other boundaries.
+var genNetipAddr4 = rapid.Custom(func(t *rapid.T) netip.Addr {
+	var bits uint32
+	if rapid.IntRange(0, 9).Draw(t, "shape") > 0 {
+		bits = rapid.Uint32().Draw(t, "bits")
+	} else {
+		boundaries := []uint32{0, math.MaxUint32, 0x7FFFFFFF, 0x80000000, 0x0000FFFF, 0xFFFF0000}
+		bits = rapid.SampledFrom(boundaries).Draw(t, "boundary")
+	}
+	var bytes [4]byte
+	binary.BigEndian.PutUint32(bytes[:], bits)
+	return netip.AddrFrom4(bytes)
+})
+
+// genNetipAddr6 draws an Is6 netip.Addr: uniform 128-bit values with
+// fixed shares of IPv4-mapped and boundary patterns.
+//
+// One draw in five is IPv4-mapped and one in ten a boundary pattern.
+// IPv4-mapped addresses are drawn explicitly because they are the Is6
+// values closest to the IPv4 family and the ones most likely to slip
+// through a family check that unmaps too eagerly: per the
+// netip.Prefix.Contains rule, 4in6 is IPv6.
+var genNetipAddr6 = rapid.Custom(func(t *rapid.T) netip.Addr {
+	var hi, lo uint64
+	switch rapid.IntRange(0, 9).Draw(t, "shape") {
+	case 0:
+		boundaries := [][2]uint64{
+			{0, 0},
+			{math.MaxUint64, math.MaxUint64},
+			{0, math.MaxUint64},
+			{math.MaxUint64, 0},
+		}
+		halves := rapid.SampledFrom(boundaries).Draw(t, "boundary")
+		hi, lo = halves[0], halves[1]
+	case 1, 2:
+		hi, lo = 0, 0x0000FFFF00000000|uint64(rapid.Uint32().Draw(t, "mapped"))
+	default:
+		hi = rapid.Uint64().Draw(t, "hi")
+		lo = rapid.Uint64().Draw(t, "lo")
+	}
+	var bytes [16]byte
+	binary.BigEndian.PutUint64(bytes[:8], hi)
+	binary.BigEndian.PutUint64(bytes[8:], lo)
+	return netip.AddrFrom16(bytes)
+})
+
+// genIPv4Network draws an IPv4 network through the total integer
+// constructor, asserting every draw normalized.
+//
+// The address is uniform and the mask comes from fixed-weight shapes:
+// contiguous prefixes of every length, random
+// patterns, the two alternating patterns, the all-zero universe mask
+// and the all-ones host route, weighted 3:3:2:1:1 so the boundary
+// shapes appear in every run instead of relying on shrinking. The
+// normalization assertion makes every property test that draws a
+// network inherit the invariant check of the type's birth session.
+var genIPv4Network = rapid.Custom(func(t *rapid.T) xnetip.IPv4Network {
+	addressBits := rapid.Uint32().Draw(t, "addr")
+	var maskBits uint32
+	switch rapid.IntRange(0, 9).Draw(t, "mask shape") {
+	case 0, 1, 2:
+		maskBits = ^uint32(0) << (32 - rapid.IntRange(0, 32).Draw(t, "prefix"))
+	case 3, 4, 5:
+		maskBits = rapid.Uint32().Draw(t, "mask")
+	case 6, 7:
+		maskBits = rapid.SampledFrom([]uint32{0xAAAAAAAA, 0x55555555}).Draw(t, "alternating")
+	case 8:
+		maskBits = 0
+	default:
+		maskBits = math.MaxUint32
+	}
+	network := xnetip.IPv4NetworkFromBits(addressBits, maskBits)
+	networkAddr, networkMask := network.Bits()
+	require.Equal(t, networkAddr&networkMask, networkAddr, "network not normalized")
+	require.Equal(t, maskBits, networkMask, "mask not preserved")
+	return network
+})
+
+// genIPv4Prefix draws a valid Is4 netip.Prefix with the address left
+// unmasked and the length uniform over 0 through 32.
+//
+// It exists for differential tests against net/netip on contiguous
+// networks: the prefix carries the same information as a contiguous
+// network, with std as the oracle for normalization, containment and
+// formatting.
+var genIPv4Prefix = rapid.Custom(func(t *rapid.T) netip.Prefix {
+	address := genNetipAddr4.Draw(t, "addr")
+	bits := rapid.IntRange(0, 32).Draw(t, "bits")
+	return netip.PrefixFrom(address, bits)
+})
+
 // Sinks keep the measured closures' results alive, so the compiler cannot
 // optimise the work under test away.
 var (
-	wordSink  uint32
-	bytesSink []byte
+	wordSink    uint32
+	bytesSink   []byte
+	networkSink xnetip.IPv4Network
+	addrSink    netip.Addr
 )
