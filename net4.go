@@ -86,7 +86,7 @@ func IPv4NetworkFromAddr(addr netip.Addr) (IPv4Network, error) {
 // ipv4AllBits is the all-ones mask, the mask of a host route.
 //
 // Pairing an address with it keeps every address bit, so a host route
-// is normalized by construction (../netip/src/net.rs:27).
+// is normalized by construction.
 var ipv4AllBits = ipv4AddrFromBits(^uint32(0))
 
 // Addr returns the network address (already normalized by the mask) as

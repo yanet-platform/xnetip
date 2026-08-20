@@ -51,7 +51,7 @@ func ipv4AddrFromNetip(a netip.Addr) (addr ipv4Addr, ok bool) {
 // with a length a contiguous mask can have. The mask is the complement
 // of all ones shifted right by the length, and a shift by the full word
 // width is zero in Go, so 0 yields the empty mask and 32 all ones
-// without a special case (../netip/src/net.rs:50).
+// without a special case.
 func ipv4MaskFromPrefix(bits int) ipv4Addr {
 	return ipv4AddrFromBits(^(^uint32(0) >> uint(bits)))
 }

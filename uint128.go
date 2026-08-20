@@ -74,7 +74,7 @@ func (m uint128) IsMax() bool {
 // The high half decides and the low half breaks a tie, which is the
 // numeric order of the 128-bit value and equals the lexicographic order
 // of the big-endian byte form. It is the order the IPv6 network
-// comparison relies on (../netip/src/net.rs:3736).
+// comparison relies on.
 func (m uint128) Compare(other uint128) int {
 	switch {
 	case m.hi < other.hi || m.hi == other.hi && m.lo < other.lo:
@@ -116,7 +116,7 @@ func (m uint128) SubOne() uint128 {
 //
 // A value and-ed with its negation keeps exactly its lowest set bit,
 // which is how the difference peel and the range decomposition find
-// their next block (../netip/src/net.rs:3918, ../netip/src/net.rs:4178).
+// their next block.
 func (m uint128) Neg() uint128 {
 	return uint128{}.Sub(m)
 }
@@ -220,7 +220,7 @@ func (m uint128) IsPowerOfTwo() bool {
 // of one counts them: bit 0 is the last bit of an IPv6 address and bit
 // 127 its first. That is the opposite of the top-down numbering IPv6
 // prose uses, so a caller holding a leading-zero count passes 127 minus
-// that count to name the highest set bit (../netip/src/net.rs:4154).
+// that count to name the highest set bit.
 func uint128Bit(n int) uint128 {
 	return uint128{0, 1}.Shl(uint(n))
 }
@@ -232,8 +232,7 @@ func uint128Bit(n int) uint128 {
 // reject longer prefixes with an error, this helper is only ever called
 // with a length a contiguous mask can have. The mask is the complement
 // of all ones shifted right by the length, so 0 yields the empty mask,
-// 64 exactly the high half and 128 all ones without a special case
-// (../netip/src/net.rs:68).
+// 64 exactly the high half and 128 all ones without a special case.
 func uint128MaskFromPrefix(bits int) uint128 {
 	return uint128{^uint64(0), ^uint64(0)}.Shr(uint(bits)).Not()
 }
@@ -246,8 +245,7 @@ func uint128MaskFromPrefix(bits int) uint128 {
 // one. The result is all ones only if every bit above that one was
 // already set, which is the leading-run shape. Zero has no lowest set
 // bit to flip, its predecessor wraps to all ones and the empty mask of
-// the whole address space counts as contiguous, as it must
-// (../netip/src/net.rs:2965).
+// the whole address space counts as contiguous, as it must.
 func (m uint128) IsContiguousMask() bool {
 	return m.Or(m.SubOne()).IsMax()
 }

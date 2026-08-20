@@ -89,7 +89,7 @@ func IPv6NetworkFromAddr(addr netip.Addr) (IPv6Network, error) {
 // ipv6AllBits is the all-ones mask, the mask of a host route.
 //
 // Pairing an address with it keeps every address bit, so a host route
-// is normalized by construction (../netip/src/net.rs:28).
+// is normalized by construction.
 var ipv6AllBits = ipv6AddrFromBits(^uint64(0), ^uint64(0))
 
 // Addr returns the network address (already normalized by the mask) as

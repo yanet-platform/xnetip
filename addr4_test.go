@@ -85,7 +85,7 @@ func Test_IPv4MaskFromPrefix_LeadingOnesTable(t *testing.T) {
 //
 // A value whose leading-one run and population count both equal the
 // length is uniquely determined, so together the two counts pin every
-// mask the way the Rust table does (../netip/src/net.rs:5038).
+// mask.
 func Test_IPv4MaskFromPrefix_LeadingOnesAndCountAreLength(t *testing.T) {
 	for length := range 33 {
 		mask := ipv4MaskFromPrefix(length).Bits()

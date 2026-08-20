@@ -384,8 +384,8 @@ func Test_Uint128_Constructors_PlaceHalves(t *testing.T) {
 // its carry across the preset mask bits and rolls over on the last one.
 //
 // The step is the one the address iterator takes: or the mask in, add
-// one, clear the mask bits, or the base back (../netip/src/net.rs:3786).
-// With the whole high half in the mask the carry out of bit 63 runs
+// one, clear the mask bits, or the base back. With the whole high half
+// in the mask the carry out of bit 63 runs
 // through it and the last host pattern wraps to the base.
 func Test_Uint128_AddOne_CarryRipplesOverMaskBits(t *testing.T) {
 	cases := []struct {
@@ -419,8 +419,8 @@ func Test_Uint128_AddOne_CarryRipplesOverMaskBits(t *testing.T) {
 // its borrow across the cleared mask bits and across bit 64.
 //
 // The step mirrors the forward one: clear the mask bits, subtract one,
-// clear them again, or the base back (../netip/src/net.rs:3834). From
-// the first host pattern it lands on the last one.
+// clear them again, or the base back. From the first host pattern it
+// lands on the last one.
 func Test_Uint128_SubOne_BorrowRipplesOverMaskBits(t *testing.T) {
 	mask := uint128{1 << 63, 0}
 	base := uint128{1 << 63, 0}
