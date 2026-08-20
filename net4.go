@@ -351,8 +351,9 @@ func (m Network4) AddrsBackward() iter.Seq[netip.Addr] {
 // The order is lexicographic on (address, mask), both compared as
 // unsigned 32-bit integers: the address decides first and the mask
 // breaks ties, so a container sorts before the networks nested under
-// the same address. This order is a documented contract: the output
-// of Aggregate4 and the input of BinarySplit4 are sorted by it.
+// the same address. This order is a documented contract: it is the
+// sort Aggregate4 applies before its greedy pass and the order
+// BinarySplit4 expects of its input.
 func (m Network4) Compare(other Network4) int {
 	if order := m.addr.Compare(other.addr); order != 0 {
 		return order
