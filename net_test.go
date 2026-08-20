@@ -1557,6 +1557,112 @@ func Test_IPNetwork_Intersection_AllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { ipNetworkSink, okSink = left4.Intersection(right6) })
 }
 
+// verifies that the intersection predicate delegates within a family
+// and is false across families.
+//
+// The family rule comes first: each family universe intersects every
+// network of its family and nothing else, and an IPv4-mapped IPv6
+// network never intersects the IPv4 network with the same bytes.
+func Test_IPNetwork_Intersects_FamiliesAndBoundary(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  bool
+	}{
+		{name: "IPv4 overlapping", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("192.168.1.0/24"), want: true},
+		{name: "IPv4 disjoint", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
+		{name: "mixed families", left: xnetip.MustParseIPNetwork("192.168.0.0/16"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: false},
+		{name: "mixed families reversed", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("192.168.0.0/16"), want: false},
+		{name: "IPv6 overlapping", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("2001:db8:1::/48"), want: true},
+		{name: "IPv4 universe vs IPv6 universe", left: xnetip.MustParseIPNetwork("0.0.0.0/0"), right: xnetip.IPNetwork{}, want: false},
+		{name: "mapped IPv6 vs IPv4 with the same bytes", left: xnetip.MustParseIPNetwork("::ffff:10.0.0.0/104"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: false},
+		{name: "IPv4 self", left: xnetip.MustParseIPNetwork("10.0.0.0/8"), right: xnetip.MustParseIPNetwork("10.0.0.0/8"), want: true},
+		{name: "IPv6 self", left: xnetip.MustParseIPNetwork("2001:db8::/32"), right: xnetip.MustParseIPNetwork("2001:db8::/32"), want: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.Intersects(testCase.right))
+		})
+	}
+}
+
+// verifies that non-contiguous intersection checks of both families
+// flow through the wrapper.
+func Test_IPNetwork_Intersects_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  xnetip.IPNetwork
+		right xnetip.IPNetwork
+		want  bool
+	}{
+		{name: "IPv4 pattern overlaps block", left: xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255"), right: xnetip.MustParseIPNetwork("10.1.0.0/255.255.0.0"), want: true},
+		{name: "IPv6 pattern disjoint from block", left: xnetip.MustParseIPNetwork("2001::1/ffff::ffff"), right: xnetip.MustParseIPNetwork("2002::/16"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.left.Intersects(testCase.right))
+		})
+	}
+}
+
+// verifies that the wrapped predicate equals the concrete answer in
+// each family.
+func Test_IPNetwork_Intersects_AgreesWithConcreteProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left4 := genIPv4Network.Draw(t, "left4")
+		right4 := genIPv4Network.Draw(t, "right4")
+		require.Equal(
+			t,
+			left4.Intersects(right4),
+			xnetip.IPNetworkFrom4(left4).Intersects(xnetip.IPNetworkFrom4(right4)),
+		)
+		left6 := genIPv6Network.Draw(t, "left6")
+		right6 := genIPv6Network.Draw(t, "right6")
+		require.Equal(
+			t,
+			left6.Intersects(right6),
+			xnetip.IPNetworkFrom6(left6).Intersects(xnetip.IPNetworkFrom6(right6)),
+		)
+	})
+}
+
+// verifies that networks of different families never intersect,
+// whatever their masks.
+func Test_IPNetwork_Intersects_CrossFamilyAlwaysFalseProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network4 := xnetip.IPNetworkFrom4(genIPv4Network.Draw(t, "network4"))
+		network6 := xnetip.IPNetworkFrom6(genIPv6Network.Draw(t, "network6"))
+		require.False(t, network4.Intersects(network6))
+		require.False(t, network6.Intersects(network4))
+	})
+}
+
+// verifies that the predicate is symmetric, reflexive and answers
+// exactly whether the intersection exists, whatever the families.
+func Test_IPNetwork_Intersects_SymmetryAndEquivalenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genIPNetwork.Draw(t, "left")
+		right := genIPNetwork.Draw(t, "right")
+		require.Equal(t, left.Intersects(right), right.Intersects(left))
+		require.True(t, left.Intersects(left))
+		_, ok := left.Intersection(right)
+		require.Equal(t, ok, left.Intersects(right))
+	})
+}
+
+// verifies that the predicate allocates nothing in either family and
+// across families.
+func Test_IPNetwork_Intersects_AllocationFree(t *testing.T) {
+	left4 := xnetip.MustParseIPNetwork("10.0.0.1/255.0.0.255")
+	right4 := xnetip.MustParseIPNetwork("10.1.0.0/255.255.0.0")
+	left6 := xnetip.MustParseIPNetwork("2001::1/ffff::ffff")
+	right6 := xnetip.MustParseIPNetwork("2001:1::/32")
+	requireNoAllocs(t, func() { okSink = left4.Intersects(right4) })
+	requireNoAllocs(t, func() { okSink = left6.Intersects(right6) })
+	requireNoAllocs(t, func() { okSink = left4.Intersects(right6) })
+}
+
 // verifies that contiguity is judged in the network's own family, the
 // concrete types' positive and negative pins lifted through the wrap.
 func Test_IPNetwork_IsContiguous_JudgedInOwnFamily(t *testing.T) {
