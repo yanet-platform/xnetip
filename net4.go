@@ -399,6 +399,21 @@ func (m Network4) containsContiguous(other Network4) bool {
 	return a2&m1 == a1 && m1 <= m2
 }
 
+// ContainsAddr reports whether addr is an address of this network.
+//
+// The test is total, the netip.Prefix.Contains rule: an address that
+// is not Is4 — an IPv6 address, IPv4-mapped included, or the invalid
+// zero netip.Addr — is simply not contained. The mask may be
+// non-contiguous: membership is agreement with the network address on
+// every mask bit. Equivalent to Contains of the host route of addr,
+// without the construction.
+func (m Network4) ContainsAddr(addr netip.Addr) bool {
+	// The network address is normalized, so masking the argument
+	// alone decides membership.
+	member, ok := addr4FromNetip(addr)
+	return ok && member.Bits()&m.mask.Bits() == m.addr.Bits()
+}
+
 // Intersection returns the network of addresses common to m and other.
 //
 // The intersection of two networks is always a single network: its

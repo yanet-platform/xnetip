@@ -861,6 +861,179 @@ func BenchmarkNetwork4_Contains_NonContiguous(b *testing.B) {
 	}
 }
 
+// verifies that address membership is total and follows the
+// netip.Prefix.Contains rule over contiguous networks.
+//
+// A member is any address agreeing on the prefix, the universe holds
+// every Is4 address, a host route holds only itself, and an address
+// that is not Is4 — plain IPv6, IPv4-mapped or the invalid zero value
+// — is not contained rather than an error.
+func Test_Network4_ContainsAddr_UnitAndBoundary(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.Network4
+		addr    netip.Addr
+		want    bool
+	}{
+		{name: "member", network: xnetip.MustParseNetwork4("10.0.0.0/8"), addr: netip.MustParseAddr("10.1.2.3"), want: true},
+		{name: "non-member", network: xnetip.MustParseNetwork4("10.0.0.0/8"), addr: netip.MustParseAddr("11.0.0.0"), want: false},
+		{name: "network address itself", network: xnetip.MustParseNetwork4("10.0.0.0/8"), addr: netip.MustParseAddr("10.0.0.0"), want: true},
+		{name: "last address", network: xnetip.MustParseNetwork4("10.0.0.0/8"), addr: netip.MustParseAddr("10.255.255.255"), want: true},
+		{name: "host route contains itself", network: xnetip.MustParseNetwork4("10.0.0.1/32"), addr: netip.MustParseAddr("10.0.0.1"), want: true},
+		{name: "host route excludes neighbour", network: xnetip.MustParseNetwork4("10.0.0.1/32"), addr: netip.MustParseAddr("10.0.0.2"), want: false},
+		{name: "universe contains zero address", network: xnetip.MustParseNetwork4("0.0.0.0/0"), addr: netip.MustParseAddr("0.0.0.0"), want: true},
+		{name: "universe contains all-ones address", network: xnetip.MustParseNetwork4("0.0.0.0/0"), addr: netip.MustParseAddr("255.255.255.255"), want: true},
+		{name: "IPv6 argument", network: xnetip.MustParseNetwork4("10.0.0.0/8"), addr: netip.MustParseAddr("2001:db8::1"), want: false},
+		{name: "IPv4-mapped argument", network: xnetip.MustParseNetwork4("10.0.0.0/8"), addr: netip.MustParseAddr("::ffff:10.1.2.3"), want: false},
+		{name: "IPv4-mapped argument against the universe", network: xnetip.MustParseNetwork4("0.0.0.0/0"), addr: netip.MustParseAddr("::ffff:1.2.3.4"), want: false},
+		{name: "invalid zero Addr", network: xnetip.MustParseNetwork4("10.0.0.0/8"), addr: netip.Addr{}, want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.ContainsAddr(testCase.addr))
+		})
+	}
+}
+
+// verifies that membership under a non-contiguous mask is agreement
+// on every mask bit, with the unmasked bits free to vary.
+func Test_Network4_ContainsAddr_NonContiguousMasks(t *testing.T) {
+	cases := []struct {
+		name    string
+		network xnetip.Network4
+		addr    netip.Addr
+		want    bool
+	}{
+		{name: "free middle octet varies", network: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), addr: netip.MustParseAddr("10.77.0.5"), want: true},
+		{name: "free octets at their extremes", network: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), addr: netip.MustParseAddr("10.255.0.255"), want: true},
+		{name: "constrained third octet differs", network: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), addr: netip.MustParseAddr("10.0.1.0"), want: false},
+		{name: "constrained first octet differs", network: xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0"), addr: netip.MustParseAddr("11.5.0.5"), want: false},
+		{name: "alternating mask keeps its pattern", network: xnetip.MustParseNetwork4("170.85.170.85/170.85.170.85"), addr: netip.MustParseAddr("170.85.170.85"), want: true},
+		{name: "alternating mask with every free bit set", network: xnetip.MustParseNetwork4("170.85.170.85/170.85.170.85"), addr: netip.MustParseAddr("255.255.255.255"), want: true},
+		{name: "alternating mask near miss in the last octet", network: xnetip.MustParseNetwork4("170.85.170.85/170.85.170.85"), addr: netip.MustParseAddr("170.85.170.84"), want: false},
+		{name: "two-run mask holds both runs", network: xnetip.MustParseNetwork4("192.168.0.0/255.255.0.255"), addr: netip.MustParseAddr("192.168.44.0"), want: true},
+		{name: "two-run mask broken in the low run", network: xnetip.MustParseNetwork4("192.168.0.0/255.255.0.255"), addr: netip.MustParseAddr("192.168.44.1"), want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.network.ContainsAddr(testCase.addr))
+		})
+	}
+}
+
+// verifies that address membership equals containing the address's
+// host route, over every mask shape.
+func Test_Network4_ContainsAddr_HostRouteEquivalenceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		address := genNetipAddr4.Draw(t, "address")
+		host, err := xnetip.Network4FromAddr(address)
+		require.NoError(t, err)
+		require.Equal(t, network.Contains(host), network.ContainsAddr(address))
+	})
+}
+
+// verifies that membership agrees with the address iterator: exactly
+// the yielded addresses are contained.
+//
+// The mask is widened to leave at most eight host bits, so the
+// iterator's address set is small enough to collect and exhaustive
+// for the membership comparison, over contiguous and ragged low-byte
+// mask shapes alike.
+func Test_Network4_ContainsAddr_MatchesAddrsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		seed := genNetwork4.Draw(t, "seed")
+		seedAddr, seedMask := ipv4NetworkBits(seed)
+		network, err := xnetip.Network4From(
+			netipAddrFrom4Bits(seedAddr),
+			netipAddrFrom4Bits(seedMask|^uint32(0xFF)),
+		)
+		require.NoError(t, err)
+		members := map[netip.Addr]bool{}
+		for address := range network.Addrs() {
+			require.True(t, network.ContainsAddr(address))
+			members[address] = true
+		}
+		probe := genNetipAddr4.Draw(t, "probe")
+		require.Equal(t, members[probe], network.ContainsAddr(probe))
+	})
+}
+
+// verifies that membership is total over arguments of every shape.
+//
+// An IPv6, zoned or invalid argument answers false, never a panic.
+func Test_Network4_ContainsAddr_TotalityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		var address netip.Addr
+		switch rapid.IntRange(0, 3).Draw(t, "argument shape") {
+		case 0:
+			address = genNetipAddr4.Draw(t, "member candidate")
+		case 1:
+			address = genNetipAddr6.Draw(t, "foreign family")
+		case 2:
+			address = genNetipAddr6.Draw(t, "zoned").WithZone("eth0")
+		default:
+			address = netip.Addr{}
+		}
+		contained := network.ContainsAddr(address)
+		if !address.Is4() {
+			require.False(t, contained)
+		}
+	})
+}
+
+// verifies that on contiguous networks address membership agrees with
+// the net/netip prefix rule for arguments of both families.
+func Test_Network4_ContainsAddr_MatchesNetipPrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		prefix := genIPv4Prefix.Draw(t, "prefix").Masked()
+		network, ok := xnetip.Network4FromPrefix(prefix)
+		require.True(t, ok)
+		var address netip.Addr
+		if rapid.Bool().Draw(t, "foreign family") {
+			address = genNetipAddr6.Draw(t, "address6")
+		} else {
+			address = genNetipAddr4.Draw(t, "address4")
+		}
+		require.Equal(t, prefix.Contains(address), network.ContainsAddr(address))
+	})
+}
+
+// verifies that the membership check allocates nothing.
+func Test_Network4_ContainsAddr_AllocationFree(t *testing.T) {
+	network := xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")
+	address := netip.MustParseAddr("10.77.0.5")
+	requireNoAllocs(t, func() { okSink = network.ContainsAddr(address) })
+}
+
+func BenchmarkNetwork4_ContainsAddr_Member(b *testing.B) {
+	network := xnetip.MustParseNetwork4("10.0.0.0/8")
+	address := netip.MustParseAddr("10.1.2.3")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = network.ContainsAddr(address)
+	}
+}
+
+func BenchmarkNetwork4_ContainsAddr_NonMember(b *testing.B) {
+	network := xnetip.MustParseNetwork4("10.0.0.0/8")
+	address := netip.MustParseAddr("192.168.1.1")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = network.ContainsAddr(address)
+	}
+}
+
+func BenchmarkNetwork4_ContainsAddr_ForeignFamily(b *testing.B) {
+	network := xnetip.MustParseNetwork4("10.0.0.0/8")
+	address := netip.MustParseAddr("2001:db8::1")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = network.ContainsAddr(address)
+	}
+}
+
 // verifies that intersecting contiguous networks yields the more
 // specific one and fails exactly on disjoint prefixes.
 //
