@@ -394,6 +394,27 @@ func (m Network) containsContiguous(other Network) bool {
 	return m.is4 == other.is4 && m.network.containsContiguous(other.network)
 }
 
+// ContainsAddr reports whether addr is an address of this network.
+//
+// The test is total, the netip.Prefix.Contains rule: an address of
+// the other family — an IPv4-mapped IPv6 address against an IPv4
+// network included — the invalid zero netip.Addr, or a zoned address
+// is simply not contained. Within the network's family the answer is
+// that of Network4.ContainsAddr or Network6.ContainsAddr, so the
+// mask may be non-contiguous.
+func (m Network) ContainsAddr(addr netip.Addr) bool {
+	// An IPv4 network answers on the low 32 stored bits, an IPv6
+	// network delegates, the zone rule included.
+	//
+	// The mapped storage pins the top 96 address and mask bits on
+	// both sides, so the low-word compare is exact for IPv4.
+	if m.is4 {
+		member, ok := addr4FromNetip(addr)
+		return ok && member.Bits()&uint32(m.network.mask.bits.lo) == uint32(m.network.addr.bits.lo)
+	}
+	return m.network.ContainsAddr(addr)
+}
+
 // Intersection returns the network of addresses common to m and other.
 //
 // Networks of different address families are disjoint and yield
