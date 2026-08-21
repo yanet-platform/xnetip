@@ -215,12 +215,21 @@ func ParseContiguous4(s string) (Contiguous[Network4], error) {
 	if err != nil {
 		return Contiguous[Network4]{}, wrapParseError("ParseContiguous4", s, ErrParse, err)
 	}
-	network, err := parseNetwork4Parts("ParseContiguous4", s, addr, suffix, hasSuffix)
+	return parseContiguous4Tail("ParseContiguous4", s, addr, suffix, hasSuffix)
+}
+
+// parseContiguous4Tail finishes a contiguous parse whose address
+// part is already parsed.
+//
+// The mask must be a leading run of one bits, otherwise the
+// rejection wraps ErrNonContiguousMask under the given parser name.
+func parseContiguous4Tail(function, input string, addr netip.Addr, suffix string, hasSuffix bool) (Contiguous[Network4], error) {
+	network, err := parseNetwork4Parts(function, input, addr, suffix, hasSuffix)
 	if err != nil {
 		return Contiguous[Network4]{}, err
 	}
 	if !network.IsContiguous() {
-		return Contiguous[Network4]{}, wrapParseError("ParseContiguous4", s, ErrNonContiguousMask, nil)
+		return Contiguous[Network4]{}, wrapParseError(function, input, ErrNonContiguousMask, nil)
 	}
 	return Contiguous[Network4]{network: network}, nil
 }
@@ -253,12 +262,21 @@ func ParseContiguous6(s string) (Contiguous[Network6], error) {
 	if err != nil {
 		return Contiguous[Network6]{}, wrapParseError("ParseContiguous6", s, ErrParse, err)
 	}
-	network, err := parseNetwork6Parts("ParseContiguous6", s, addr, suffix, hasSuffix)
+	return parseContiguous6Tail("ParseContiguous6", s, addr, suffix, hasSuffix)
+}
+
+// parseContiguous6Tail finishes a contiguous parse whose address
+// part is already parsed.
+//
+// The mask must be a leading run of one bits, otherwise the
+// rejection wraps ErrNonContiguousMask under the given parser name.
+func parseContiguous6Tail(function, input string, addr netip.Addr, suffix string, hasSuffix bool) (Contiguous[Network6], error) {
+	network, err := parseNetwork6Parts(function, input, addr, suffix, hasSuffix)
 	if err != nil {
 		return Contiguous[Network6]{}, err
 	}
 	if !network.IsContiguous() {
-		return Contiguous[Network6]{}, wrapParseError("ParseContiguous6", s, ErrNonContiguousMask, nil)
+		return Contiguous[Network6]{}, wrapParseError(function, input, ErrNonContiguousMask, nil)
 	}
 	return Contiguous[Network6]{network: network}, nil
 }
@@ -290,23 +308,17 @@ func ParseContiguous(s string) (Contiguous[Network], error) {
 		return Contiguous[Network]{}, wrapParseError("ParseContiguous", s, ErrParse, err)
 	}
 	if addr.Is4() {
-		network, err := parseNetwork4Parts("ParseContiguous", s, addr, suffix, hasSuffix)
+		block, err := parseContiguous4Tail("ParseContiguous", s, addr, suffix, hasSuffix)
 		if err != nil {
 			return Contiguous[Network]{}, err
 		}
-		if !network.IsContiguous() {
-			return Contiguous[Network]{}, wrapParseError("ParseContiguous", s, ErrNonContiguousMask, nil)
-		}
-		return Contiguous[Network]{network: NetworkFrom4(network)}, nil
+		return ContiguousFrom4(block), nil
 	}
-	network, err := parseNetwork6Parts("ParseContiguous", s, addr, suffix, hasSuffix)
+	block, err := parseContiguous6Tail("ParseContiguous", s, addr, suffix, hasSuffix)
 	if err != nil {
 		return Contiguous[Network]{}, err
 	}
-	if !network.IsContiguous() {
-		return Contiguous[Network]{}, wrapParseError("ParseContiguous", s, ErrNonContiguousMask, nil)
-	}
-	return Contiguous[Network]{network: NetworkFrom6(network)}, nil
+	return ContiguousFrom6(block), nil
 }
 
 // MustParseContiguous calls ParseContiguous and panics on error.

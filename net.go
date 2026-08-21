@@ -211,10 +211,18 @@ func (m Network) IPv4() (Network4, bool) {
 	if !m.is4 {
 		return Network4{}, false
 	}
-	// The stored form of an IPv4 network is IPv4-mapped by
-	// construction, so the truncation always succeeds.
-	network, _ := m.network.ToIPv4Mapped()
-	return network, true
+	return m.unwrap4(), true
+}
+
+// unwrap4 returns the IPv4 network stored in the mapped form.
+//
+// Valid only for an IPv4 network: the mapped-storage invariant makes
+// the low 32 stored bits the IPv4 network, already normalized.
+func (m Network) unwrap4() Network4 {
+	return Network4{
+		addr: addr4FromBits(uint32(m.network.addr.bits.lo)),
+		mask: addr4FromBits(uint32(m.network.mask.bits.lo)),
+	}
 }
 
 // IPv6 returns the IPv6 network, ok is false for an IPv4 network.
@@ -293,17 +301,10 @@ func (m Network) Addrs() iter.Seq[netip.Addr] {
 	// The dispatch lives inside a single returned closure so a range
 	// over it stays a direct call in both families.
 	return func(yield func(netip.Addr) bool) {
-		// An IPv4 network must unwrap before iterating.
-		//
-		// The stored IPv4-mapped form would yield addresses of the
-		// wrong family. The mapped-storage invariant makes the low
-		// 32 stored bits the IPv4 network, already normalized.
+		// An IPv4 network must unwrap before iterating: the stored
+		// mapped form would yield addresses of the wrong family.
 		if m.is4 {
-			network := Network4{
-				addr: addr4FromBits(uint32(m.network.addr.bits.lo)),
-				mask: addr4FromBits(uint32(m.network.mask.bits.lo)),
-			}
-			network.Addrs()(yield)
+			m.unwrap4().Addrs()(yield)
 			return
 		}
 		m.network.Addrs()(yield)
@@ -324,17 +325,10 @@ func (m Network) AddrsBackward() iter.Seq[netip.Addr] {
 	// The dispatch lives inside a single returned closure so a range
 	// over it stays a direct call in both families.
 	return func(yield func(netip.Addr) bool) {
-		// An IPv4 network must unwrap before iterating.
-		//
-		// The stored IPv4-mapped form would yield addresses of the
-		// wrong family. The mapped-storage invariant makes the low
-		// 32 stored bits the IPv4 network, already normalized.
+		// An IPv4 network must unwrap before iterating: the stored
+		// mapped form would yield addresses of the wrong family.
 		if m.is4 {
-			network := Network4{
-				addr: addr4FromBits(uint32(m.network.addr.bits.lo)),
-				mask: addr4FromBits(uint32(m.network.mask.bits.lo)),
-			}
-			network.AddrsBackward()(yield)
+			m.unwrap4().AddrsBackward()(yield)
 			return
 		}
 		m.network.AddrsBackward()(yield)
@@ -485,24 +479,10 @@ func (m Network) Difference(other Network) iter.Seq[Network] {
 			yield(m)
 			return
 		}
-		// An IPv4 pair must unwrap before peeling.
-		//
-		// Running the 128-bit peel on the mapped storage would lose
-		// the family of every part. The mapped-storage invariant
-		// makes the low 32 stored bits the IPv4 networks, already
-		// normalized, and the family dispatch stays inside this
-		// closure so a range over the sequence remains a direct
-		// call.
+		// An IPv4 pair must unwrap before peeling: the 128-bit peel
+		// on the mapped storage would lose the family of every part.
 		if m.is4 {
-			network := Network4{
-				addr: addr4FromBits(uint32(m.network.addr.bits.lo)),
-				mask: addr4FromBits(uint32(m.network.mask.bits.lo)),
-			}
-			otherNetwork := Network4{
-				addr: addr4FromBits(uint32(other.network.addr.bits.lo)),
-				mask: addr4FromBits(uint32(other.network.mask.bits.lo)),
-			}
-			for part := range network.Difference(otherNetwork) {
+			for part := range m.unwrap4().Difference(other.unwrap4()) {
 				if !yield(NetworkFrom4(part)) {
 					return
 				}

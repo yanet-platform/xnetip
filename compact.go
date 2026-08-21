@@ -30,24 +30,10 @@ type compact[T network[T]] struct {
 // String returns the compact text form of the network, see Compact
 // for the format.
 func (m compact[T]) String() string {
-	// Each branch sizes its buffer to the family's longest form, so
+	// The buffer covers the longest form of any instantiation, so
 	// the string conversion is the only allocation.
-	switch network := any(m.network).(type) {
-	case Network4:
-		var buffer [31]byte
-		return string(appendCompact4(buffer[:0], network))
-	case Network6:
-		var buffer [91]byte
-		return string(appendCompact6(buffer[:0], network))
-	}
-	// The constraint leaves Network as the only remaining
-	// instantiation, and it renders as the family it holds.
-	network := any(m.network).(Network)
 	var buffer [91]byte
-	if inner, ok := network.IPv4(); ok {
-		return string(appendCompact4(buffer[:0], inner))
-	}
-	return string(appendCompact6(buffer[:0], network.network))
+	return string(m.AppendTo(buffer[:0]))
 }
 
 // AppendTo appends the compact text form of the network to b and
