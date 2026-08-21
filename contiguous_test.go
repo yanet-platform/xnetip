@@ -563,6 +563,93 @@ func Test_Contiguous_Contains_MatchesNetipPrefixProperty(t *testing.T) {
 	})
 }
 
+// verifies that typed address membership answers the direct IPv4
+// cases: a member, a non-member and foreign-family arguments.
+func Test_Contiguous_ContainsAddr_IPv4Direct(t *testing.T) {
+	block := xnetip.MustParseContiguous4("10.0.0.0/8")
+	require.True(t, block.ContainsAddr(netip.MustParseAddr("10.1.2.3")))
+	require.False(t, block.ContainsAddr(netip.MustParseAddr("11.0.0.0")))
+	require.False(t, block.ContainsAddr(netip.MustParseAddr("2001:db8::1")))
+	require.False(t, block.ContainsAddr(netip.MustParseAddr("::ffff:10.1.2.3")))
+	require.False(t, block.ContainsAddr(netip.Addr{}))
+}
+
+// verifies that typed address membership answers the direct IPv6
+// cases.
+//
+// The cases are a member, a non-member, a foreign family and a
+// zoned argument.
+func Test_Contiguous_ContainsAddr_IPv6Direct(t *testing.T) {
+	block := xnetip.MustParseContiguous6("2001:db8::/32")
+	require.True(t, block.ContainsAddr(netip.MustParseAddr("2001:db8::1")))
+	require.False(t, block.ContainsAddr(netip.MustParseAddr("2001:db9::")))
+	require.False(t, block.ContainsAddr(netip.MustParseAddr("10.1.2.3")))
+	require.False(t, block.ContainsAddr(netip.Addr{}))
+	zoned := xnetip.MustParseContiguous6("fe80::/10")
+	require.False(t, zoned.ContainsAddr(netip.MustParseAddr("fe80::1%eth0")))
+}
+
+// verifies that typed address membership in the family-agnostic
+// instantiation requires the block's own family.
+func Test_Contiguous_ContainsAddr_NetworkDirect(t *testing.T) {
+	block4 := xnetip.MustParseContiguous("10.0.0.0/8")
+	require.True(t, block4.ContainsAddr(netip.MustParseAddr("10.1.2.3")))
+	require.False(t, block4.ContainsAddr(netip.MustParseAddr("11.0.0.0")))
+	require.False(t, block4.ContainsAddr(netip.MustParseAddr("::ffff:10.1.2.3")))
+	block6 := xnetip.MustParseContiguous("2001:db8::/32")
+	require.True(t, block6.ContainsAddr(netip.MustParseAddr("2001:db8::1")))
+	require.False(t, block6.ContainsAddr(netip.MustParseAddr("2001:db9::")))
+	require.False(t, block6.ContainsAddr(netip.MustParseAddr("10.1.2.3")))
+}
+
+// verifies that typed address membership equals the wrapped
+// network's answer in all three instantiations.
+//
+// The probes cover every argument shape: both families, IPv4-mapped
+// included, a zoned IPv6 address and the invalid zero value.
+func Test_Contiguous_ContainsAddr_MatchesInnerProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := drawMembershipProbe(t)
+		block4 := genContiguous4.Draw(t, "block4")
+		require.Equal(t, block4.Network().ContainsAddr(address), block4.ContainsAddr(address))
+		block6 := genContiguous6.Draw(t, "block6")
+		require.Equal(t, block6.Network().ContainsAddr(address), block6.ContainsAddr(address))
+		block := genContiguous.Draw(t, "block")
+		require.Equal(t, block.Network().ContainsAddr(address), block.ContainsAddr(address))
+	})
+}
+
+// verifies against net/netip: typed address membership equals the
+// total prefix view's own containment for arguments of every shape.
+//
+// The wrapper's prefix is total, so the equality needs no
+// contiguity carve-out, and zoned addresses stay in the comparison:
+// both sides reject them.
+func Test_Contiguous_ContainsAddr_MatchesNetipPrefixProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := drawMembershipProbe(t)
+		block4 := genContiguous4.Draw(t, "block4")
+		require.Equal(t, block4.Prefix().Contains(address), block4.ContainsAddr(address))
+		block6 := genContiguous6.Draw(t, "block6")
+		require.Equal(t, block6.Prefix().Contains(address), block6.ContainsAddr(address))
+		block := genContiguous.Draw(t, "block")
+		require.Equal(t, block.Prefix().Contains(address), block.ContainsAddr(address))
+	})
+}
+
+// verifies that typed address membership allocates nothing in all
+// three instantiations.
+func Test_Contiguous_ContainsAddr_AllocationFree(t *testing.T) {
+	address4 := netip.MustParseAddr("10.1.2.3")
+	address6 := netip.MustParseAddr("2001:db8::1")
+	block4 := xnetip.MustParseContiguous4("10.0.0.0/8")
+	requireNoAllocs(t, func() { okSink = block4.ContainsAddr(address4) })
+	block6 := xnetip.MustParseContiguous6("2001:db8::/32")
+	requireNoAllocs(t, func() { okSink = block6.ContainsAddr(address6) })
+	block := xnetip.MustParseContiguous("10.0.0.0/8")
+	requireNoAllocs(t, func() { okSink = block.ContainsAddr(address4) })
+}
+
 // verifies that intersecting nested blocks yields the nested block
 // in both orders, in both families.
 func Test_Contiguous_Intersection_Nested(t *testing.T) {
@@ -1609,6 +1696,33 @@ func BenchmarkContiguous_Contains_IPv6General(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		okSink = container.Network().Contains(nested.Network())
+	}
+}
+
+func BenchmarkContiguous_ContainsAddr_IPv4(b *testing.B) {
+	block := xnetip.MustParseContiguous4("10.0.0.0/8")
+	address := netip.MustParseAddr("10.1.2.3")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = block.ContainsAddr(address)
+	}
+}
+
+func BenchmarkContiguous_ContainsAddr_IPv6(b *testing.B) {
+	block := xnetip.MustParseContiguous6("2001:db8::/32")
+	address := netip.MustParseAddr("2001:db8::1")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = block.ContainsAddr(address)
+	}
+}
+
+func BenchmarkContiguous_ContainsAddr_Network(b *testing.B) {
+	block := xnetip.MustParseContiguous("10.0.0.0/8")
+	address := netip.MustParseAddr("10.1.2.3")
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = block.ContainsAddr(address)
 	}
 }
 

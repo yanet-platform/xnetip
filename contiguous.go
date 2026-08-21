@@ -363,6 +363,16 @@ func (m Contiguous[T]) Contains(other Contiguous[T]) bool {
 	return m.network.containsContiguous(other.network)
 }
 
+// ContainsAddr reports whether addr is an address of this block.
+//
+// The answer is exactly the wrapped network's ContainsAddr: total,
+// the netip.Prefix.Contains rule, cross-family, zoned and invalid
+// addresses not contained. For a Network instantiation the address
+// must be of the block's own family.
+func (m Contiguous[T]) ContainsAddr(addr netip.Addr) bool {
+	return m.network.ContainsAddr(addr)
+}
+
 // Intersection returns the block of addresses common to m and other.
 //
 // Two CIDR blocks intersect exactly when one contains the other, so
@@ -560,6 +570,10 @@ type network[T any] interface {
 	// containsContiguous is the concrete type's containment kernel
 	// for two CIDR operands.
 	containsContiguous(T) bool
+
+	// ContainsAddr is the concrete type's own total address
+	// membership.
+	ContainsAddr(netip.Addr) bool
 
 	// Intersection is the concrete type's own comma-ok intersection.
 	Intersection(T) (T, bool)
