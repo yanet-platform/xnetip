@@ -75,20 +75,12 @@ func ContiguousIPv6(block Contiguous[Network]) (Contiguous[Network6], bool) {
 // result is a CIDR block by construction. The address must be Is4 —
 // an IPv6 address, IPv4-mapped included, or the invalid zero
 // netip.Addr is rejected with ErrAddrFamilyMismatch — and bits must
-// be in the range 0 through 32, otherwise ErrCIDROverflow is
-// returned: the Network4FromCIDR contract under this function's
-// name.
+// be in the range 0 through 32, otherwise ErrCIDROverflow is returned.
 func ContiguousFromCIDR4(addr netip.Addr, bits int) (Contiguous[Network4], error) {
-	// The typed constructor can only reject the length after the
-	// family check, so the error is rebuilt to name this entry point.
-	if !addr.Is4() {
-		input := cidrInput(addr, bits)
-		return Contiguous[Network4]{}, wrapParseError("ContiguousFromCIDR4", input, ErrAddrFamilyMismatch, nil)
-	}
-	network, err := Network4FromCIDR(addr, bits)
+	network, err := network4FromCIDRKernel(addr, bits)
 	if err != nil {
 		input := cidrInput(addr, bits)
-		return Contiguous[Network4]{}, wrapParseError("ContiguousFromCIDR4", input, ErrCIDROverflow, nil)
+		return Contiguous[Network4]{}, wrapParseError("ContiguousFromCIDR4", input, err, nil)
 	}
 	// A mask built from a prefix length is contiguous by
 	// construction, so the block wraps without revalidation.
@@ -103,17 +95,12 @@ func ContiguousFromCIDR4(addr netip.Addr, bits int) (Contiguous[Network4], error
 // (an IPv4-mapped address is IPv6, a zone is dropped silently) — an
 // Is4 address or the invalid zero netip.Addr is rejected with
 // ErrAddrFamilyMismatch — and bits must be in the range 0 through
-// 128, otherwise ErrCIDROverflow is returned: the Network6FromCIDR
-// contract under this function's name.
+// 128, otherwise ErrCIDROverflow is returned.
 func ContiguousFromCIDR6(addr netip.Addr, bits int) (Contiguous[Network6], error) {
-	if !addr.Is6() {
-		input := cidrInput(addr, bits)
-		return Contiguous[Network6]{}, wrapParseError("ContiguousFromCIDR6", input, ErrAddrFamilyMismatch, nil)
-	}
-	network, err := Network6FromCIDR(addr, bits)
+	network, err := network6FromCIDRKernel(addr, bits)
 	if err != nil {
 		input := cidrInput(addr, bits)
-		return Contiguous[Network6]{}, wrapParseError("ContiguousFromCIDR6", input, ErrCIDROverflow, nil)
+		return Contiguous[Network6]{}, wrapParseError("ContiguousFromCIDR6", input, err, nil)
 	}
 	// A mask built from a prefix length is contiguous by
 	// construction, so the block wraps without revalidation.
@@ -128,17 +115,25 @@ func ContiguousFromCIDR6(addr netip.Addr, bits int) (Contiguous[Network6], error
 // the family, 0 through 32 for IPv4 and 0 through 128 for IPv6,
 // otherwise ErrCIDROverflow is returned. An IPv4-mapped address is
 // IPv6 and stays IPv6, as in netip. The invalid zero netip.Addr is
-// rejected with ErrAddrFamilyMismatch: the NetworkFromCIDR contract
-// under this function's name.
+// rejected with ErrAddrFamilyMismatch.
 func ContiguousFromCIDR(addr netip.Addr, bits int) (Contiguous[Network], error) {
-	if !addr.IsValid() {
-		input := cidrInput(addr, bits)
-		return Contiguous[Network]{}, wrapParseError("ContiguousFromCIDR", input, ErrAddrFamilyMismatch, nil)
+	var network Network
+	var err error
+	switch {
+	case addr.Is4():
+		var network4 Network4
+		network4, err = network4FromCIDRKernel(addr, bits)
+		network = NetworkFrom4(network4)
+	case addr.Is6():
+		var network6 Network6
+		network6, err = network6FromCIDRKernel(addr, bits)
+		network = NetworkFrom6(network6)
+	default:
+		err = ErrAddrFamilyMismatch
 	}
-	network, err := NetworkFromCIDR(addr, bits)
 	if err != nil {
 		input := cidrInput(addr, bits)
-		return Contiguous[Network]{}, wrapParseError("ContiguousFromCIDR", input, ErrCIDROverflow, nil)
+		return Contiguous[Network]{}, wrapParseError("ContiguousFromCIDR", input, err, nil)
 	}
 	// A mask built from a prefix length is contiguous by
 	// construction, so the block wraps without revalidation.

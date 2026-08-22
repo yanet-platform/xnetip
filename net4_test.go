@@ -292,16 +292,26 @@ func Test_Network4FromCIDR_UniverseEqualsZeroValue(t *testing.T) {
 // overflow sentinel and the zero network.
 func Test_Network4FromCIDR_RejectsOutOfRangeBits(t *testing.T) {
 	cases := []struct {
-		name string
-		bits int
+		name      string
+		bits      int
+		wantError string
 	}{
-		{name: "one past the family width", bits: 33},
-		{name: "negative length", bits: -1},
+		{
+			name:      "one past the family width",
+			bits:      33,
+			wantError: `xnetip.Network4FromCIDR("192.168.1.5/33"): prefix length out of range`,
+		},
+		{
+			name:      "negative length",
+			bits:      -1,
+			wantError: `xnetip.Network4FromCIDR("192.168.1.5/-1"): prefix length out of range`,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			network, err := xnetip.Network4FromCIDR(netip.MustParseAddr("192.168.1.5"), testCase.bits)
 			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+			require.Equal(t, testCase.wantError, err.Error())
 			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}
@@ -311,17 +321,31 @@ func Test_Network4FromCIDR_RejectsOutOfRangeBits(t *testing.T) {
 // family-mismatch sentinel and the zero network for a valid length.
 func Test_Network4FromCIDR_RejectsForeignFamily(t *testing.T) {
 	cases := []struct {
-		name string
-		addr netip.Addr
+		name      string
+		addr      netip.Addr
+		wantError string
 	}{
-		{name: "IPv6 address", addr: netip.MustParseAddr("2001:db8::1")},
-		{name: "IPv4-mapped IPv6 address", addr: netip.MustParseAddr("::ffff:192.168.1.5")},
-		{name: "invalid zero address", addr: netip.Addr{}},
+		{
+			name:      "IPv6 address",
+			addr:      netip.MustParseAddr("2001:db8::1"),
+			wantError: `xnetip.Network4FromCIDR("2001:db8::1/24"): address family mismatch`,
+		},
+		{
+			name:      "IPv4-mapped IPv6 address",
+			addr:      netip.MustParseAddr("::ffff:192.168.1.5"),
+			wantError: `xnetip.Network4FromCIDR("::ffff:192.168.1.5/24"): address family mismatch`,
+		},
+		{
+			name:      "invalid zero address",
+			addr:      netip.Addr{},
+			wantError: `xnetip.Network4FromCIDR("invalid IP/24"): address family mismatch`,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			network, err := xnetip.Network4FromCIDR(testCase.addr, 24)
 			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+			require.Equal(t, testCase.wantError, err.Error())
 			require.Equal(t, xnetip.Network4{}, network)
 		})
 	}

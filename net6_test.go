@@ -517,16 +517,26 @@ func Test_Network6FromCIDR_DropsZoneSilently(t *testing.T) {
 // overflow sentinel and the zero network.
 func Test_Network6FromCIDR_RejectsOutOfRangeBits(t *testing.T) {
 	cases := []struct {
-		name string
-		bits int
+		name      string
+		bits      int
+		wantError string
 	}{
-		{name: "one past the family width", bits: 129},
-		{name: "negative length", bits: -1},
+		{
+			name:      "one past the family width",
+			bits:      129,
+			wantError: `xnetip.Network6FromCIDR("2001:db8::1/129"): prefix length out of range`,
+		},
+		{
+			name:      "negative length",
+			bits:      -1,
+			wantError: `xnetip.Network6FromCIDR("2001:db8::1/-1"): prefix length out of range`,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			network, err := xnetip.Network6FromCIDR(netip.MustParseAddr("2001:db8::1"), testCase.bits)
 			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+			require.Equal(t, testCase.wantError, err.Error())
 			require.Equal(t, xnetip.Network6{}, network)
 		})
 	}
@@ -536,16 +546,26 @@ func Test_Network6FromCIDR_RejectsOutOfRangeBits(t *testing.T) {
 // family-mismatch sentinel and the zero network for a valid length.
 func Test_Network6FromCIDR_RejectsForeignFamily(t *testing.T) {
 	cases := []struct {
-		name string
-		addr netip.Addr
+		name      string
+		addr      netip.Addr
+		wantError string
 	}{
-		{name: "IPv4 address", addr: netip.MustParseAddr("1.2.3.4")},
-		{name: "invalid zero address", addr: netip.Addr{}},
+		{
+			name:      "IPv4 address",
+			addr:      netip.MustParseAddr("1.2.3.4"),
+			wantError: `xnetip.Network6FromCIDR("1.2.3.4/64"): address family mismatch`,
+		},
+		{
+			name:      "invalid zero address",
+			addr:      netip.Addr{},
+			wantError: `xnetip.Network6FromCIDR("invalid IP/64"): address family mismatch`,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			network, err := xnetip.Network6FromCIDR(testCase.addr, 64)
 			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+			require.Equal(t, testCase.wantError, err.Error())
 			require.Equal(t, xnetip.Network6{}, network)
 		})
 	}

@@ -62,14 +62,26 @@ func fromBits4(addr, mask addr4) Network4 {
 // and bits must be in the range 0 through 32, otherwise
 // ErrCIDROverflow is returned.
 func Network4FromCIDR(addr netip.Addr, bits int) (Network4, error) {
+	network, err := network4FromCIDRKernel(addr, bits)
+	if err != nil {
+		input := cidrInput(addr, bits)
+		return Network4{}, wrapParseError("Network4FromCIDR", input, err, nil)
+	}
+	return network, nil
+}
+
+// The IPv4 CIDR kernel builds a network from an address and prefix
+// length, returning a bare rejection for the public caller to wrap.
+//
+// The address must be IPv4 and the length must be in 0 through 32.
+// Host bits are cleared on success.
+func network4FromCIDRKernel(addr netip.Addr, bits int) (Network4, error) {
 	addrKernel, ok := addr4FromNetip(addr)
 	if !ok {
-		input := cidrInput(addr, bits)
-		return Network4{}, wrapParseError("Network4FromCIDR", input, ErrAddrFamilyMismatch, nil)
+		return Network4{}, ErrAddrFamilyMismatch
 	}
 	if bits < 0 || bits > 32 {
-		input := cidrInput(addr, bits)
-		return Network4{}, wrapParseError("Network4FromCIDR", input, ErrCIDROverflow, nil)
+		return Network4{}, ErrCIDROverflow
 	}
 	return fromBits4(addrKernel, ipv4MaskFromPrefix(bits)), nil
 }
@@ -85,12 +97,7 @@ func Network4FromPrefix(p netip.Prefix) (Network4, bool) {
 	if !p.IsValid() || !p.Addr().Is4() {
 		return Network4{}, false
 	}
-	// A valid Is4 prefix carries a length within 0 through 32, so the
-	// constructor cannot fail; its error answers false, not a panic.
-	network, err := Network4FromCIDR(p.Addr(), p.Bits())
-	if err != nil {
-		return Network4{}, false
-	}
+	network, _ := network4FromCIDRKernel(p.Addr(), p.Bits())
 	return network, true
 }
 

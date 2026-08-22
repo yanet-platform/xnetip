@@ -67,14 +67,26 @@ func fromBits6(addr, mask addr6) Network6 {
 // and bits must be in the range 0 through 128, otherwise
 // ErrCIDROverflow is returned.
 func Network6FromCIDR(addr netip.Addr, bits int) (Network6, error) {
+	network, err := network6FromCIDRKernel(addr, bits)
+	if err != nil {
+		input := cidrInput(addr, bits)
+		return Network6{}, wrapParseError("Network6FromCIDR", input, err, nil)
+	}
+	return network, nil
+}
+
+// The IPv6 CIDR kernel builds a network from an address and prefix
+// length, returning a bare rejection for the public caller to wrap.
+//
+// The address must be IPv6 and the length must be in 0 through 128.
+// Host bits are cleared on success.
+func network6FromCIDRKernel(addr netip.Addr, bits int) (Network6, error) {
 	addrKernel, ok := addr6FromNetip(addr)
 	if !ok {
-		input := cidrInput(addr, bits)
-		return Network6{}, wrapParseError("Network6FromCIDR", input, ErrAddrFamilyMismatch, nil)
+		return Network6{}, ErrAddrFamilyMismatch
 	}
 	if bits < 0 || bits > 128 {
-		input := cidrInput(addr, bits)
-		return Network6{}, wrapParseError("Network6FromCIDR", input, ErrCIDROverflow, nil)
+		return Network6{}, ErrCIDROverflow
 	}
 	return fromBits6(addrKernel, addr6{uint128MaskFromPrefix(bits)}), nil
 }
@@ -92,12 +104,7 @@ func Network6FromPrefix(p netip.Prefix) (Network6, bool) {
 	if !p.IsValid() || !p.Addr().Is6() {
 		return Network6{}, false
 	}
-	// A valid Is6 prefix carries a length within 0 through 128, so the
-	// constructor cannot fail; its error answers false, not a panic.
-	network, err := Network6FromCIDR(p.Addr(), p.Bits())
-	if err != nil {
-		return Network6{}, false
-	}
+	network, _ := network6FromCIDRKernel(p.Addr(), p.Bits())
 	return network, true
 }
 

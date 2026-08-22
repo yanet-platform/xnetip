@@ -1974,23 +1974,61 @@ func Test_ContiguousFromCIDR4_Boundaries(t *testing.T) {
 // verifies that a length outside the IPv4 range is refused with the
 // overflow sentinel under this constructor's name.
 func Test_ContiguousFromCIDR4_Overflow(t *testing.T) {
-	for _, bits := range []int{33, -1} {
-		_, err := xnetip.ContiguousFromCIDR4(netip.MustParseAddr("192.168.1.5"), bits)
-		require.ErrorIs(t, err, xnetip.ErrCIDROverflow, "bits %d", bits)
-		require.True(t, strings.HasPrefix(err.Error(), "xnetip.ContiguousFromCIDR4("), err.Error())
+	cases := []struct {
+		name      string
+		bits      int
+		wantError string
+	}{
+		{
+			name:      "one past the family width",
+			bits:      33,
+			wantError: `xnetip.ContiguousFromCIDR4("192.168.1.5/33"): prefix length out of range`,
+		},
+		{
+			name:      "negative length",
+			bits:      -1,
+			wantError: `xnetip.ContiguousFromCIDR4("192.168.1.5/-1"): prefix length out of range`,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := xnetip.ContiguousFromCIDR4(netip.MustParseAddr("192.168.1.5"), testCase.bits)
+			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+			require.Equal(t, testCase.wantError, err.Error())
+		})
 	}
 }
 
 // verifies that the IPv4 form rejects every non-Is4 address: plain
 // IPv6, IPv4-mapped IPv6 and the invalid zero address.
 func Test_ContiguousFromCIDR4_FamilyMismatch(t *testing.T) {
-	for _, addr := range []netip.Addr{
-		netip.MustParseAddr("2001:db8::1"),
-		netip.MustParseAddr("::ffff:192.168.1.5"),
-		{},
-	} {
-		_, err := xnetip.ContiguousFromCIDR4(addr, 24)
-		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch, addr.String())
+	cases := []struct {
+		name      string
+		addr      netip.Addr
+		wantError string
+	}{
+		{
+			name:      "IPv6 address",
+			addr:      netip.MustParseAddr("2001:db8::1"),
+			wantError: `xnetip.ContiguousFromCIDR4("2001:db8::1/24"): address family mismatch`,
+		},
+		{
+			name:      "IPv4-mapped IPv6 address",
+			addr:      netip.MustParseAddr("::ffff:192.168.1.5"),
+			wantError: `xnetip.ContiguousFromCIDR4("::ffff:192.168.1.5/24"): address family mismatch`,
+		},
+		{
+			name:      "invalid zero address",
+			addr:      netip.Addr{},
+			wantError: `xnetip.ContiguousFromCIDR4("invalid IP/24"): address family mismatch`,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := xnetip.ContiguousFromCIDR4(testCase.addr, 24)
+			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+			require.Equal(t, testCase.wantError, err.Error())
+		})
 	}
 }
 
@@ -2016,19 +2054,56 @@ func Test_ContiguousFromCIDR6_Boundaries(t *testing.T) {
 // verifies that a length outside the IPv6 range is refused with the
 // overflow sentinel under this constructor's name.
 func Test_ContiguousFromCIDR6_Overflow(t *testing.T) {
-	for _, bits := range []int{129, -1} {
-		_, err := xnetip.ContiguousFromCIDR6(netip.MustParseAddr("2001:db8::1"), bits)
-		require.ErrorIs(t, err, xnetip.ErrCIDROverflow, "bits %d", bits)
-		require.True(t, strings.HasPrefix(err.Error(), "xnetip.ContiguousFromCIDR6("), err.Error())
+	cases := []struct {
+		name      string
+		bits      int
+		wantError string
+	}{
+		{
+			name:      "one past the family width",
+			bits:      129,
+			wantError: `xnetip.ContiguousFromCIDR6("2001:db8::1/129"): prefix length out of range`,
+		},
+		{
+			name:      "negative length",
+			bits:      -1,
+			wantError: `xnetip.ContiguousFromCIDR6("2001:db8::1/-1"): prefix length out of range`,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := xnetip.ContiguousFromCIDR6(netip.MustParseAddr("2001:db8::1"), testCase.bits)
+			require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+			require.Equal(t, testCase.wantError, err.Error())
+		})
 	}
 }
 
 // verifies that the IPv6 form rejects an Is4 address and the invalid
 // zero address while accepting an IPv4-mapped IPv6 one.
 func Test_ContiguousFromCIDR6_FamilyMismatch(t *testing.T) {
-	for _, addr := range []netip.Addr{netip.MustParseAddr("192.168.1.5"), {}} {
-		_, err := xnetip.ContiguousFromCIDR6(addr, 64)
-		require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch, addr.String())
+	cases := []struct {
+		name      string
+		addr      netip.Addr
+		wantError string
+	}{
+		{
+			name:      "IPv4 address",
+			addr:      netip.MustParseAddr("192.168.1.5"),
+			wantError: `xnetip.ContiguousFromCIDR6("192.168.1.5/64"): address family mismatch`,
+		},
+		{
+			name:      "invalid zero address",
+			addr:      netip.Addr{},
+			wantError: `xnetip.ContiguousFromCIDR6("invalid IP/64"): address family mismatch`,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := xnetip.ContiguousFromCIDR6(testCase.addr, 64)
+			require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+			require.Equal(t, testCase.wantError, err.Error())
+		})
 	}
 	mapped, err := xnetip.ContiguousFromCIDR6(netip.MustParseAddr("::ffff:192.168.1.5"), 104)
 	require.NoError(t, err)
@@ -2072,11 +2147,13 @@ func Test_ContiguousFromCIDR_Boundaries(t *testing.T) {
 func Test_ContiguousFromCIDR_OverflowAndZeroAddr(t *testing.T) {
 	_, err := xnetip.ContiguousFromCIDR(netip.MustParseAddr("192.168.1.5"), 33)
 	require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
-	require.True(t, strings.HasPrefix(err.Error(), "xnetip.ContiguousFromCIDR("), err.Error())
+	require.Equal(t, `xnetip.ContiguousFromCIDR("192.168.1.5/33"): prefix length out of range`, err.Error())
 	_, err = xnetip.ContiguousFromCIDR(netip.MustParseAddr("2001:db8::1"), 129)
 	require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+	require.Equal(t, `xnetip.ContiguousFromCIDR("2001:db8::1/129"): prefix length out of range`, err.Error())
 	_, err = xnetip.ContiguousFromCIDR(netip.Addr{}, 0)
 	require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+	require.Equal(t, `xnetip.ContiguousFromCIDR("invalid IP/0"): address family mismatch`, err.Error())
 }
 
 // verifies that the typed IPv4 constructor accepts exactly the

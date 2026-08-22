@@ -377,23 +377,49 @@ func Test_NetworkFromCIDR_DispatchesByFamily(t *testing.T) {
 // IPv4, 129 IPv6, 64 splits the two and negatives overflow both.
 func Test_NetworkFromCIDR_FamilySetsTheLimit(t *testing.T) {
 	cases := []struct {
-		name    string
-		addr    string
-		bits    int
-		wantErr bool
+		name      string
+		addr      string
+		bits      int
+		wantError string
 	}{
-		{name: "IPv4 33 overflows", addr: "192.168.1.5", bits: 33, wantErr: true},
-		{name: "IPv6 129 overflows", addr: "2001:db8::1", bits: 129, wantErr: true},
-		{name: "IPv4 64 overflows", addr: "192.168.1.5", bits: 64, wantErr: true},
-		{name: "IPv6 64 is valid", addr: "2001:db8::1", bits: 64, wantErr: false},
-		{name: "IPv4 negative overflows", addr: "192.168.1.5", bits: -1, wantErr: true},
-		{name: "IPv6 negative overflows", addr: "2001:db8::1", bits: -1, wantErr: true},
+		{
+			name:      "IPv4 33 overflows",
+			addr:      "192.168.1.5",
+			bits:      33,
+			wantError: `xnetip.NetworkFromCIDR("192.168.1.5/33"): prefix length out of range`,
+		},
+		{
+			name:      "IPv6 129 overflows",
+			addr:      "2001:db8::1",
+			bits:      129,
+			wantError: `xnetip.NetworkFromCIDR("2001:db8::1/129"): prefix length out of range`,
+		},
+		{
+			name:      "IPv4 64 overflows",
+			addr:      "192.168.1.5",
+			bits:      64,
+			wantError: `xnetip.NetworkFromCIDR("192.168.1.5/64"): prefix length out of range`,
+		},
+		{name: "IPv6 64 is valid", addr: "2001:db8::1", bits: 64},
+		{
+			name:      "IPv4 negative overflows",
+			addr:      "192.168.1.5",
+			bits:      -1,
+			wantError: `xnetip.NetworkFromCIDR("192.168.1.5/-1"): prefix length out of range`,
+		},
+		{
+			name:      "IPv6 negative overflows",
+			addr:      "2001:db8::1",
+			bits:      -1,
+			wantError: `xnetip.NetworkFromCIDR("2001:db8::1/-1"): prefix length out of range`,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			network, err := xnetip.NetworkFromCIDR(netip.MustParseAddr(testCase.addr), testCase.bits)
-			if testCase.wantErr {
+			if testCase.wantError != "" {
 				require.ErrorIs(t, err, xnetip.ErrCIDROverflow)
+				require.Equal(t, testCase.wantError, err.Error())
 				require.Equal(t, xnetip.Network{}, network)
 			} else {
 				require.NoError(t, err)
@@ -407,6 +433,7 @@ func Test_NetworkFromCIDR_FamilySetsTheLimit(t *testing.T) {
 func Test_NetworkFromCIDR_RejectsInvalidAddr(t *testing.T) {
 	network, err := xnetip.NetworkFromCIDR(netip.Addr{}, 0)
 	require.ErrorIs(t, err, xnetip.ErrAddrFamilyMismatch)
+	require.Equal(t, `xnetip.NetworkFromCIDR("invalid IP/0"): address family mismatch`, err.Error())
 	require.Equal(t, xnetip.Network{}, network)
 }
 

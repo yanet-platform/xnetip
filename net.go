@@ -91,27 +91,25 @@ func NetworkFromAddr(addr netip.Addr) (Network, error) {
 // zero netip.Addr is rejected with ErrAddrFamilyMismatch. Host bits of
 // addr are cleared.
 func NetworkFromCIDR(addr netip.Addr, bits int) (Network, error) {
-	// The typed constructors can only reject the length after the
-	// family dispatch, so the error is rebuilt to name this entry point.
+	var network Network
+	var err error
 	switch {
 	case addr.Is4():
-		network, err := Network4FromCIDR(addr, bits)
-		if err != nil {
-			input := cidrInput(addr, bits)
-			return Network{}, wrapParseError("NetworkFromCIDR", input, ErrCIDROverflow, nil)
-		}
-		return NetworkFrom4(network), nil
+		var network4 Network4
+		network4, err = network4FromCIDRKernel(addr, bits)
+		network = NetworkFrom4(network4)
 	case addr.Is6():
-		network, err := Network6FromCIDR(addr, bits)
-		if err != nil {
-			input := cidrInput(addr, bits)
-			return Network{}, wrapParseError("NetworkFromCIDR", input, ErrCIDROverflow, nil)
-		}
-		return NetworkFrom6(network), nil
+		var network6 Network6
+		network6, err = network6FromCIDRKernel(addr, bits)
+		network = NetworkFrom6(network6)
 	default:
-		input := cidrInput(addr, bits)
-		return Network{}, wrapParseError("NetworkFromCIDR", input, ErrAddrFamilyMismatch, nil)
+		err = ErrAddrFamilyMismatch
 	}
+	if err != nil {
+		input := cidrInput(addr, bits)
+		return Network{}, wrapParseError("NetworkFromCIDR", input, err, nil)
+	}
+	return network, nil
 }
 
 // NetworkFromPrefix converts a netip.Prefix into a Network.
