@@ -32,6 +32,21 @@ func mustBiContiguous(t require.TestingT, text string) xnetip.BiContiguous {
 	return wrapper
 }
 
+// maskHalfPrefixLenOracle counts leading one bits in one eight-byte mask half.
+func maskHalfPrefixLenOracle(mask [16]byte, offset int) int {
+	prefix := 0
+	for byteOffset := range 8 {
+		word := mask[offset+byteOffset]
+		for bitOffset := range 8 {
+			if word&(1<<uint(7-bitOffset)) == 0 {
+				return prefix
+			}
+			prefix++
+		}
+	}
+	return prefix
+}
+
 // verifies that the bi-contiguous shape rejection has its own stable
 // sentinel text, distinct from the stricter CIDR shape rejection.
 func Test_ErrNonBiContiguousMask_HasDedicatedText(t *testing.T) {
@@ -677,6 +692,174 @@ func Test_BiContiguous_EqualityAndMapKeyFollowNetwork(t *testing.T) {
 
 	values := map[xnetip.BiContiguous]string{first: "normalized"}
 	require.Equal(t, "normalized", values[second])
+}
+
+// verifies that both reported mask coordinates are exact at the empty,
+// full, half-boundary and genuine two-run shapes.
+func Test_BiContiguous_HighPrefixLenAndLowPrefixLen_UnitAndBoundaries(t *testing.T) {
+	cases := []struct {
+		name     string
+		block    xnetip.BiContiguous
+		wantHigh int
+		wantLow  int
+	}{
+		{name: "zero wrapper", block: xnetip.BiContiguous{}, wantHigh: 0, wantLow: 0},
+		{
+			name:     "host route",
+			block:    xnetip.MustParseBiContiguous("::1/128"),
+			wantHigh: 64,
+			wantLow:  64,
+		},
+		{
+			name:     "global prefix below half boundary",
+			block:    xnetip.MustParseBiContiguous("2001:db8::/40"),
+			wantHigh: 40,
+			wantLow:  0,
+		},
+		{
+			name:     "global prefix at half boundary",
+			block:    xnetip.MustParseBiContiguous("2001:db8::/64"),
+			wantHigh: 64,
+			wantLow:  0,
+		},
+		{
+			name:     "global prefix one bit above half boundary",
+			block:    xnetip.MustParseBiContiguous("2001:db8::/65"),
+			wantHigh: 64,
+			wantLow:  1,
+		},
+		{
+			name:     "global prefix in low half",
+			block:    xnetip.MustParseBiContiguous("2001:db8::/96"),
+			wantHigh: 64,
+			wantLow:  32,
+		},
+		{
+			name: "motivating independent runs",
+			block: xnetip.MustParseBiContiguous(
+				"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			),
+			wantHigh: 40,
+			wantLow:  32,
+		},
+		{
+			name:     "low half only first bit",
+			block:    xnetip.MustParseBiContiguous("::/::8000:0:0:0"),
+			wantHigh: 0,
+			wantLow:  1,
+		},
+		{
+			name: "nearly full high half and full low half",
+			block: xnetip.MustParseBiContiguous(
+				"::/ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff",
+			),
+			wantHigh: 63,
+			wantLow:  64,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(
+				t,
+				[2]int{testCase.wantHigh, testCase.wantLow},
+				[2]int{testCase.block.HighPrefixLen(), testCase.block.LowPrefixLen()},
+			)
+		})
+	}
+}
+
+// verifies that every pair of mask-half prefix lengths is recovered exactly,
+// reconstructs the mask and identifies the globally contiguous subset.
+func Test_BiContiguous_HighPrefixLenAndLowPrefixLen_ExhaustEveryShape(t *testing.T) {
+	addr := netip.MustParseAddr("::")
+	for highPrefix := 0; highPrefix <= 64; highPrefix++ {
+		for lowPrefix := 0; lowPrefix <= 64; lowPrefix++ {
+			mask := netipAddrFrom6Bits(prefixMask64(highPrefix), prefixMask64(lowPrefix))
+			block, err := xnetip.BiContiguousFrom(addr, mask)
+			require.NoError(t, err)
+			require.Equal(
+				t,
+				[2]int{highPrefix, lowPrefix},
+				[2]int{block.HighPrefixLen(), block.LowPrefixLen()},
+				"high prefix %d, low prefix %d",
+				highPrefix,
+				lowPrefix,
+			)
+			require.Equal(
+				t,
+				lowPrefix == 0 || highPrefix == 64,
+				block.Network().IsContiguous(),
+				"high prefix %d, low prefix %d",
+				highPrefix,
+				lowPrefix,
+			)
+
+			rebuiltMask := netipAddrFrom6Bits(
+				prefixMask64(block.HighPrefixLen()),
+				prefixMask64(block.LowPrefixLen()),
+			)
+			require.Equal(
+				t,
+				block.Network().Mask(),
+				rebuiltMask,
+				"high prefix %d, low prefix %d",
+				highPrefix,
+				lowPrefix,
+			)
+		}
+	}
+}
+
+// verifies that generated mask coordinates match an independent byte-and-bit
+// oracle, reconstruct the mask and characterize global contiguity.
+func Test_BiContiguous_HighPrefixLenAndLowPrefixLen_MatchBitLoopProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := genBiContiguous.Draw(t, "block")
+		mask := block.Network().Mask().As16()
+		highPrefix := block.HighPrefixLen()
+		lowPrefix := block.LowPrefixLen()
+		require.Equal(
+			t,
+			[2]int{
+				maskHalfPrefixLenOracle(mask, 0),
+				maskHalfPrefixLenOracle(mask, 8),
+			},
+			[2]int{highPrefix, lowPrefix},
+		)
+		require.Equal(
+			t,
+			lowPrefix == 0 || highPrefix == 64,
+			block.Network().IsContiguous(),
+		)
+		require.Equal(
+			t,
+			block.Network().Mask(),
+			netipAddrFrom6Bits(prefixMask64(highPrefix), prefixMask64(lowPrefix)),
+		)
+	})
+}
+
+// verifies that reading either mask coordinate allocates nothing for the
+// zero wrapper and a genuine two-run value.
+func Test_BiContiguous_HighPrefixLenAndLowPrefixLen_AllocationFree(t *testing.T) {
+	cases := []struct {
+		name  string
+		block xnetip.BiContiguous
+	}{
+		{name: "zero wrapper", block: xnetip.BiContiguous{}},
+		{
+			name: "independent high and low runs",
+			block: xnetip.MustParseBiContiguous(
+				"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			requireNoAllocs(t, func() { intSink = testCase.block.HighPrefixLen() })
+			requireNoAllocs(t, func() { intSink = testCase.block.LowPrefixLen() })
+		})
+	}
 }
 
 // verifies that representative wrapper comparisons use address first and

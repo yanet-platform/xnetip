@@ -1,6 +1,9 @@
 package xnetip
 
-import "net/netip"
+import (
+	"math/bits"
+	"net/netip"
+)
 
 // BiContiguous is an IPv6 network whose two 64-bit mask halves are
 // independently contiguous.
@@ -121,6 +124,24 @@ func BiContiguousFromContiguous(block Contiguous[Network6]) BiContiguous {
 // this view.
 func (m BiContiguous) Network() Network6 {
 	return m.network6
+}
+
+// HighPrefixLen returns the leading-one length of the high 64-bit
+// mask half.
+//
+// The result is total and ranges from zero through 64. The zero wrapper
+// reports zero.
+func (m BiContiguous) HighPrefixLen() int {
+	return bits.LeadingZeros64(^m.network6.mask.bits.hi)
+}
+
+// LowPrefixLen returns the leading-one length of the low 64-bit
+// mask half.
+//
+// The result is total and ranges from zero through 64. The zero wrapper
+// reports zero.
+func (m BiContiguous) LowPrefixLen() int {
+	return bits.LeadingZeros64(^m.network6.mask.bits.lo)
 }
 
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after
