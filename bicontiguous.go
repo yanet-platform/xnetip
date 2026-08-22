@@ -16,6 +16,11 @@ type BiContiguous struct {
 	network6 Network6
 }
 
+// halfPrefixMask returns a leading-one mask for lengths zero through 64.
+func halfPrefixMask(prefix int) uint64 {
+	return ^uint64(0) << (64 - prefix)
+}
+
 // ParseBiContiguous parses an IPv6 network whose two mask halves are
 // independently contiguous.
 //

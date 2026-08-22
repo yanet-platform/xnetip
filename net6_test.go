@@ -6133,3 +6133,195 @@ func BenchmarkNetwork6_ToContiguous_NonContiguous(b *testing.B) {
 		contiguous6Sink = network.ToContiguous()
 	}
 }
+
+// verifies that widening keeps the longest leading run in each mask
+// half and normalizes the address under those independent runs.
+func Test_Network6_ToBiContiguous_PerHalfTruncation(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "zero network", input: "::/0", want: "::/0"},
+		{name: "host route", input: "2001:db8::1/128", want: "2001:db8::1/128"},
+		{name: "motivating two-run mask", input: "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0", want: "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0"},
+		{name: "global /40", input: "2a02:6b8:c00::/40", want: "2a02:6b8:c00::/40"},
+		{name: "global /64", input: "2001:db8:1:2::/64", want: "2001:db8:1:2::/64"},
+		{name: "global /96", input: "2001:db8:1:2:3:4::/96", want: "2001:db8:1:2:3:4::/96"},
+		{name: "hole in high half", input: "ffff:0:ffff:ffff:abcd:ef01::/ffff:0:ffff:ffff:ffff:ffff::", want: "ffff::abcd:ef01:0:0/ffff::ffff:ffff:0:0"},
+		{name: "hole in low half", input: "ffff:ffff:ff00:0:f0f0:ffff:ffff:ffff/ffff:ffff:ff00:0:f0f0:ffff:ffff:ffff", want: "ffff:ffff:ff00:0:f000::/ffff:ffff:ff00:0:f000::"},
+		{name: "holes in both halves", input: "aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa", want: "8000::8000:0:0:0/8000::8000:0:0:0"},
+		{name: "hole at half boundary", input: "ffff:ffff:ffff:fffe:ffff:ffff::/ffff:ffff:ffff:fffe:ffff:ffff::", want: "ffff:ffff:ffff:fffe:ffff:ffff::/ffff:ffff:ffff:fffe:ffff:ffff::"},
+		{name: "set host bits are cleared", input: "ffff:0:ffff:ffff:f0f0:ffff:ffff:ffff/ffff:0:ffff:ffff:f0f0:ffff:ffff:ffff", want: "ffff::f000:0:0:0/ffff::f000:0:0:0"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseNetwork6(testCase.input)
+			require.Equal(t, xnetip.MustParseBiContiguous(testCase.want), network.ToBiContiguous())
+		})
+	}
+}
+
+// verifies that the zero network widens to the exact zero wrapper.
+func Test_Network6_ToBiContiguous_ZeroValue(t *testing.T) {
+	require.Equal(t, xnetip.BiContiguous{}, xnetip.Network6{}.ToBiContiguous())
+}
+
+// verifies that every widened result carries a valid guarantee and
+// succeeds through the exact conversion without changing.
+func Test_Network6_ToBiContiguous_ResultGuaranteedProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		result := network.ToBiContiguous()
+		require.True(t, result.Network().IsBicontiguous())
+		exact, ok := xnetip.BiContiguousFrom6(result.Network())
+		require.True(t, ok)
+		require.Equal(t, result, exact)
+	})
+}
+
+// verifies that widening always produces a supernet of the source.
+func Test_Network6_ToBiContiguous_ContainsSourceProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		require.True(t, network.ToBiContiguous().Network().Contains(network))
+	})
+}
+
+// verifies that widening is an identity exactly for masks already
+// made of one leading run in each half.
+func Test_Network6_ToBiContiguous_IdentityIffBicontiguousProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		result := network.ToBiContiguous().Network()
+		require.Equal(t, network.IsBicontiguous(), result == network)
+	})
+}
+
+// The oracle builds the uninterrupted leading-one run one bit at a
+// time, independently of the runtime bit-counting implementation.
+func leadingPrefixMask64Oracle(mask uint64) uint64 {
+	var prefix uint64
+	for position := 63; position >= 0; position-- {
+		bit := uint64(1) << position
+		if mask&bit == 0 {
+			break
+		}
+		prefix |= bit
+	}
+	return prefix
+}
+
+// verifies that each result half equals the simple bit-loop oracle
+// for the corresponding source half.
+func Test_Network6_ToBiContiguous_MatchesPerHalfOracleProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		_, _, sourceMaskHi, sourceMaskLo := ipv6NetworkBits(network)
+		_, _, resultMaskHi, resultMaskLo := ipv6NetworkBits(network.ToBiContiguous().Network())
+		require.Equal(t, leadingPrefixMask64Oracle(sourceMaskHi), resultMaskHi)
+		require.Equal(t, leadingPrefixMask64Oracle(sourceMaskLo), resultMaskLo)
+	})
+}
+
+// The bounded oracle constructs an eight-bit prefix one bit at a time.
+func prefixMask8Oracle(prefix int) uint8 {
+	var mask uint8
+	for offset := range prefix {
+		mask |= uint8(1) << (7 - offset)
+	}
+	return mask
+}
+
+// verifies on bounded halves that the chosen admissible prefixes
+// contain every other prefix-mask subset of the source mask.
+//
+// More mask bits describe a smaller address set, so this dominance
+// makes the chosen product the unique smallest admissible supernet.
+func Test_Network6_ToBiContiguous_MinimalOnBoundedHalvesProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		sourceHi := rapid.Uint8().Draw(t, "source high half")
+		sourceLo := rapid.Uint8().Draw(t, "source low half")
+		network, err := xnetip.Network6From(
+			netipAddrFrom6Bits(math.MaxUint64, math.MaxUint64),
+			netipAddrFrom6Bits(uint64(sourceHi)<<56, uint64(sourceLo)<<56),
+		)
+		require.NoError(t, err)
+		_, _, resultMaskHi, resultMaskLo := ipv6NetworkBits(network.ToBiContiguous().Network())
+		chosenHi := uint8(resultMaskHi >> 56)
+		chosenLo := uint8(resultMaskLo >> 56)
+		require.Zero(t, resultMaskHi<<8)
+		require.Zero(t, resultMaskLo<<8)
+		require.Equal(t, chosenHi, chosenHi&sourceHi)
+		require.Equal(t, chosenLo, chosenLo&sourceLo)
+
+		for highPrefix := range 9 {
+			candidateHi := prefixMask8Oracle(highPrefix)
+			if candidateHi&sourceHi != candidateHi {
+				continue
+			}
+			for lowPrefix := range 9 {
+				candidateLo := prefixMask8Oracle(lowPrefix)
+				if candidateLo&sourceLo != candidateLo {
+					continue
+				}
+				require.Equal(t, candidateHi, candidateHi&chosenHi)
+				require.Equal(t, candidateLo, candidateLo&chosenLo)
+			}
+		}
+	})
+}
+
+// verifies exhaustively that all 4,225 admissible mask shapes are
+// exact identities under the widening conversion.
+func Test_Network6_ToBiContiguous_IdentityForEveryShape(t *testing.T) {
+	for highPrefix := range 65 {
+		for lowPrefix := range 65 {
+			network, err := xnetip.Network6From(
+				netipAddrFrom6Bits(math.MaxUint64, math.MaxUint64),
+				netipAddrFrom6Bits(prefixMask64(highPrefix), prefixMask64(lowPrefix)),
+			)
+			require.NoError(t, err)
+			require.Equal(
+				t,
+				network,
+				network.ToBiContiguous().Network(),
+				"high prefix %d, low prefix %d",
+				highPrefix,
+				lowPrefix,
+			)
+		}
+	}
+}
+
+// verifies that exact and widening conversions allocate nothing.
+func Test_Network6_ToBiContiguous_AllocationFree(t *testing.T) {
+	exact := xnetip.MustParseNetwork6("2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
+	widening := xnetip.MustParseNetwork6("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa")
+	requireNoAllocs(t, func() { biContiguousSink = exact.ToBiContiguous() })
+	requireNoAllocs(t, func() { biContiguousSink = widening.ToBiContiguous() })
+}
+
+func BenchmarkNetwork6_ToBiContiguous_Exact(b *testing.B) {
+	network := xnetip.MustParseNetwork6("2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0")
+	b.ReportAllocs()
+	for b.Loop() {
+		biContiguousSink = network.ToBiContiguous()
+	}
+}
+
+func BenchmarkNetwork6_ToBiContiguous_WidenBothHalves(b *testing.B) {
+	network := xnetip.MustParseNetwork6("aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa")
+	b.ReportAllocs()
+	for b.Loop() {
+		biContiguousSink = network.ToBiContiguous()
+	}
+}
+
+func BenchmarkNetwork6_ToBiContiguous_Zero(b *testing.B) {
+	network := xnetip.Network6{}
+	b.ReportAllocs()
+	for b.Loop() {
+		biContiguousSink = network.ToBiContiguous()
+	}
+}

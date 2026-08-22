@@ -2,6 +2,7 @@ package xnetip
 
 import (
 	"iter"
+	"math/bits"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -776,6 +777,22 @@ func (m Network6) ToContiguous() Contiguous[Network6] {
 	// construction, so the result is wrapped without revalidation.
 	mask := addr6{uint128MaskFromPrefix(m.mask.bits.LeadingOnes())}
 	return Contiguous[Network6]{network: fromBits6(m.addr, mask)}
+}
+
+// ToBiContiguous returns the smallest bi-contiguous network that
+// contains this network.
+//
+// Each mask half keeps its longest leading run of one bits and clears
+// every later constrained bit. The address is normalized under the
+// widened mask. A bi-contiguous network is returned wrapped unchanged;
+// the exact, non-widening conversion is BiContiguousFrom6.
+func (m Network6) ToBiContiguous() BiContiguous {
+	mask := m.mask.bits
+	widenedMask := addr6{uint128FromHalves(
+		halfPrefixMask(bits.LeadingZeros64(^mask.hi)),
+		halfPrefixMask(bits.LeadingZeros64(^mask.lo)),
+	)}
+	return BiContiguous{network6: fromBits6(m.addr, widenedMask)}
 }
 
 // String returns the text form of the network, see AppendTo.
