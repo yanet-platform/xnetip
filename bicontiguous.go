@@ -1,0 +1,90 @@
+package xnetip
+
+import "net/netip"
+
+// BiContiguousFrom returns network with its bi-contiguity guarantee
+// carried by the result type.
+//
+// ok is false when either 64-bit mask half is not a leading run of
+// ones, and the zero wrapper is returned. The network is otherwise
+// carried unchanged.
+func BiContiguousFrom(network Network6) (BiContiguous, bool) {
+	if !network.IsBicontiguous() {
+		return BiContiguous{}, false
+	}
+	return BiContiguous{network6: network}, true
+}
+
+// BiContiguousFromAddrs returns the normalized bi-contiguous network
+// with the given IPv6 address and mask.
+//
+// Both arguments must be Is6 addresses. IPv4-mapped IPv6 is accepted
+// and zones are dropped silently. An Is4 or invalid zero address wraps
+// ErrAddrFamilyMismatch. A valid mask whose 64-bit halves are not each
+// leading runs of ones wraps ErrNonBiContiguousMask. The zero wrapper is
+// returned on every error.
+func BiContiguousFromAddrs(addr, mask netip.Addr) (BiContiguous, error) {
+	addrKernel, addrOk := addr6FromNetip(addr)
+	maskKernel, maskOk := addr6FromNetip(mask)
+	if !addrOk || !maskOk {
+		input := addr.String() + "/" + mask.String()
+		return BiContiguous{}, wrapParseError(
+			"BiContiguousFromAddrs",
+			input,
+			ErrAddrFamilyMismatch,
+			nil,
+		)
+	}
+
+	network := fromBits6(addrKernel, maskKernel)
+	wrapper, ok := BiContiguousFrom(network)
+	if !ok {
+		input := addr.String() + "/" + mask.String()
+		return BiContiguous{}, wrapParseError(
+			"BiContiguousFromAddrs",
+			input,
+			ErrNonBiContiguousMask,
+			nil,
+		)
+	}
+	return wrapper, nil
+}
+
+// BiContiguousFromContiguous upgrades an IPv6 CIDR block to the
+// broader bi-contiguous class without validation.
+//
+// Every global leading run is independently a leading run in both
+// 64-bit halves, so the conversion is total and carries the wrapped
+// network unchanged.
+func BiContiguousFromContiguous(block Contiguous[Network6]) BiContiguous {
+	return BiContiguous{network6: block.network}
+}
+
+// BiContiguous is an IPv6 network whose two 64-bit mask halves are
+// independently contiguous.
+//
+// Each half is a leading run of one bits followed by zero bits. The
+// zero value wraps ::/0 and is valid. Values are immutable, comparable
+// with == exactly when their wrapped networks are, and safe to copy.
+// The unexported field prevents construction without validating or
+// otherwise proving the mask shape.
+type BiContiguous struct {
+	// Distinct field identity prevents structural conversion of this
+	// two-run wrapper into the stricter CIDR wrapper.
+	network6 Network6
+}
+
+// Network returns the wrapped IPv6 network.
+//
+// It is total: the wrapper adds only the per-half mask guarantee, and
+// operations without a guarantee-bearing result are reached through
+// this view.
+func (m BiContiguous) Network() Network6 {
+	return m.network6
+}
+
+// Compare returns -1, 0 or +1 as m sorts before, equal to or after
+// other in the wrapped network order.
+func (m BiContiguous) Compare(other BiContiguous) int {
+	return m.network6.Compare(other.network6)
+}

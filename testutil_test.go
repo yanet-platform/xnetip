@@ -488,6 +488,52 @@ var genContiguous6 = rapid.Custom(func(t *rapid.T) xnetip.Contiguous[xnetip.Netw
 	return wrapped
 })
 
+// prefixMask64 returns a 64-bit leading run of prefix one bits.
+func prefixMask64(prefix int) uint64 {
+	if prefix == 0 {
+		return 0
+	}
+	return math.MaxUint64 << (64 - prefix)
+}
+
+// drawBiContiguousPrefix draws a per-half prefix length with fixed
+// weight for the empty, one-bit, near-full and full boundary runs.
+func drawBiContiguousPrefix(t *rapid.T, label string) int {
+	switch rapid.IntRange(0, 9).Draw(t, label+" shape") {
+	case 0:
+		return 0
+	case 1:
+		return 1
+	case 2:
+		return 63
+	case 3:
+		return 64
+	default:
+		return rapid.IntRange(0, 64).Draw(t, label+" random")
+	}
+}
+
+// genBiContiguous draws an IPv6 network whose mask halves are
+// independent leading runs of ones.
+//
+// Every draw enters through the checked address-pair constructor and
+// is asserted normalized, so later property tests inherit the wrapper
+// invariant and the boundary-shape coverage.
+var genBiContiguous = rapid.Custom(func(t *rapid.T) xnetip.BiContiguous {
+	addrHi := rapid.Uint64().Draw(t, "addr hi")
+	addrLo := rapid.Uint64().Draw(t, "addr lo")
+	maskHi := prefixMask64(drawBiContiguousPrefix(t, "high prefix"))
+	maskLo := prefixMask64(drawBiContiguousPrefix(t, "low prefix"))
+	wrapper, err := xnetip.BiContiguousFromAddrs(
+		netipAddrFrom6Bits(addrHi, addrLo),
+		netipAddrFrom6Bits(maskHi, maskLo),
+	)
+	require.NoError(t, err)
+	require.Equal(t, netipAddrFrom6Bits(addrHi&maskHi, addrLo&maskLo), wrapper.Network().Addr())
+	require.Equal(t, netipAddrFrom6Bits(maskHi, maskLo), wrapper.Network().Mask())
+	return wrapper
+})
+
 // genContiguous draws a family-agnostic CIDR block, reusing the
 // concrete block generators with a fixed share of IPv4-mapped IPv6.
 //
@@ -533,18 +579,19 @@ func digitsOnly(text string) bool {
 // Sinks keep the measured closures' results alive, so the compiler cannot
 // optimise the work under test away.
 var (
-	wordSink        uint32
-	stringSink      string
-	intSink         int
-	bytesSink       []byte
-	networkSink     xnetip.Network4
-	network6Sink    xnetip.Network6
-	ipNetworkSink   xnetip.Network
-	addrSink        netip.Addr
-	prefixSink      netip.Prefix
-	okSink          bool
-	contiguous4Sink xnetip.Contiguous[xnetip.Network4]
-	contiguous6Sink xnetip.Contiguous[xnetip.Network6]
-	contiguousSink  xnetip.Contiguous[xnetip.Network]
-	errSink         error
+	wordSink         uint32
+	stringSink       string
+	intSink          int
+	bytesSink        []byte
+	networkSink      xnetip.Network4
+	network6Sink     xnetip.Network6
+	ipNetworkSink    xnetip.Network
+	addrSink         netip.Addr
+	prefixSink       netip.Prefix
+	okSink           bool
+	contiguous4Sink  xnetip.Contiguous[xnetip.Network4]
+	contiguous6Sink  xnetip.Contiguous[xnetip.Network6]
+	contiguousSink   xnetip.Contiguous[xnetip.Network]
+	biContiguousSink xnetip.BiContiguous
+	errSink          error
 )

@@ -4,9 +4,16 @@ Guidance for AI coding agents working on `xnetip`. Keep it under 8 KB: facts abo
 
 ## Project
 
-`xnetip` (`github.com/yanet-platform/xnetip`, Go 1.24, single package, **stdlib-only runtime**, tests on `testify` + `rapid`) is a Go port of the Rust crate `netip` 0.3.9: IPv4/IPv6 network types as `(address, mask)` pairs with first-class **non-contiguous masks**, full set algebra (contains, intersection, difference, merge, adjacency, supernet), address iteration, range-to-CIDR, in-place aggregation and binary split. Reference sources: `../netip/src/{net.rs,parser.rs,fmt.rs}` (read them for semantics — the Go API mirrors them one to one), `../netip/CLAUDE.md`, `../netip/.docs/ROADMAP.md`.
+`xnetip` (`github.com/yanet-platform/xnetip`, Go 1.24, one package) is a
+**stdlib-only runtime** port of Rust `netip` 0.3.9. It models IPv4/IPv6
+networks as `(address, mask)` pairs, including non-contiguous masks, set
+algebra, iteration, range-to-CIDR, aggregation and binary split. Tests use
+`testify` and `rapid`. Read `../netip/src/{net.rs,parser.rs,fmt.rs}` fresh for
+semantics; also see `../netip/CLAUDE.md` and `../netip/.docs/ROADMAP.md`.
 
-Priorities: **functionality first, performance second**. Iteration 1 scope: the network core. Out of scope (backlog in `.roadmap/00-overview.md`): `Contiguous`/`BiContiguous` wrappers and their aggregations, `MacAddr`, `ParseNext*`, byte-slice parsing, hand-rolled parsers.
+Priorities: **functionality first, performance second**. Iteration 1 covers
+the network core and its `Contiguous`/`BiContiguous` guarantee wrappers;
+`.roadmap/00-overview.md` owns the remaining backlog.
 
 ## Build, test, lint
 
@@ -32,7 +39,8 @@ uint128.go         unexported 128-bit helper {hi, lo uint64}, exported methods, 
 addr4.go addr6.go  unexported address kernels addr4{uint32} addr6{uint128} — the public API speaks netip.Addr
 net4.go net6.go net.go               Network4  Network6  Network{network Network6; is4 bool}
                    a type's whole API lives in its file (constructors, Parse*, formatters, marshalling, set algebra, Addrs, Difference)
-errors.go compact.go contiguous.go   sentinels, Compact (function over an unexported wrapper), Contiguous[T] CIDR wrapper + the network[T] F-bound
+errors.go compact.go                 sentinels, Compact (function over an unexported wrapper)
+contiguous.go bicontiguous.go        Contiguous[T] CIDR wrapper + network[T] F-bound; concrete IPv6 BiContiguous wrapper
 range.go aggregate.go binary_split.go   free functions over ranges and slices (RangeToNetworks*, Aggregate*, BinarySplit*), one file each
 *_test.go          mirror of the source file, package xnetip_test; white-box files (package xnetip): uint128_test.go and the kernel suites addr4_test.go, addr6_test.go, errors_test.go
 testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by the type's birth session
@@ -42,12 +50,33 @@ testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by t
 
 ## Types and invariants
 
-- The public API speaks `netip.Addr`: accessors (`Addr`, `Mask`, `LastAddr`), iterators (`Addrs`) and checked constructors all use it. A constructor taking `netip.Addr` returns `(T, error)` and rejects a foreign family and the invalid zero `Addr` with `ErrAddrFamilyMismatch`; a zone is dropped silently. Relational operations taking `netip.Addr` are total — a foreign-family argument (an IPv4-mapped address against an IPv4 network included) is simply not contained, the `netip.Prefix.Contains` rule. Internally addresses are host-order integers (unexported `addr4{uint32}`, `addr6{uint128}`), zone-free by construction.
-- Networks are always normalized: `addr & mask == addr`. Every constructor enforces it. Zero values are valid: `Network4{}` = `0.0.0.0/0`, `Network6{}` = `::/0`, `Network{}` = `::/0`.
-- `Network` stores IPv4 **IPv4-mapped**: addr `::ffff:a.b.c.d`, mask `ffff:ffff:ffff:ffff:ffff:ffff:M`. Invariant: `is4 ⇒ network.IsIPv4MappedIPv6()`. Every operation delegates to the 128-bit form and stays correct, `PrefixLen()` subtracts 96 for IPv4. Cross-family: relational ops are false, `Intersection`/`Merge` return `ok=false`, `Compare` orders IPv4 before IPv6.
-- Mask semantics, contiguity, `PrefixLen() (int, bool)`, `ToContiguous()` (plain network), `LastAddr()`, adjacency, merge, lowest-mask-bit variants, `SupernetFor`, `Difference` (exactly popcount(m2 &^ m1) pairwise-disjoint networks), host-index iteration order — all exactly as documented in `../netip/src/net.rs`. Differences from Rust are listed in `.roadmap/00-overview.md` ("Deliberate divergences"). The CIDR suffix after `/` is strict (digits only, no leading zeros, no `+`), `%zone` in parse input is an error.
-- Go idioms for Rust traits: `Option<T>` → `(T, bool)`. Parse/construct errors → `error` built from exported sentinels wrapped with `%w` and the input echoed. `Ord` → `Compare(other) int` only. `Display` → `String()` + `AppendTo([]byte) []byte` + `MarshalText`/`UnmarshalText`. Iterators → `iter.Seq` (`Addrs`, `AddrsBackward`, `NumHostBits() int`, `Difference`, `RangeToNetworks4/6`). `fmt::Compact<T>` → the `Compact` function returning an unexported generic wrapper with `String`/`AppendTo` (type inference at the call site). Free slice functions are verb-first (`Aggregate4`, `BinarySplit6`).
-- Parsing goes through `net/netip` in iteration 1: split at the first `/` ourselves (dotted masks are a supported form), `netip.ParseAddr` for the address and the mask, our own strict prefix-length rule.
+- Public address inputs, views and iterators use `netip.Addr`; kernels are
+  zone-free host-order integers (`addr4{uint32}`, `addr6{uint128}`). Checked
+  constructors return `(T, error)`, drop zones, and reject a foreign family or
+  invalid zero address with `ErrAddrFamilyMismatch`. Relations are total: a
+  foreign family (4in6 against IPv4 included) is not contained, matching
+  `netip.Prefix.Contains`.
+- Networks are normalized (`addr & mask == addr`). Valid zero values are
+  `Network4{}` = `0.0.0.0/0`, and `Network6{}`/`Network{}` = `::/0`.
+- `Contiguous[T]` proves one global leading-one mask run. Concrete
+  `BiContiguous` over `Network6` proves one run per 64-bit half. Their storage
+  is unexported; equality and ordering match the wrapped network; zero values
+  are valid universe networks.
+- `Network` stores IPv4 mapped: address `::ffff:a.b.c.d`, mask
+  `ffff:ffff:ffff:ffff:ffff:ffff:M`; `is4` implies
+  `network.IsIPv4MappedIPv6()`. Operations delegate to 128 bits and
+  `PrefixLen` subtracts 96. Cross-family relations are false,
+  `Intersection`/`Merge` return `ok=false`, and `Compare` orders IPv4 first.
+- Mask algebra, contiguity, `LastAddr`, adjacency, merge, supernet,
+  `Difference` and iteration order mirror `../netip/src/net.rs`; deliberate
+  differences are in `.roadmap/00-overview.md`. Parsing uses `net/netip` after
+  our own `/` split and strict prefix-length check (digits only, no leading
+  zero or `+`); dotted masks work and `%zone` is an error.
+- Rust `Option<T>` becomes `(T, bool)`, errors wrap exported sentinels with
+  `%w` and echo input, `Ord` becomes `Compare`, and iterators use `iter.Seq`.
+  Formatting uses `String`/`AppendTo` plus text marshaling. `Compact` returns
+  an unexported inferred generic wrapper. Slice functions are verb-first
+  (`Aggregate4`, `BinarySplit6`).
 
 ## Hard constraints
 

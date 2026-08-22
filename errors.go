@@ -53,6 +53,13 @@ var ErrInvalidMask = errors.New("invalid network mask")
 // network that the plain network parsers accept.
 var ErrNonContiguousMask = errors.New("mask not contiguous")
 
+// ErrNonBiContiguousMask reports a valid IPv6 mask with an interior
+// hole in either 64-bit half, where a bi-contiguous mask was required.
+//
+// The checked address-pair constructor returns it when the plain IPv6
+// network is valid but does not carry the stronger per-half shape.
+var ErrNonBiContiguousMask = errors.New("mask not bi-contiguous")
+
 // ErrEmptyInput reports empty text where a network was required.
 //
 // Only the UnmarshalText implementations return it: their zero values
