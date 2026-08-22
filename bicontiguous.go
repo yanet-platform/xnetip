@@ -123,3 +123,48 @@ func (m BiContiguous) Network() Network6 {
 func (m BiContiguous) Compare(other BiContiguous) int {
 	return m.network6.Compare(other.network6)
 }
+
+// String returns the canonical text form of the bi-contiguous network.
+//
+// The format is exactly the wrapped IPv6 network's: a globally contiguous
+// mask uses a prefix length, while a genuine two-run mask is written as a
+// compressed IPv6 address. The output parses back with ParseBiContiguous.
+func (m BiContiguous) String() string {
+	// The buffer covers the longest address-plus-mask form, so the string
+	// conversion is the only allocation.
+	var buffer [91]byte
+	return string(m.AppendTo(buffer[:0]))
+}
+
+// AppendTo appends the canonical text form to b.
+//
+// The format is exactly the wrapped IPv6 network's, including its choice
+// between a decimal prefix length and an explicit compressed mask.
+func (m BiContiguous) AppendTo(b []byte) []byte {
+	return m.network6.AppendTo(b)
+}
+
+// MarshalText implements encoding.TextMarshaler.
+//
+// The text is the String form of the bi-contiguous network. It never fails
+// and allocates only the returned slice.
+func (m BiContiguous) MarshalText() ([]byte, error) {
+	return m.AppendTo(make([]byte, 0, len("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"))), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+//
+// The text must be accepted by ParseBiContiguous. Empty text wraps
+// ErrEmptyInput because the zero wrapper is a valid block. The receiver is
+// untouched on every error.
+func (m *BiContiguous) UnmarshalText(text []byte) error {
+	if len(text) == 0 {
+		return wrapParseError("BiContiguous.UnmarshalText", "", ErrEmptyInput, nil)
+	}
+	wrapper, err := ParseBiContiguous(string(text))
+	if err != nil {
+		return err
+	}
+	*m = wrapper
+	return nil
+}

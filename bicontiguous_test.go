@@ -1,7 +1,10 @@
 package xnetip_test
 
 import (
+	"encoding"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/netip"
 	"strconv"
@@ -10,6 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/xnetip"
 	"pgregory.net/rapid"
+)
+
+var (
+	_ fmt.Stringer             = xnetip.BiContiguous{}
+	_ encoding.TextMarshaler   = xnetip.BiContiguous{}
+	_ encoding.TextUnmarshaler = (*xnetip.BiContiguous)(nil)
 )
 
 // mustBiContiguous wraps a parsed IPv6 network fixture, stopping the
@@ -787,4 +796,348 @@ func Test_BiContiguous_OperationsAllocationFree(t *testing.T) {
 	requireNoAllocs(t, func() { biContiguousSink = xnetip.BiContiguousFromContiguous(block) })
 	requireNoAllocs(t, func() { network6Sink = first.Network() })
 	requireNoAllocs(t, func() { intSink = first.Compare(second) })
+}
+
+// verifies that every representative mask shape uses exactly the
+// canonical text of its wrapped IPv6 network.
+func Test_BiContiguous_String_ExactForms(t *testing.T) {
+	cases := []struct {
+		name    string
+		wrapper xnetip.BiContiguous
+		want    string
+	}{
+		{name: "zero wrapper", wrapper: xnetip.BiContiguous{}, want: "::/0"},
+		{
+			name:    "host route",
+			wrapper: xnetip.MustParseBiContiguous("::1/128"),
+			want:    "::1/128",
+		},
+		{
+			name:    "global prefix below half boundary",
+			wrapper: xnetip.MustParseBiContiguous("2001:db8::/40"),
+			want:    "2001:db8::/40",
+		},
+		{
+			name:    "global prefix above half boundary",
+			wrapper: xnetip.MustParseBiContiguous("2001:db8::/96"),
+			want:    "2001:db8::/96",
+		},
+		{
+			name: "independent high 40 and low 32 runs",
+			wrapper: xnetip.MustParseBiContiguous(
+				"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			),
+			want: "2a02:6b8:c00:0:1234:abcd::/ffff:ffff:ff00:0:ffff:ffff::",
+		},
+		{
+			name:    "low half only one-bit run",
+			wrapper: xnetip.MustParseBiContiguous("::/::8000:0:0:0"),
+			want:    "::/::8000:0:0:0",
+		},
+		{
+			name:    "mapped IPv6 host route",
+			wrapper: xnetip.MustParseBiContiguous("::ffff:192.0.2.1/128"),
+			want:    "::ffff:192.0.2.1/128",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, testCase.wrapper.String())
+		})
+	}
+}
+
+// verifies that every text adapter emits the same bytes as the wrapped
+// network and preserves bytes already present in an append buffer.
+func Test_BiContiguous_TextAdapters_MatchNetworkProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		wrapper := genBiContiguous.Draw(t, "wrapper")
+		want := wrapper.Network().String()
+		require.Equal(t, want, wrapper.String())
+		require.Equal(t, want, string(wrapper.AppendTo(nil)))
+		require.Equal(t, "network="+want, string(wrapper.AppendTo([]byte("network="))))
+		text, err := wrapper.MarshalText()
+		require.NoError(t, err)
+		require.Equal(t, want, string(text))
+	})
+}
+
+// verifies that an append buffer with enough spare capacity is reused
+// instead of replacing its backing storage.
+func Test_BiContiguous_AppendTo_ReusesCapacity(t *testing.T) {
+	wrapper := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+	)
+	buffer := make([]byte, len("network="), 128)
+	copy(buffer, "network=")
+	firstByte := &buffer[0]
+
+	appended := wrapper.AppendTo(buffer)
+
+	require.Equal(t, firstByte, &appended[0])
+}
+
+// verifies that every pair of per-half prefix lengths survives both
+// parser and text-unmarshaler round trips without changing the block.
+func Test_BiContiguous_Text_RoundTripsEveryShape(t *testing.T) {
+	addr := netipAddrFrom6Bits(math.MaxUint64, math.MaxUint64)
+	for highPrefix := range 65 {
+		for lowPrefix := range 65 {
+			mask := netipAddrFrom6Bits(
+				prefixMask64(highPrefix),
+				prefixMask64(lowPrefix),
+			)
+			wrapper, err := xnetip.BiContiguousFrom(addr, mask)
+			require.NoError(t, err)
+
+			parsed, err := xnetip.ParseBiContiguous(wrapper.String())
+			require.NoError(
+				t,
+				err,
+				"high prefix %d, low prefix %d",
+				highPrefix,
+				lowPrefix,
+			)
+			require.Equal(
+				t,
+				wrapper,
+				parsed,
+				"high prefix %d, low prefix %d",
+				highPrefix,
+				lowPrefix,
+			)
+
+			text, err := wrapper.MarshalText()
+			require.NoError(t, err)
+			var decoded xnetip.BiContiguous
+			require.NoError(
+				t,
+				decoded.UnmarshalText(text),
+				"high prefix %d, low prefix %d",
+				highPrefix,
+				lowPrefix,
+			)
+			require.Equal(
+				t,
+				wrapper,
+				decoded,
+				"high prefix %d, low prefix %d",
+				highPrefix,
+				lowPrefix,
+			)
+		}
+	}
+}
+
+// verifies that generated wrappers survive direct text parsing and
+// marshaling in both directions.
+func Test_BiContiguous_Text_RoundTripsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		wrapper := genBiContiguous.Draw(t, "wrapper")
+		parsed, err := xnetip.ParseBiContiguous(wrapper.String())
+		require.NoError(t, err)
+		require.Equal(t, wrapper, parsed)
+
+		text, err := wrapper.MarshalText()
+		require.NoError(t, err)
+		var decoded xnetip.BiContiguous
+		require.NoError(t, decoded.UnmarshalText(text))
+		require.Equal(t, wrapper, decoded)
+	})
+}
+
+// verifies that generated wrappers survive JSON round trips both as
+// standalone values and as struct fields.
+func Test_BiContiguous_MarshalText_JSONRoundTripsProperty(t *testing.T) {
+	type document struct {
+		Network xnetip.BiContiguous `json:"network"`
+	}
+
+	rapid.Check(t, func(t *rapid.T) {
+		wrapper := genBiContiguous.Draw(t, "wrapper")
+		encoded, err := json.Marshal(wrapper)
+		require.NoError(t, err)
+		var decoded xnetip.BiContiguous
+		require.NoError(t, json.Unmarshal(encoded, &decoded))
+		require.Equal(t, wrapper, decoded)
+
+		encoded, err = json.Marshal(document{Network: wrapper})
+		require.NoError(t, err)
+		var decodedDocument document
+		require.NoError(t, json.Unmarshal(encoded, &decodedDocument))
+		require.Equal(t, document{Network: wrapper}, decodedDocument)
+	})
+}
+
+// verifies that nil and non-nil empty text both report the dedicated
+// sentinel and leave a nonzero receiver unchanged.
+func Test_BiContiguous_UnmarshalText_EmptyKeepsReceiver(t *testing.T) {
+	initial := xnetip.MustParseBiContiguous("2001:db8::/32")
+	cases := []struct {
+		name string
+		text []byte
+	}{
+		{name: "nil slice", text: nil},
+		{name: "non-nil empty slice", text: []byte{}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			wrapper := initial
+			err := wrapper.UnmarshalText(testCase.text)
+			require.ErrorIs(t, err, xnetip.ErrEmptyInput)
+			require.EqualError(
+				t,
+				err,
+				`xnetip.BiContiguous.UnmarshalText(""): empty input`,
+			)
+			require.Equal(t, initial, wrapper)
+		})
+	}
+}
+
+// verifies that every nonempty rejection keeps the parser's error class
+// and text while leaving a nonzero receiver unchanged.
+func Test_BiContiguous_UnmarshalText_ErrorsKeepReceiver(t *testing.T) {
+	initial := xnetip.MustParseBiContiguous("2001:db8::/32")
+	cases := []struct {
+		name     string
+		input    string
+		sentinel error
+	}{
+		{
+			name:     "high-half interior hole",
+			input:    "::/ffff:0:ffff::",
+			sentinel: xnetip.ErrNonBiContiguousMask,
+		},
+		{
+			name:     "low-half interior hole",
+			input:    "::/ffff:ffff::f0f0:f0f0:f0f0:f0f0",
+			sentinel: xnetip.ErrNonBiContiguousMask,
+		},
+		{name: "malformed text", input: "not-a-network", sentinel: xnetip.ErrParse},
+		{
+			name:     "IPv4 text",
+			input:    "192.0.2.1/24",
+			sentinel: xnetip.ErrAddrFamilyMismatch,
+		},
+		{name: "zone", input: "fe80::1%eth0/64", sentinel: xnetip.ErrZone},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, parseErr := xnetip.ParseBiContiguous(testCase.input)
+			require.Error(t, parseErr)
+
+			wrapper := initial
+			err := wrapper.UnmarshalText([]byte(testCase.input))
+			require.ErrorIs(t, err, testCase.sentinel)
+			require.EqualError(t, err, parseErr.Error())
+			require.Equal(t, initial, wrapper)
+		})
+	}
+}
+
+// verifies that JSON reports the same shape sentinel as direct text
+// decoding and preserves the destination after the rejected string.
+func Test_BiContiguous_UnmarshalText_JSONErrorKeepsReceiver(t *testing.T) {
+	initial := xnetip.MustParseBiContiguous("2001:db8::/32")
+	wrapper := initial
+
+	err := json.Unmarshal([]byte(`"::/ffff:0:ffff::"`), &wrapper)
+
+	require.ErrorIs(t, err, xnetip.ErrNonBiContiguousMask)
+	require.Equal(t, initial, wrapper)
+}
+
+// verifies that formatting pays only for its returned value and that
+// a preallocated append path adds no allocation over the inner network.
+func Test_BiContiguous_Text_AllocationContract(t *testing.T) {
+	wrapper := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+	)
+	inner := wrapper.Network()
+	buffer := make([]byte, 0, 128)
+
+	requireNoAllocs(t, func() { bytesSink = wrapper.AppendTo(buffer[:0]) })
+	require.Equal(
+		t,
+		int(testing.AllocsPerRun(100, func() { stringSink = inner.String() })),
+		int(testing.AllocsPerRun(100, func() { stringSink = wrapper.String() })),
+	)
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = wrapper.String() })))
+	require.Equal(
+		t,
+		1,
+		int(testing.AllocsPerRun(100, func() { bytesSink, errSink = wrapper.MarshalText() })),
+	)
+}
+
+// verifies that successful text decoding adds no allocation beyond the
+// wrapped network's parser path for the same stable bytes.
+func Test_BiContiguous_UnmarshalText_MatchesNetwork6Allocations(t *testing.T) {
+	text := []byte(
+		"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+	)
+	var network xnetip.Network6
+	var wrapper xnetip.BiContiguous
+
+	networkAllocs := int(testing.AllocsPerRun(100, func() {
+		errSink = network.UnmarshalText(text)
+	}))
+	unmarshalAllocs := int(testing.AllocsPerRun(100, func() {
+		errSink = wrapper.UnmarshalText(text)
+	}))
+
+	require.Equal(t, networkAllocs, unmarshalAllocs)
+}
+
+// verifies that the compact adapter accepts the guarantee-bearing value
+// and drops only a host route's redundant suffix.
+func Test_Compact_BiContiguous_ExactForms(t *testing.T) {
+	cases := []struct {
+		name    string
+		wrapper xnetip.BiContiguous
+		want    string
+	}{
+		{name: "zero wrapper", wrapper: xnetip.BiContiguous{}, want: "::/0"},
+		{
+			name:    "host route",
+			wrapper: xnetip.MustParseBiContiguous("::1/128"),
+			want:    "::1",
+		},
+		{
+			name:    "global prefix",
+			wrapper: xnetip.MustParseBiContiguous("2001:db8::/32"),
+			want:    "2001:db8::/32",
+		},
+		{
+			name: "genuine two-run mask",
+			wrapper: xnetip.MustParseBiContiguous(
+				"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			),
+			want: "2a02:6b8:c00:0:1234:abcd::/ffff:ffff:ff00:0:ffff:ffff::",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.want, xnetip.Compact(testCase.wrapper).String())
+		})
+	}
+}
+
+// verifies that compact rendering of every generated wrapper matches the
+// inner IPv6 adapter, reparses exactly and appends without allocation.
+func Test_Compact_BiContiguous_DelegatesProperty(t *testing.T) {
+	buffer := make([]byte, 0, 128)
+	rapid.Check(t, func(t *rapid.T) {
+		wrapper := genBiContiguous.Draw(t, "wrapper")
+		compact := xnetip.Compact(wrapper)
+		want := xnetip.Compact(wrapper.Network()).String()
+		require.Equal(t, want, compact.String())
+		require.Equal(t, want, string(compact.AppendTo(nil)))
+
+		parsed, err := xnetip.ParseBiContiguous(compact.String())
+		require.NoError(t, err)
+		require.Equal(t, wrapper, parsed)
+		requireNoAllocs(t, func() { bytesSink = compact.AppendTo(buffer[:0]) })
+	})
 }

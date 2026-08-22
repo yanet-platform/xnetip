@@ -1,17 +1,29 @@
 package xnetip
 
-// Compact renders a network in its shortest unambiguous form.
+// Compact renders a network-like value in its shortest unambiguous form.
 //
 // A host route is written as its bare address, everything else
 // exactly as the network's own String writes it: address and prefix
 // length for a contiguous mask, address and explicit mask otherwise.
 // A Network is written in its own family, so the host-route rule
 // fires at 32 bits for IPv4 and at 128 for IPv6, an IPv4-mapped IPv6
-// network counting as IPv6. The output reparses with the family's
-// Parse function, which reads a bare address as a host route. The
-// opaque result carries String, AppendTo and fmt.Stringer.
-func Compact[T network[T]](n T) compact[T] {
+// network counting as IPv6. A guarantee-bearing IPv6 wrapper keeps
+// the same rule and reparses through its own parser. The opaque result
+// carries String, AppendTo and fmt.Stringer.
+func Compact[T compactable](n T) compact[T] {
 	return compact[T]{network: n}
+}
+
+// compactable is the closed set of values accepted by the compact adapter.
+//
+// The guarantee-bearing IPv6 value joins the three base network types
+// because it has the same text and host-route semantics as its wrapped
+// network.
+type compactable interface {
+	Network4 | Network6 | Network | BiContiguous
+
+	// AppendTo appends the value's canonical text to a byte slice.
+	AppendTo([]byte) []byte
 }
 
 // compact is the adapter Compact returns, a wrapper over a network
@@ -22,7 +34,7 @@ func Compact[T network[T]](n T) compact[T] {
 // fmt.Stringer contract, never by name. Future formatting adapters
 // follow the same shape, a constructor function over an opaque
 // wrapper.
-type compact[T network[T]] struct {
+type compact[T compactable] struct {
 	// network is the network value to render.
 	network T
 }
@@ -44,6 +56,8 @@ func (m compact[T]) AppendTo(b []byte) []byte {
 		return appendCompact4(b, network)
 	case Network6:
 		return appendCompact6(b, network)
+	case BiContiguous:
+		return appendCompact6(b, network.network6)
 	}
 	// The constraint leaves Network as the only remaining
 	// instantiation, and it renders as the family it holds.
