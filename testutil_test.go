@@ -524,7 +524,7 @@ var genBiContiguous = rapid.Custom(func(t *rapid.T) xnetip.BiContiguous {
 	addrLo := rapid.Uint64().Draw(t, "addr lo")
 	maskHi := prefixMask64(drawBiContiguousPrefix(t, "high prefix"))
 	maskLo := prefixMask64(drawBiContiguousPrefix(t, "low prefix"))
-	wrapper, err := xnetip.BiContiguousFromAddrs(
+	wrapper, err := xnetip.BiContiguousFrom(
 		netipAddrFrom6Bits(addrHi, addrLo),
 		netipAddrFrom6Bits(maskHi, maskLo),
 	)

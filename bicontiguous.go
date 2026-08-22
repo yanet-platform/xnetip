@@ -16,20 +16,42 @@ type BiContiguous struct {
 	network6 Network6
 }
 
-// BiContiguousFrom returns network with its bi-contiguity guarantee
-// carried by the result type.
+// ParseBiContiguous parses an IPv6 network whose two mask halves are
+// independently contiguous.
 //
-// ok is false when either 64-bit mask half is not a leading run of
-// ones, and the zero wrapper is returned. The network is otherwise
-// carried unchanged.
-func BiContiguousFrom(network Network6) (BiContiguous, bool) {
-	if !network.IsBicontiguous() {
-		return BiContiguous{}, false
+// The grammar and ordinary parse errors are exactly ParseNetwork6's.
+// A valid network whose mask has an interior hole in either 64-bit
+// half instead wraps ErrNonBiContiguousMask under this function's
+// name.
+func ParseBiContiguous(s string) (BiContiguous, error) {
+	network, err := ParseNetwork6(s)
+	if err != nil {
+		return BiContiguous{}, err
 	}
-	return BiContiguous{network6: network}, true
+	if !network.IsBicontiguous() {
+		return BiContiguous{}, wrapParseError(
+			"ParseBiContiguous",
+			s,
+			ErrNonBiContiguousMask,
+			nil,
+		)
+	}
+	return BiContiguous{network6: network}, nil
 }
 
-// BiContiguousFromAddrs returns the normalized bi-contiguous network
+// MustParseBiContiguous calls ParseBiContiguous and panics on error.
+//
+// It is intended for tests and package-level constants built from
+// literals.
+func MustParseBiContiguous(s string) BiContiguous {
+	network, err := ParseBiContiguous(s)
+	if err != nil {
+		panic(err)
+	}
+	return network
+}
+
+// BiContiguousFrom returns the normalized bi-contiguous network
 // with the given IPv6 address and mask.
 //
 // Both arguments must be Is6 addresses. IPv4-mapped IPv6 is accepted
@@ -37,13 +59,13 @@ func BiContiguousFrom(network Network6) (BiContiguous, bool) {
 // ErrAddrFamilyMismatch. A valid mask whose 64-bit halves are not each
 // leading runs of ones wraps ErrNonBiContiguousMask. The zero wrapper is
 // returned on every error.
-func BiContiguousFromAddrs(addr, mask netip.Addr) (BiContiguous, error) {
+func BiContiguousFrom(addr, mask netip.Addr) (BiContiguous, error) {
 	addrKernel, addrOk := addr6FromNetip(addr)
 	maskKernel, maskOk := addr6FromNetip(mask)
 	if !addrOk || !maskOk {
 		input := addr.String() + "/" + mask.String()
 		return BiContiguous{}, wrapParseError(
-			"BiContiguousFromAddrs",
+			"BiContiguousFrom",
 			input,
 			ErrAddrFamilyMismatch,
 			nil,
@@ -51,17 +73,30 @@ func BiContiguousFromAddrs(addr, mask netip.Addr) (BiContiguous, error) {
 	}
 
 	network := fromBits6(addrKernel, maskKernel)
-	wrapper, ok := BiContiguousFrom(network)
+	wrapper, ok := BiContiguousFrom6(network)
 	if !ok {
 		input := addr.String() + "/" + mask.String()
 		return BiContiguous{}, wrapParseError(
-			"BiContiguousFromAddrs",
+			"BiContiguousFrom",
 			input,
 			ErrNonBiContiguousMask,
 			nil,
 		)
 	}
 	return wrapper, nil
+}
+
+// BiContiguousFrom6 returns network with its bi-contiguity guarantee
+// carried by the result type.
+//
+// ok is false when either 64-bit mask half is not a leading run of
+// ones, and the zero wrapper is returned. The network is otherwise
+// carried unchanged.
+func BiContiguousFrom6(network Network6) (BiContiguous, bool) {
+	if !network.IsBicontiguous() {
+		return BiContiguous{}, false
+	}
+	return BiContiguous{network6: network}, true
 }
 
 // BiContiguousFromContiguous upgrades an IPv6 CIDR block to the
