@@ -105,7 +105,7 @@ func (m addr6) Compare(other addr6) int {
 // the extended buffer.
 //
 // The form is the RFC 5952 one net/netip prints, mapped addresses as
-// "::ffff:a.b.c.d", 45 bytes at most. It is the allocation-free kernel
+// "::ffff:a.b.c.d", 39 bytes at most. It is the allocation-free kernel
 // behind the network formatters: with enough capacity in b it performs
 // no allocation.
 func (m addr6) AppendTo(b []byte) []byte {

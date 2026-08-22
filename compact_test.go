@@ -263,6 +263,84 @@ func Test_Compact_IPv6_MatchesNetipRenderingProperty(t *testing.T) {
 	})
 }
 
+// verifies that every contiguous-wrapper instantiation uses the same
+// compact form as its wrapped network, including bare host routes.
+func Test_Compact_Contiguous_ExactForms(t *testing.T) {
+	require.Equal(
+		t,
+		"127.0.0.1",
+		xnetip.Compact(xnetip.MustParseContiguous4("127.0.0.1/32")).String(),
+	)
+	require.Equal(
+		t,
+		"10.0.0.0/8",
+		xnetip.Compact(xnetip.MustParseContiguous4("10.0.0.0/8")).String(),
+	)
+	require.Equal(
+		t,
+		"::1",
+		xnetip.Compact(xnetip.MustParseContiguous6("::1/128")).String(),
+	)
+	require.Equal(
+		t,
+		"2001:db8::/32",
+		xnetip.Compact(xnetip.MustParseContiguous6("2001:db8::/32")).String(),
+	)
+	require.Equal(
+		t,
+		"192.0.2.1",
+		xnetip.Compact(xnetip.MustParseContiguous("192.0.2.1/32")).String(),
+	)
+	require.Equal(
+		t,
+		"::ffff:192.0.2.1",
+		xnetip.Compact(xnetip.MustParseContiguous("::ffff:192.0.2.1/128")).String(),
+	)
+}
+
+// verifies that generated contiguous wrappers compact exactly like their
+// wrapped networks and reparse without losing the guarantee or family.
+func Test_Compact_Contiguous_DelegatesProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block4 := genContiguous4.Draw(t, "block4")
+		compact4 := xnetip.Compact(block4).String()
+		require.Equal(t, xnetip.Compact(block4.Network()).String(), compact4)
+		parsed4, err := xnetip.ParseContiguous4(compact4)
+		require.NoError(t, err)
+		require.Equal(t, block4, parsed4)
+
+		block6 := genContiguous6.Draw(t, "block6")
+		compact6 := xnetip.Compact(block6).String()
+		require.Equal(t, xnetip.Compact(block6.Network()).String(), compact6)
+		parsed6, err := xnetip.ParseContiguous6(compact6)
+		require.NoError(t, err)
+		require.Equal(t, block6, parsed6)
+
+		block := genContiguous.Draw(t, "block")
+		compact := xnetip.Compact(block).String()
+		require.Equal(t, xnetip.Compact(block.Network()).String(), compact)
+		parsed, err := xnetip.ParseContiguous(compact)
+		require.NoError(t, err)
+		require.Equal(t, block, parsed)
+	})
+}
+
+// verifies that compact appending and string conversion keep their
+// allocation contracts for every contiguous-wrapper instantiation.
+func Test_Compact_Contiguous_AllocationContract(t *testing.T) {
+	compact4 := xnetip.Compact(xnetip.MustParseContiguous4("127.0.0.1/32"))
+	compact6 := xnetip.Compact(xnetip.MustParseContiguous6("2001:db8::/32"))
+	compact := xnetip.Compact(xnetip.MustParseContiguous("::ffff:192.0.2.1/128"))
+	buffer := make([]byte, 0, 128)
+
+	requireNoAllocs(t, func() { bytesSink = compact4.AppendTo(buffer[:0]) })
+	requireNoAllocs(t, func() { bytesSink = compact6.AppendTo(buffer[:0]) })
+	requireNoAllocs(t, func() { bytesSink = compact.AppendTo(buffer[:0]) })
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = compact4.String() })))
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = compact6.String() })))
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = compact.String() })))
+}
+
 // verifies that appending into a buffer with enough capacity allocates
 // nothing, whatever the shape and the instantiation.
 func Test_Compact_AppendTo_AllocationFree(t *testing.T) {

@@ -506,7 +506,7 @@ func (m Contiguous[T]) String() string {
 	// A generic method cannot size the buffer per family (see
 	// Network6.String for the widest form), and the overshoot is
 	// stack space.
-	var buffer [91]byte
+	var buffer [maxNetworkTextLen]byte
 	return string(m.AppendTo(buffer[:0]))
 }
 

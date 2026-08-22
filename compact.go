@@ -7,20 +7,21 @@ package xnetip
 // length for a contiguous mask, address and explicit mask otherwise.
 // A Network is written in its own family, so the host-route rule
 // fires at 32 bits for IPv4 and at 128 for IPv6, an IPv4-mapped IPv6
-// network counting as IPv6. A guarantee-bearing IPv6 wrapper keeps
-// the same rule and reparses through its own parser. The opaque result
-// carries String, AppendTo and fmt.Stringer.
+// network counting as IPv6. Guarantee-bearing wrappers keep the same
+// rule and reparse through their own parsers. The opaque result carries
+// String, AppendTo and fmt.Stringer.
 func Compact[T compactable](n T) compact[T] {
 	return compact[T]{network: n}
 }
 
 // compactable is the closed set of values accepted by the compact adapter.
 //
-// The guarantee-bearing IPv6 value joins the three base network types
-// because it has the same text and host-route semantics as its wrapped
-// network.
+// The guarantee-bearing values join the three base network types because
+// they have the same text and host-route semantics as their wrapped networks.
 type compactable interface {
-	Network4 | Network6 | Network | BiContiguous
+	Network4 | Network6 | Network |
+		Contiguous[Network4] | Contiguous[Network6] | Contiguous[Network] |
+		BiContiguous
 
 	// AppendTo appends the value's canonical text to a byte slice.
 	AppendTo([]byte) []byte
@@ -44,7 +45,7 @@ type compact[T compactable] struct {
 func (m compact[T]) String() string {
 	// The buffer covers the longest form of any instantiation, so
 	// the string conversion is the only allocation.
-	var buffer [91]byte
+	var buffer [maxNetworkTextLen]byte
 	return string(m.AppendTo(buffer[:0]))
 }
 
@@ -56,6 +57,15 @@ func (m compact[T]) AppendTo(b []byte) []byte {
 		return appendCompact4(b, network)
 	case Network6:
 		return appendCompact6(b, network)
+	case Contiguous[Network4]:
+		return appendCompact4(b, network.network)
+	case Contiguous[Network6]:
+		return appendCompact6(b, network.network)
+	case Contiguous[Network]:
+		if inner, ok := network.network.IPv4(); ok {
+			return appendCompact4(b, inner)
+		}
+		return appendCompact6(b, network.network.network)
 	case BiContiguous:
 		return appendCompact6(b, network.network6)
 	}

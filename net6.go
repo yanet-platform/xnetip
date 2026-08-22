@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// maxNetworkTextLen is the longest canonical address-plus-mask form.
+const maxNetworkTextLen = len("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+
 // Network6 is an IPv6 network: an address and a mask of arbitrary
 // shape.
 //
@@ -777,9 +780,9 @@ func (m Network6) ToContiguous() Contiguous[Network6] {
 
 // String returns the text form of the network, see AppendTo.
 func (m Network6) String() string {
-	// The buffer covers the longest form (address and mask of 45
+	// The buffer covers the longest form (address and mask of 39
 	// bytes each), so the string conversion is the only allocation.
-	var buffer [91]byte
+	var buffer [maxNetworkTextLen]byte
 	return string(m.AppendTo(buffer[:0]))
 }
 
@@ -806,7 +809,7 @@ func (m Network6) AppendTo(b []byte) []byte {
 // mask (non-contiguous mask). It never fails and allocates only the
 // returned slice.
 func (m Network6) MarshalText() ([]byte, error) {
-	return m.AppendTo(make([]byte, 0, len("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"))), nil
+	return m.AppendTo(make([]byte, 0, maxNetworkTextLen)), nil
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.

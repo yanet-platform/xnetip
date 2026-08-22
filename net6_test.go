@@ -2915,6 +2915,17 @@ func Test_Network6_String_MatchesNetipPrefixProperty(t *testing.T) {
 	})
 }
 
+// verifies that the longest zone-free canonical address-plus-mask form is
+// 79 bytes and still needs only the returned string allocation.
+func Test_Network6_String_MaximumCanonicalLength(t *testing.T) {
+	const text = "ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff/ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff"
+	network := xnetip.MustParseNetwork6(text)
+
+	require.Len(t, network.String(), 79)
+	require.Equal(t, text, network.String())
+	require.Equal(t, 1, int(testing.AllocsPerRun(100, func() { stringSink = network.String() })))
+}
+
 // verifies that appending into a buffer with enough capacity allocates
 // nothing, whatever the mask's shape.
 func Test_Network6_AppendTo_AllocationFree(t *testing.T) {

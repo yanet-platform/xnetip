@@ -712,7 +712,7 @@ func (m Network) ToContiguous() Contiguous[Network] {
 func (m Network) String() string {
 	// The buffer covers the longest form of either family, so the
 	// string conversion is the only allocation.
-	var buffer [91]byte
+	var buffer [maxNetworkTextLen]byte
 	return string(m.AppendTo(buffer[:0]))
 }
 
@@ -737,7 +737,7 @@ func (m Network) AppendTo(b []byte) []byte {
 // stored IPv4-mapped, an IPv6 network prints compressed. It never
 // fails and allocates only the returned slice.
 func (m Network) MarshalText() ([]byte, error) {
-	return m.AppendTo(make([]byte, 0, len("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"))), nil
+	return m.AppendTo(make([]byte, 0, maxNetworkTextLen)), nil
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
