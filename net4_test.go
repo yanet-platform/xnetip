@@ -2937,6 +2937,14 @@ func BenchmarkParseNetwork4_Reject(b *testing.B) {
 	}
 }
 
+func BenchmarkParseNetwork4_Reject_Rendered(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		networkSink, errSink = xnetip.ParseNetwork4("10.0.0.0/33")
+		stringSink = errSink.Error()
+	}
+}
+
 // verifies that the marshaled text is the string form: prefix length
 // for a contiguous mask, dotted mask otherwise, suffix always present.
 func Test_Network4_MarshalText_MatchesStringForm(t *testing.T) {

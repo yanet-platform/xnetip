@@ -2,7 +2,6 @@ package xnetip
 
 import (
 	"errors"
-	"fmt"
 	"net/netip"
 	"strconv"
 )
@@ -68,18 +67,63 @@ var ErrNonBiContiguousMask = errors.New("mask not bi-contiguous")
 // empty text through ErrParse and the net/netip cause instead.
 var ErrEmptyInput = errors.New("empty input")
 
-// wrapParseError builds the error the parsers and checked constructors
+// Ordinary network diagnostics fit in the stack buffer; longer arbitrary
+// input grows through append without changing the rendered text.
+const parseErrorBufferSize = 256
+
+// parseError is the deferred error the parsers and checked constructors
 // return: the function name with the input echoed, then the cause.
 //
-// The sentinel is one of the exported errors of this package and the
-// detail, if not nil, is the underlying net/netip error. Both are
-// wrapped, so errors.Is matches the sentinel while the message keeps the
-// exact reason net/netip gave.
-func wrapParseError(function, input string, sentinel, detail error) error {
-	if detail == nil {
-		return fmt.Errorf("xnetip.%s(%q): %w", function, input, sentinel)
+// Rendering is postponed until the message is requested. Both the
+// sentinel and optional detail remain available to errors.Is and
+// errors.As.
+type parseError struct {
+	function string
+	input    string
+	sentinel error
+	detail   error
+}
+
+func (m *parseError) Error() string {
+	sentinel := m.sentinel.Error()
+	detail := ""
+	if m.detail != nil {
+		detail = m.detail.Error()
 	}
-	return fmt.Errorf("xnetip.%s(%q): %w: %w", function, input, sentinel, detail)
+
+	var buffer [parseErrorBufferSize]byte
+	message := buffer[:0]
+	message = append(message, "xnetip."...)
+	message = append(message, m.function...)
+	message = append(message, '(')
+	message = strconv.AppendQuote(message, m.input)
+	message = append(message, ')', ':', ' ')
+	message = append(message, sentinel...)
+	if m.detail != nil {
+		message = append(message, ':', ' ')
+		message = append(message, detail...)
+	}
+	return string(message)
+}
+
+func (m *parseError) Unwrap() []error {
+	if m.detail == nil {
+		return []error{m.sentinel}
+	}
+	return []error{m.sentinel, m.detail}
+}
+
+// wrapParseError returns the shared deferred parser and constructor error.
+//
+// The sentinel is one of the exported package errors. The optional detail
+// carries the underlying cause when a parser can provide one.
+func wrapParseError(function, input string, sentinel, detail error) error {
+	return &parseError{
+		function: function,
+		input:    input,
+		sentinel: sentinel,
+		detail:   detail,
+	}
 }
 
 // cidrInput formats an address and prefix length pair the way the

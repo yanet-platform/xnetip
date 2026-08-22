@@ -3037,6 +3037,14 @@ func BenchmarkParseNetwork_Reject(b *testing.B) {
 	}
 }
 
+func BenchmarkParseNetwork_Reject_Rendered(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		ipNetworkSink, errSink = xnetip.ParseNetwork("hello")
+		stringSink = errSink.Error()
+	}
+}
+
 // verifies that the marshaled text is the string form in the network's
 // own family: the IPv4-mapped storage form never leaks.
 func Test_Network_MarshalText_MatchesStringForm(t *testing.T) {

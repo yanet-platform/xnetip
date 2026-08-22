@@ -3406,6 +3406,14 @@ func BenchmarkParseNetwork6_Reject(b *testing.B) {
 	}
 }
 
+func BenchmarkParseNetwork6_Reject_Rendered(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		network6Sink, errSink = xnetip.ParseNetwork6("::/129")
+		stringSink = errSink.Error()
+	}
+}
+
 // verifies that the marshaled text is the string form: prefix length
 // or colon-form mask by contiguity, suffix always present.
 func Test_Network6_MarshalText_MatchesStringForm(t *testing.T) {
