@@ -2,6 +2,20 @@ package xnetip
 
 import "net/netip"
 
+// BiContiguous is an IPv6 network whose two 64-bit mask halves are
+// independently contiguous.
+//
+// Each half is a leading run of one bits followed by zero bits. The
+// zero value wraps ::/0 and is valid. Values are immutable, comparable
+// with == exactly when their wrapped networks are, and safe to copy.
+// The unexported field prevents construction without validating or
+// otherwise proving the mask shape.
+type BiContiguous struct {
+	// Distinct field identity prevents structural conversion of this
+	// two-run wrapper into the stricter CIDR wrapper.
+	network6 Network6
+}
+
 // BiContiguousFrom returns network with its bi-contiguity guarantee
 // carried by the result type.
 //
@@ -58,20 +72,6 @@ func BiContiguousFromAddrs(addr, mask netip.Addr) (BiContiguous, error) {
 // network unchanged.
 func BiContiguousFromContiguous(block Contiguous[Network6]) BiContiguous {
 	return BiContiguous{network6: block.network}
-}
-
-// BiContiguous is an IPv6 network whose two 64-bit mask halves are
-// independently contiguous.
-//
-// Each half is a leading run of one bits followed by zero bits. The
-// zero value wraps ::/0 and is valid. Values are immutable, comparable
-// with == exactly when their wrapped networks are, and safe to copy.
-// The unexported field prevents construction without validating or
-// otherwise proving the mask shape.
-type BiContiguous struct {
-	// Distinct field identity prevents structural conversion of this
-	// two-run wrapper into the stricter CIDR wrapper.
-	network6 Network6
 }
 
 // Network returns the wrapped IPv6 network.
