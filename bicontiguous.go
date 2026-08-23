@@ -1,6 +1,7 @@
 package xnetip
 
 import (
+	"iter"
 	"math/bits"
 	"net/netip"
 )
@@ -201,6 +202,28 @@ func (m BiContiguous) MergeByLowestMaskBit(other BiContiguous) (BiContiguous, bo
 	// The result is either an unchanged input or has one bottommost
 	// run shortened by one bit, so it wraps without revalidation.
 	return BiContiguous{network6: merged}, true
+}
+
+// Difference returns the bi-contiguous networks whose union is m
+// without other.
+//
+// A disjoint other yields m once, while a containing other yields
+// nothing. On overlap, pairwise-disjoint parts are yielded from the
+// most significant pending mask bit: the high-half prefix extension
+// first, then the low-half extension. The part count is the sum of
+// those extension lengths. Each step lengthens one leading run, so
+// every part stays bi-contiguous. The sequence is allocation-free and
+// re-iterable.
+func (m BiContiguous) Difference(other BiContiguous) iter.Seq[BiContiguous] {
+	return func(yield func(BiContiguous) bool) {
+		for part := range m.network6.Difference(other.network6) {
+			// Each peeled mask advances a per-half leading run, so it
+			// wraps without revalidation.
+			if !yield(BiContiguous{network6: part}) {
+				return
+			}
+		}
+	}
 }
 
 // String returns the canonical text form of the bi-contiguous network.

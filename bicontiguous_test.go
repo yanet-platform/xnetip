@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/netip"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -1790,6 +1791,332 @@ func Test_BiContiguous_IntersectionAndMergeByLowestMaskBit_AllocationFree(t *tes
 	})
 	requireNoAllocs(t, func() {
 		biContiguousSink, okSink = container.MergeByLowestMaskBit(contained)
+	})
+}
+
+// verifies that identity, containment and disjointness on either rectangle
+// axis produce the empty or singleton sequence required by set difference.
+func Test_BiContiguous_Difference_EmptyAndDisjointCases(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		other  string
+		want   []string
+	}{
+		{
+			name:   "self subtraction is empty",
+			source: "2001:db8:ab00:0:1234:0:0:0/ffff:ffff:ff00:0:ffff:0:0:0",
+			other:  "2001:db8:ab00:0:1234:0:0:0/ffff:ffff:ff00:0:ffff:0:0:0",
+		},
+		{
+			name:   "containing rectangle leaves nothing",
+			source: "2001:db8:ab00:0:1234:0:0:0/ffff:ffff:ffc0:0:ffff:c000:0:0",
+			other:  "2001:db8:ab00:0:1234:0:0:0/ffff:ffff:ff00:0:ffff:0:0:0",
+		},
+		{
+			name:   "high-axis conflict leaves the source",
+			source: "2001:db8:ab00:0:1234:0:0:0/ffff:ffff:ff00:0:ffff:0:0:0",
+			other:  "2001:db8:ac00:0:1234:0:0:0/ffff:ffff:ff00:0:ffff:0:0:0",
+			want:   []string{"2001:db8:ab00:0:1234:0:0:0/ffff:ffff:ff00:0:ffff:0:0:0"},
+		},
+		{
+			name:   "low-axis conflict leaves the source",
+			source: "2001:db8:ab00:0:1234:0:0:0/ffff:ffff:ff00:0:ffff:0:0:0",
+			other:  "2001:db8:ab00:0:5678:0:0:0/ffff:ffff:ff00:0:ffff:0:0:0",
+			want:   []string{"2001:db8:ab00:0:1234:0:0:0/ffff:ffff:ff00:0:ffff:0:0:0"},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			source := xnetip.MustParseBiContiguous(testCase.source)
+			other := xnetip.MustParseBiContiguous(testCase.other)
+			var want []xnetip.BiContiguous
+			for _, text := range testCase.want {
+				want = append(want, xnetip.MustParseBiContiguous(text))
+			}
+			require.Equal(t, want, slices.Collect(source.Difference(other)))
+		})
+	}
+}
+
+// verifies that a nested high-axis gap peels exactly two rectangles in
+// increasing high-prefix order while preserving the low prefix.
+func Test_BiContiguous_Difference_HighOnlyGapExact(t *testing.T) {
+	source := xnetip.MustParseBiContiguous(
+		"2001:db8:ab00:0:1234:5678:0:0/ffff:ffff:ff00:0:ffff:ffff:0:0",
+	)
+	other := xnetip.MustParseBiContiguous(
+		"2001:db8:ab00:0:1234:5678:0:0/ffff:ffff:ffc0:0:ffff:ffff:0:0",
+	)
+	want := []xnetip.BiContiguous{
+		xnetip.MustParseBiContiguous(
+			"2001:db8:ab80:0:1234:5678:0:0/ffff:ffff:ff80:0:ffff:ffff:0:0",
+		),
+		xnetip.MustParseBiContiguous(
+			"2001:db8:ab40:0:1234:5678:0:0/ffff:ffff:ffc0:0:ffff:ffff:0:0",
+		),
+	}
+	require.Equal(t, want, slices.Collect(source.Difference(other)))
+}
+
+// verifies that a nested low-axis gap peels exactly two rectangles in
+// increasing low-prefix order while preserving the high prefix.
+func Test_BiContiguous_Difference_LowOnlyGapExact(t *testing.T) {
+	source := xnetip.MustParseBiContiguous(
+		"2001:db8:ab00:0:1234:0:0:0/ffff:ffff:ff00:0:ffff:0:0:0",
+	)
+	other := xnetip.MustParseBiContiguous(
+		"2001:db8:ab00:0:1234:0:0:0/ffff:ffff:ff00:0:ffff:c000:0:0",
+	)
+	want := []xnetip.BiContiguous{
+		xnetip.MustParseBiContiguous(
+			"2001:db8:ab00:0:1234:8000:0:0/ffff:ffff:ff00:0:ffff:8000:0:0",
+		),
+		xnetip.MustParseBiContiguous(
+			"2001:db8:ab00:0:1234:4000:0:0/ffff:ffff:ff00:0:ffff:c000:0:0",
+		),
+	}
+	require.Equal(t, want, slices.Collect(source.Difference(other)))
+}
+
+// verifies that a two-bit gap on both axes yields the exact high parts first
+// and then the exact low parts, item for item with the inner peel.
+func Test_BiContiguous_Difference_BothAxisGapExact(t *testing.T) {
+	source := xnetip.MustParseBiContiguous("::/c000:0:0:0:c000:0:0:0")
+	other := xnetip.MustParseBiContiguous("::/f000:0:0:0:f000:0:0:0")
+	want := []xnetip.BiContiguous{
+		xnetip.MustParseBiContiguous("2000::/e000:0:0:0:c000:0:0:0"),
+		xnetip.MustParseBiContiguous("1000::/f000:0:0:0:c000:0:0:0"),
+		xnetip.MustParseBiContiguous("::2000:0:0:0/f000:0:0:0:e000:0:0:0"),
+		xnetip.MustParseBiContiguous("::1000:0:0:0/f000:0:0:0:f000:0:0:0"),
+	}
+	parts := slices.Collect(source.Difference(other))
+	require.Equal(t, want, parts)
+	inner := slices.Collect(source.Network().Difference(other.Network()))
+	for idx, part := range parts {
+		require.Equal(t, inner[idx], part.Network())
+	}
+}
+
+// verifies that the universe minus one host yields all 128 rectangles,
+// exhausting high-prefix lengths before advancing the low prefix.
+func Test_BiContiguous_Difference_UniverseMinusHostFullDepth(t *testing.T) {
+	source := xnetip.MustParseBiContiguous("::/0")
+	other := xnetip.MustParseBiContiguous("2001:db8::1/128")
+	parts := slices.Collect(source.Difference(other))
+	inner := slices.Collect(source.Network().Difference(other.Network()))
+	require.Len(t, parts, 128)
+	for idx, part := range parts {
+		require.Equal(t, inner[idx], part.Network())
+		validated, ok := xnetip.BiContiguousFrom6(part.Network())
+		require.True(t, ok)
+		require.Equal(t, part, validated)
+		if idx < 64 {
+			require.Equal(t, idx+1, part.HighPrefixLen())
+			require.Zero(t, part.LowPrefixLen())
+		} else {
+			require.Equal(t, 64, part.HighPrefixLen())
+			require.Equal(t, idx-63, part.LowPrefixLen())
+		}
+	}
+}
+
+// verifies that pending bits spanning the half boundary preserve inner order,
+// finishing the high run before continuing the low run.
+func Test_BiContiguous_Difference_CrossesHalfBoundary(t *testing.T) {
+	source := xnetip.MustParseBiContiguous(
+		"2001:db8:1234:5670:8000:0:0:0/ffff:ffff:ffff:fff0:c000:0:0:0",
+	)
+	other := xnetip.MustParseBiContiguous(
+		"2001:db8:1234:5678:a000:0:0:0/ffff:ffff:ffff:ffff:fc00:0:0:0",
+	)
+	parts := slices.Collect(source.Difference(other))
+	inner := slices.Collect(source.Network().Difference(other.Network()))
+	require.Len(t, parts, 8)
+	for idx, part := range parts {
+		require.Equal(t, inner[idx], part.Network())
+		if idx < 4 {
+			require.Equal(t, 61+idx, part.HighPrefixLen())
+			require.Equal(t, 2, part.LowPrefixLen())
+		} else {
+			require.Equal(t, 64, part.HighPrefixLen())
+			require.Equal(t, idx-1, part.LowPrefixLen())
+		}
+	}
+}
+
+// verifies that typed difference has exactly the wrapped peel's length,
+// values and order on random rectangle pairs.
+func Test_BiContiguous_Difference_MatchesNetworkProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genBiContiguous.Draw(t, "source")
+		other := genBiContiguous.Draw(t, "other")
+		inner := slices.Collect(source.Network().Difference(other.Network()))
+		parts := slices.Collect(source.Difference(other))
+		require.Len(t, parts, len(inner))
+		for idx, part := range parts {
+			require.Equal(t, inner[idx], part.Network())
+		}
+	})
+}
+
+// verifies that every difference part revalidates, stays in the source,
+// misses the subtrahend and is disjoint from every other part.
+func Test_BiContiguous_Difference_PartsInvariantsProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		source := genBiContiguous.Draw(t, "source")
+		other := genBiContiguous.Draw(t, "other")
+		parts := slices.Collect(source.Difference(other))
+		for _, part := range parts {
+			validated, ok := xnetip.BiContiguousFrom6(part.Network())
+			require.True(t, ok)
+			require.Equal(t, part, validated)
+			require.True(t, source.Contains(part))
+			_, overlaps := part.Intersection(other)
+			require.False(t, overlaps)
+		}
+		for firstIdx := range parts {
+			for secondIdx := firstIdx + 1; secondIdx < len(parts); secondIdx++ {
+				_, overlaps := parts[firstIdx].Intersection(parts[secondIdx])
+				require.False(t, overlaps)
+			}
+		}
+	})
+}
+
+// verifies exact set coverage by exhaustive membership on rectangles whose
+// two host axes are each bounded to four bits.
+func Test_BiContiguous_Difference_BoundedCoverageProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		sourceAddressHigh := rapid.Uint64().Draw(t, "source address high")
+		sourceAddressLow := rapid.Uint64().Draw(t, "source address low")
+		otherAddressHigh := rapid.Uint64().Draw(t, "other address high")
+		otherAddressLow := rapid.Uint64().Draw(t, "other address low")
+		sourceHighPrefix := rapid.IntRange(60, 64).Draw(t, "source high prefix")
+		sourceLowPrefix := rapid.IntRange(60, 64).Draw(t, "source low prefix")
+		otherHighPrefix := rapid.IntRange(60, 64).Draw(t, "other high prefix")
+		otherLowPrefix := rapid.IntRange(60, 64).Draw(t, "other low prefix")
+		source, err := xnetip.BiContiguousFrom(
+			netipAddrFrom6Bits(sourceAddressHigh, sourceAddressLow),
+			netipAddrFrom6Bits(
+				prefixMask64(sourceHighPrefix),
+				prefixMask64(sourceLowPrefix),
+			),
+		)
+		require.NoError(t, err)
+		other, err := xnetip.BiContiguousFrom(
+			netipAddrFrom6Bits(otherAddressHigh, otherAddressLow),
+			netipAddrFrom6Bits(
+				prefixMask64(otherHighPrefix),
+				prefixMask64(otherLowPrefix),
+			),
+		)
+		require.NoError(t, err)
+		parts := slices.Collect(source.Difference(other))
+		for highSuffix := range 16 {
+			for lowSuffix := range 16 {
+				candidate := netipAddrFrom6Bits(
+					(sourceAddressHigh&^uint64(15))|uint64(highSuffix),
+					(sourceAddressLow&^uint64(15))|uint64(lowSuffix),
+				)
+				want := source.Network().ContainsAddr(candidate) &&
+					!other.Network().ContainsAddr(candidate)
+				got := false
+				for _, part := range parts {
+					got = got || part.Network().ContainsAddr(candidate)
+				}
+				require.Equal(t, want, got)
+			}
+		}
+	})
+}
+
+// verifies that overlapping rectangles yield the component-wise prefix-gap
+// count and advance the high prefix fully before the low prefix.
+func Test_BiContiguous_Difference_OverlappingProgressionProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := netipAddrFrom6Bits(
+			rapid.Uint64().Draw(t, "address high"),
+			rapid.Uint64().Draw(t, "address low"),
+		)
+		sourceHigh := drawBiContiguousPrefix(t, "source high prefix")
+		sourceLow := drawBiContiguousPrefix(t, "source low prefix")
+		otherHigh := drawBiContiguousPrefix(t, "other high prefix")
+		otherLow := drawBiContiguousPrefix(t, "other low prefix")
+		source, err := xnetip.BiContiguousFrom(
+			addr,
+			netipAddrFrom6Bits(prefixMask64(sourceHigh), prefixMask64(sourceLow)),
+		)
+		require.NoError(t, err)
+		other, err := xnetip.BiContiguousFrom(
+			addr,
+			netipAddrFrom6Bits(prefixMask64(otherHigh), prefixMask64(otherLow)),
+		)
+		require.NoError(t, err)
+		_, overlaps := source.Intersection(other)
+		require.True(t, overlaps)
+
+		targetHigh := max(sourceHigh, otherHigh)
+		targetLow := max(sourceLow, otherLow)
+		highGap := targetHigh - sourceHigh
+		lowGap := targetLow - sourceLow
+		parts := slices.Collect(source.Difference(other))
+		require.Len(t, parts, highGap+lowGap)
+		for idx, part := range parts {
+			if idx < highGap {
+				require.Equal(t, sourceHigh+idx+1, part.HighPrefixLen())
+				require.Equal(t, sourceLow, part.LowPrefixLen())
+			} else {
+				require.Equal(t, targetHigh, part.HighPrefixLen())
+				require.Equal(t, sourceLow+idx-highGap+1, part.LowPrefixLen())
+			}
+		}
+	})
+}
+
+// verifies that breaking after two items stops the current traversal and the
+// same sequence subsequently yields its complete result again.
+func Test_BiContiguous_Difference_EarlyBreakAndReiteration(t *testing.T) {
+	source := xnetip.MustParseBiContiguous("::/0")
+	other := xnetip.MustParseBiContiguous("2001:db8::1/128")
+	sequence := source.Difference(other)
+	var head []xnetip.BiContiguous
+	for part := range sequence {
+		head = append(head, part)
+		if len(head) == 2 {
+			break
+		}
+	}
+	require.Len(t, head, 2)
+	full := slices.Collect(sequence)
+	require.Len(t, full, 128)
+	require.Equal(t, head, full[:2])
+	require.Equal(t, full, slices.Collect(sequence))
+}
+
+// verifies that full-depth, disjoint and empty range consumption allocates no
+// heap memory.
+func Test_BiContiguous_Difference_AllocationFree(t *testing.T) {
+	fullSource := xnetip.MustParseBiContiguous("::/0")
+	fullOther := xnetip.MustParseBiContiguous("2001:db8::1/128")
+	requireNoAllocs(t, func() {
+		for part := range fullSource.Difference(fullOther) {
+			biContiguousSink = part
+		}
+	})
+	disjointSource := xnetip.MustParseBiContiguous("2001:db8::/32")
+	disjointOther := xnetip.MustParseBiContiguous("fe80::/10")
+	requireNoAllocs(t, func() {
+		for part := range disjointSource.Difference(disjointOther) {
+			biContiguousSink = part
+		}
+	})
+	emptySource := xnetip.MustParseBiContiguous("2001:db8::1/128")
+	emptyOther := xnetip.MustParseBiContiguous("::/0")
+	requireNoAllocs(t, func() {
+		for part := range emptySource.Difference(emptyOther) {
+			biContiguousSink = part
+		}
 	})
 }
 
