@@ -1,6 +1,7 @@
 package xnetip_test
 
 import (
+	"encoding/binary"
 	"math/bits"
 	"net/netip"
 	"slices"
@@ -1289,4 +1290,836 @@ func BenchmarkAggregate6_1024Clustered(b *testing.B) {
 		copy(networks, template)
 		intSink = len(xnetip.Aggregate6(networks))
 	}
+}
+
+// mustBiContiguousFromHalves builds a normalized rectangle from two address
+// halves and their independent leading-one prefix lengths.
+func mustBiContiguousFromHalves(
+	highAddr uint64,
+	highPrefix int,
+	lowAddr uint64,
+	lowPrefix int,
+) xnetip.BiContiguous {
+	block, err := xnetip.BiContiguousFrom(
+		netipAddrFrom6Bits(highAddr, lowAddr),
+		netipAddrFrom6Bits(
+			prefixMask64(highPrefix),
+			prefixMask64(lowPrefix),
+		),
+	)
+	if err != nil {
+		panic(err)
+	}
+	return block
+}
+
+// parseBiContiguousBlocks parses an exact table fixture into wrappers.
+func parseBiContiguousBlocks(texts []string) []xnetip.BiContiguous {
+	blocks := make([]xnetip.BiContiguous, len(texts))
+	for idx, text := range texts {
+		blocks[idx] = xnetip.MustParseBiContiguous(text)
+	}
+	return blocks
+}
+
+// compareBiContiguousMaskAddress orders rectangles by numeric mask and then
+// normalized address, the aggregate output's public sort key.
+func compareBiContiguousMaskAddress(first, second xnetip.BiContiguous) int {
+	if order := first.Network().Mask().Compare(second.Network().Mask()); order != 0 {
+		return order
+	}
+	return first.Network().Addr().Compare(second.Network().Addr())
+}
+
+type biContiguousHighGroupKey struct {
+	prefix int
+	addr   uint64
+}
+
+type biContiguousLowShape struct {
+	addr   uint64
+	prefix int
+}
+
+// biContiguousAddressHalves returns the host-order high and low address halves.
+func biContiguousAddressHalves(block xnetip.BiContiguous) (uint64, uint64) {
+	addr := block.Network().Addr().As16()
+	return binary.BigEndian.Uint64(addr[:8]), binary.BigEndian.Uint64(addr[8:])
+}
+
+// findBiContiguousHighRowMerge finds the first high-half buddy pair carrying
+// equal canonical low-half sets in level-major order.
+func findBiContiguousHighRowMerge(
+	blocks []xnetip.BiContiguous,
+) ([]int, []int, int, bool) {
+	groups := map[biContiguousHighGroupKey][]int{}
+	for idx, block := range blocks {
+		highAddr, _ := biContiguousAddressHalves(block)
+		key := biContiguousHighGroupKey{
+			prefix: block.HighPrefixLen(),
+			addr:   highAddr,
+		}
+		groups[key] = append(groups[key], idx)
+	}
+	keys := make([]biContiguousHighGroupKey, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	slices.SortFunc(keys, func(first, second biContiguousHighGroupKey) int {
+		switch {
+		case first.prefix < second.prefix:
+			return -1
+		case first.prefix > second.prefix:
+			return 1
+		case first.addr < second.addr:
+			return -1
+		case first.addr > second.addr:
+			return 1
+		default:
+			return 0
+		}
+	})
+	for _, lowerKey := range keys {
+		if lowerKey.prefix == 0 {
+			continue
+		}
+		buddyBit := uint64(1) << (64 - lowerKey.prefix)
+		if lowerKey.addr&buddyBit != 0 {
+			continue
+		}
+		upperKey := biContiguousHighGroupKey{
+			prefix: lowerKey.prefix,
+			addr:   lowerKey.addr | buddyBit,
+		}
+		upper, ok := groups[upperKey]
+		if !ok {
+			continue
+		}
+		lower := groups[lowerKey]
+		if len(lower) != len(upper) {
+			continue
+		}
+		lowerShapes := make([]biContiguousLowShape, len(lower))
+		upperShapes := make([]biContiguousLowShape, len(upper))
+		for idx := range lower {
+			_, lowerAddr := biContiguousAddressHalves(blocks[lower[idx]])
+			_, upperAddr := biContiguousAddressHalves(blocks[upper[idx]])
+			lowerShapes[idx] = biContiguousLowShape{
+				addr: lowerAddr, prefix: blocks[lower[idx]].LowPrefixLen(),
+			}
+			upperShapes[idx] = biContiguousLowShape{
+				addr: upperAddr, prefix: blocks[upper[idx]].LowPrefixLen(),
+			}
+		}
+		compareLowShape := func(first, second biContiguousLowShape) int {
+			switch {
+			case first.addr < second.addr:
+				return -1
+			case first.addr > second.addr:
+				return 1
+			case first.prefix < second.prefix:
+				return -1
+			case first.prefix > second.prefix:
+				return 1
+			default:
+				return 0
+			}
+		}
+		slices.SortFunc(lowerShapes, compareLowShape)
+		slices.SortFunc(upperShapes, compareLowShape)
+		if slices.Equal(lowerShapes, upperShapes) {
+			return lower, upper, lowerKey.prefix - 1, true
+		}
+	}
+	return nil, nil, 0, false
+}
+
+// applyBiContiguousHighRowMerge applies one independent high-half group
+// rewrite and reports whether a matching buddy pair existed.
+func applyBiContiguousHighRowMerge(blocks []xnetip.BiContiguous) ([]xnetip.BiContiguous, bool) {
+	lower, upper, newHighPrefix, ok := findBiContiguousHighRowMerge(blocks)
+	if !ok {
+		return blocks, false
+	}
+	lowerSet := map[int]struct{}{}
+	upperSet := map[int]struct{}{}
+	for _, idx := range lower {
+		lowerSet[idx] = struct{}{}
+	}
+	for _, idx := range upper {
+		upperSet[idx] = struct{}{}
+	}
+	result := make([]xnetip.BiContiguous, 0, len(blocks)-len(upper))
+	for idx, block := range blocks {
+		if _, drop := upperSet[idx]; drop {
+			continue
+		}
+		if _, reparent := lowerSet[idx]; reparent {
+			highAddr, lowAddr := biContiguousAddressHalves(block)
+			block = mustBiContiguousFromHalves(
+				highAddr,
+				newHighPrefix,
+				lowAddr,
+				block.LowPrefixLen(),
+			)
+		}
+		result = append(result, block)
+	}
+	return result, true
+}
+
+// referenceAggregateBiContiguous6 applies the three class-preserving rewrites
+// with a simple allocating quadratic fixpoint.
+func referenceAggregateBiContiguous6(
+	input []xnetip.BiContiguous,
+) []xnetip.BiContiguous {
+	blocks := slices.Clone(input)
+	for {
+		applied := false
+		for firstIdx := 0; firstIdx < len(blocks) && !applied; firstIdx++ {
+			for secondIdx := firstIdx + 1; secondIdx < len(blocks); secondIdx++ {
+				merged, ok := blocks[firstIdx].MergeByLowestMaskBit(blocks[secondIdx])
+				if !ok {
+					continue
+				}
+				blocks[firstIdx] = merged
+				blocks = append(blocks[:secondIdx], blocks[secondIdx+1:]...)
+				applied = true
+				break
+			}
+		}
+		if applied {
+			continue
+		}
+		var merged bool
+		blocks, merged = applyBiContiguousHighRowMerge(blocks)
+		if merged {
+			continue
+		}
+		break
+	}
+	slices.SortFunc(blocks, compareBiContiguousMaskAddress)
+	return blocks
+}
+
+// boundedBiContiguousUnion enumerates the exact address union of fixtures
+// whose total host space is intentionally small.
+func boundedBiContiguousUnion(
+	blocks []xnetip.BiContiguous,
+) map[netip.Addr]struct{} {
+	union := map[netip.Addr]struct{}{}
+	for _, block := range blocks {
+		for addr := range block.Addrs() {
+			union[addr] = struct{}{}
+		}
+	}
+	return union
+}
+
+// requireBiContiguousAggregateFixpoint checks the public sorted, class and
+// pairwise-closed result contract.
+func requireBiContiguousAggregateFixpoint(
+	t require.TestingT,
+	blocks []xnetip.BiContiguous,
+) {
+	for idx := 1; idx < len(blocks); idx++ {
+		require.LessOrEqual(
+			t,
+			compareBiContiguousMaskAddress(blocks[idx-1], blocks[idx]),
+			0,
+		)
+	}
+	for idx, block := range blocks {
+		revalidated, ok := xnetip.BiContiguousFrom6(block.Network())
+		require.True(t, ok)
+		require.Equal(t, block, revalidated)
+		for otherIdx := idx + 1; otherIdx < len(blocks); otherIdx++ {
+			require.False(t, block.Contains(blocks[otherIdx]))
+			require.False(t, blocks[otherIdx].Contains(block))
+			_, ok = block.MergeByLowestMaskBit(blocks[otherIdx])
+			require.False(t, ok)
+		}
+	}
+	_, _, _, ok := findBiContiguousHighRowMerge(blocks)
+	require.False(t, ok)
+}
+
+// verifies exact positional output for containment, both buddy axes,
+// cascades, cross-shape interference and the documented non-minimal gadget.
+func Test_AggregateBiContiguous6_ExactFixtures(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{name: "empty slice", input: []string{}, expected: []string{}},
+		{
+			name: "singleton unchanged",
+			input: []string{
+				"2001:db8::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			},
+			expected: []string{
+				"2001:db8::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			},
+		},
+		{
+			name: "duplicates collapse",
+			input: []string{
+				"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+				"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+				"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			},
+			expected: []string{
+				"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			},
+		},
+		{
+			name: "low buddies merge",
+			input: []string{
+				"2001:db8:1:0:aaaa:bbbb:0:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+				"2001:db8:1:0:aaaa:bbbb:1:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+			},
+			expected: []string{
+				"2001:db8:1:0:aaaa:bbbb:0:0/ffff:ffff:ffff:0:ffff:ffff:fffe:0",
+			},
+		},
+		{
+			name: "high buddies with equal low rows merge",
+			input: []string{
+				"2001:db8:0:0:aaaa:bbbb:cccc:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+				"2001:db8:1:0:aaaa:bbbb:cccc:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+			},
+			expected: []string{
+				"2001:db8:0:0:aaaa:bbbb:cccc:0/ffff:ffff:fffe:0:ffff:ffff:ffff:0",
+			},
+		},
+		{
+			name: "high buddies with different low rows stay separate",
+			input: []string{
+				"2001:db8:0:0:aaaa:bbbb:cccc:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+				"2001:db8:1:0:aaaa:bbbb:dddd:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+			},
+			expected: []string{
+				"2001:db8:0:0:aaaa:bbbb:cccc:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+				"2001:db8:1:0:aaaa:bbbb:dddd:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+			},
+		},
+		{
+			name: "full two by two grid collapses",
+			input: []string{
+				"2001:db8:0:0:aaaa:bbbb:0:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+				"2001:db8:0:0:aaaa:bbbb:1:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+				"2001:db8:1:0:aaaa:bbbb:0:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+				"2001:db8:1:0:aaaa:bbbb:1:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+			},
+			expected: []string{
+				"2001:db8:0:0:aaaa:bbbb:0:0/ffff:ffff:fffe:0:ffff:ffff:fffe:0",
+			},
+		},
+		{
+			name:     "contiguous slash forty-eight buddies merge",
+			input:    []string{"2001:db8::/48", "2001:db8:1::/48"},
+			expected: []string{"2001:db8::/47"},
+		},
+		{
+			name: "multi-level high cascade keeps disjoint survivor",
+			input: []string{
+				"2001:db8::/48",
+				"2001:db8:1::/48",
+				"2001:db8:2::/48",
+				"2001:db8:3::/48",
+				"2001:dead::/32",
+			},
+			expected: []string{"2001:dead::/32", "2001:db8::/46"},
+		},
+		{
+			name: "non-adjacent containment crosses sort interference",
+			input: []string{
+				"2001:db8::/32",
+				"2001:dead::/32",
+				"2001:db8:1::/48",
+			},
+			expected: []string{"2001:db8::/32", "2001:dead::/32"},
+		},
+		{
+			name: "implied coverage remains three",
+			input: []string{
+				"::/c000:0:0:0:8000:0:0:0",
+				"4000::/c000:0:0:0:c000:0:0:0",
+				"::4000:0:0:0/8000:0:0:0:c000:0:0:0",
+			},
+			expected: []string{
+				"::4000:0:0:0/8000:0:0:0:c000:0:0:0",
+				"::/c000:0:0:0:8000:0:0:0",
+				"4000::/c000:0:0:0:c000:0:0:0",
+			},
+		},
+		{
+			name: "broader motivating low rectangle absorbs narrower",
+			input: []string{
+				"2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+				"2a02:6b8:c00::1234:0:0:0/ffff:ffff:ff00::ffff:0:0:0",
+			},
+			expected: []string{
+				"2a02:6b8:c00::1234:0:0:0/ffff:ffff:ff00::ffff:0:0:0",
+			},
+		},
+		{
+			name: "reparented survivor meets native next level",
+			input: []string{
+				"2001:db8::/48",
+				"2001:db8:1::/48",
+				"2001:db8:2::/47",
+			},
+			expected: []string{"2001:db8::/46"},
+		},
+		{
+			name: "reparented survivor low-aggregates with native row",
+			input: []string{
+				"2001:db8:0:0:aaaa:bbbb:cccc:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+				"2001:db8:1:0:aaaa:bbbb:cccc:0/ffff:ffff:ffff:0:ffff:ffff:ffff:0",
+				"2001:db8:0:0:aaaa:bbbb:cccd:0/ffff:ffff:fffe:0:ffff:ffff:ffff:0",
+			},
+			expected: []string{
+				"2001:db8:0:0:aaaa:bbbb:cccc:0/ffff:ffff:fffe:0:ffff:ffff:fffe:0",
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			work := parseBiContiguousBlocks(testCase.input)
+			var first *xnetip.BiContiguous
+			if len(work) > 0 {
+				first = &work[0]
+			}
+			result := xnetip.AggregateBiContiguous6(work)
+			require.LessOrEqual(t, len(result), len(work))
+			if first != nil {
+				require.Same(t, first, &result[0])
+			}
+			require.Equal(t, parseBiContiguousBlocks(testCase.expected), result)
+			requireBiContiguousAggregateFixpoint(t, result)
+		})
+	}
+}
+
+// verifies all 63 independent high-level buddy pairs reparent exactly once
+// while eight inert host routes remain in numeric mask-address order.
+func Test_AggregateBiContiguous6_DisjointCascadeExactOutput(t *testing.T) {
+	input := make([]xnetip.BiContiguous, 0, 134)
+	for prefix := 2; prefix <= 64; prefix++ {
+		buddyBit := uint64(1) << (64 - prefix)
+		marker := uint64(1) << (65 - prefix)
+		input = append(
+			input,
+			mustBiContiguousFromHalves(marker, prefix, 0, 0),
+			mustBiContiguousFromHalves(marker|buddyBit, prefix, 0, 0),
+		)
+	}
+	for idx := range 8 {
+		input = append(input, mustBiContiguousFromHalves(0, 64, uint64(0x100*(idx+1)), 64))
+	}
+	expected := make([]xnetip.BiContiguous, 0, 71)
+	for prefix := 2; prefix <= 64; prefix++ {
+		expected = append(expected, mustBiContiguousFromHalves(
+			uint64(1)<<(65-prefix),
+			prefix-1,
+			0,
+			0,
+		))
+	}
+	for idx := range 8 {
+		expected = append(expected, mustBiContiguousFromHalves(
+			0,
+			64,
+			uint64(0x100*(idx+1)),
+			64,
+		))
+	}
+	slices.SortFunc(expected, compareBiContiguousMaskAddress)
+	require.Equal(t, expected, xnetip.AggregateBiContiguous6(input))
+}
+
+// verifies a same-shape run spanning three 64-element chunks is removed by
+// a strict ancestor without losing or retaining a boundary element.
+func Test_AggregateBiContiguous6_ContainmentAcrossChunkBoundaries(t *testing.T) {
+	container := mustBiContiguousFromHalves(0, 8, 0, 0)
+	input := make([]xnetip.BiContiguous, 1, 131)
+	input[0] = container
+	for idx := range 130 {
+		input = append(input, mustBiContiguousFromHalves(uint64(2*(idx+1)), 64, 0, 64))
+	}
+	require.Equal(t, []xnetip.BiContiguous{container}, xnetip.AggregateBiContiguous6(input))
+}
+
+// verifies shape bitmap endpoints zero and 64 and containment crossing the
+// address-half boundary preserve the two incomparable axis-wide rectangles.
+func Test_AggregateBiContiguous6_ShapeBitmapBoundaries(t *testing.T) {
+	highWildcard := xnetip.MustParseBiContiguous(
+		"::1234/0:0:0:0:ffff:ffff:ffff:ffff",
+	)
+	lowWildcard := xnetip.MustParseBiContiguous(
+		"2001:db8::/ffff:ffff:ffff:ffff::",
+	)
+	host := xnetip.MustParseBiContiguous("2001:db8::1234/128")
+	input := []xnetip.BiContiguous{host, lowWildcard, highWildcard}
+	require.Equal(
+		t,
+		[]xnetip.BiContiguous{highWildcard, lowWildcard},
+		xnetip.AggregateBiContiguous6(input),
+	)
+}
+
+var genBiContiguousAggregateWindow = rapid.SliceOfN(rapid.Custom(
+	func(t *rapid.T) xnetip.BiContiguous {
+		highPrefix := rapid.IntRange(60, 64).Draw(t, "high prefix")
+		lowPrefix := rapid.IntRange(60, 64).Draw(t, "low prefix")
+		return mustBiContiguousFromHalves(
+			rapid.Uint64().Draw(t, "high address"),
+			highPrefix,
+			rapid.Uint64().Draw(t, "low address"),
+			lowPrefix,
+		)
+	},
+), 0, 15)
+
+// verifies on brute-forceable rectangles that the exact address union is
+// preserved and both production and independent greedy covers reach closure.
+func Test_AggregateBiContiguous6_PreservesBoundedUnionAndOracleContractProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		input := genBiContiguousAggregateWindow.Draw(t, "rectangles")
+		expectedUnion := boundedBiContiguousUnion(input)
+		work := slices.Clone(input)
+		result := xnetip.AggregateBiContiguous6(work)
+		reference := referenceAggregateBiContiguous6(input)
+		require.Equal(t, expectedUnion, boundedBiContiguousUnion(result))
+		require.Equal(t, expectedUnion, boundedBiContiguousUnion(reference))
+		requireBiContiguousAggregateFixpoint(t, result)
+		requireBiContiguousAggregateFixpoint(t, reference)
+	})
+}
+
+// verifies arbitrary wrapper slices produce a revalidated numeric-order
+// fixpoint with no containment, lowest-bit merge or equal-row buddy remaining.
+func Test_AggregateBiContiguous6_GeneralFixpointProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		input := rapid.SliceOfN(genBiContiguous, 0, 23).Draw(t, "rectangles")
+		work := slices.Clone(input)
+		result := xnetip.AggregateBiContiguous6(work)
+		require.LessOrEqual(t, len(result), len(input))
+		requireBiContiguousAggregateFixpoint(t, result)
+	})
+}
+
+// verifies aggregating a closed result again preserves its exact value set.
+func Test_AggregateBiContiguous6_IdempotentAsSetProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		input := rapid.SliceOfN(genBiContiguous, 0, 23).Draw(t, "rectangles")
+		firstWork := slices.Clone(input)
+		first := slices.Clone(xnetip.AggregateBiContiguous6(firstWork))
+		secondWork := slices.Clone(first)
+		second := slices.Clone(xnetip.AggregateBiContiguous6(secondWork))
+		slices.SortFunc(first, xnetip.BiContiguous.Compare)
+		slices.SortFunc(second, xnetip.BiContiguous.Compare)
+		require.Equal(t, first, second)
+	})
+}
+
+// verifies repeated input shuffles may choose different valid covers but
+// always preserve the exact bounded union and the full fixpoint contract.
+func Test_AggregateBiContiguous6_ShuffleInvariantContractProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		input := genBiContiguousAggregateWindow.Draw(t, "rectangles")
+		expectedUnion := boundedBiContiguousUnion(input)
+		for shuffle := range 3 {
+			work := rapid.Permutation(input).Draw(t, "shuffle "+string(rune('a'+shuffle)))
+			result := xnetip.AggregateBiContiguous6(work)
+			require.Equal(t, expectedUnion, boundedBiContiguousUnion(result))
+			requireBiContiguousAggregateFixpoint(t, result)
+		}
+	})
+}
+
+// sweepCleanContainmentFixture builds exact host routes with neither low nor
+// high buddies, plus one ancestor containing only the unmarked branch.
+func sweepCleanContainmentFixture(count int) []xnetip.BiContiguous {
+	const (
+		highBase = uint64(0x2001_0db8_abcd_1200)
+		lowBase  = uint64(0x5678_9abc_def0_1200)
+	)
+	blocks := make([]xnetip.BiContiguous, 1, count)
+	blocks[0] = mustBiContiguousFromHalves(highBase, 59, lowBase, 59)
+	for idx := 0; idx < count-1; idx++ {
+		withinBranch := idx / 2
+		highOffset := uint64(2 * ((withinBranch / 16) % 16))
+		lowOffset := uint64(2 * (withinBranch % 16))
+		highAddr := highBase | highOffset
+		if idx%2 != 0 {
+			highAddr |= 1 << 5
+		}
+		blocks = append(blocks, mustBiContiguousFromHalves(
+			highAddr,
+			64,
+			lowBase|lowOffset,
+			64,
+		))
+	}
+	return blocks
+}
+
+// referenceBiContiguousContainment drops every uniquely represented block
+// contained by another block and sorts the survivors by the public key.
+func referenceBiContiguousContainment(
+	input []xnetip.BiContiguous,
+) []xnetip.BiContiguous {
+	result := make([]xnetip.BiContiguous, 0, len(input))
+	for idx, candidate := range input {
+		contained := false
+		for otherIdx, other := range input {
+			if idx != otherIdx && other.Contains(candidate) {
+				contained = true
+				break
+			}
+		}
+		if !contained {
+			result = append(result, candidate)
+		}
+	}
+	slices.SortFunc(result, compareBiContiguousMaskAddress)
+	return result
+}
+
+// verifies the chunked containment probe matches a quadratic oracle exactly
+// on large sweep-clean slices ranging across the three chunk sizes.
+func Test_AggregateBiContiguous6_MultiChunkContainmentMatchesQuadraticProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		count := rapid.IntRange(64, 191).Draw(t, "rectangle count")
+		input := sweepCleanContainmentFixture(count)
+		work := rapid.Permutation(input).Draw(t, "input order")
+		result := xnetip.AggregateBiContiguous6(work)
+		require.Equal(t, referenceBiContiguousContainment(input), result)
+	})
+}
+
+// aggregateBiContiguousNeverMerges spreads distinct normalized values across
+// many deep shapes without an intended sibling or containment relation.
+func aggregateBiContiguousNeverMerges(count, shapeCount int) []xnetip.BiContiguous {
+	blocks := make([]xnetip.BiContiguous, count)
+	for idx := range count {
+		shape := uint64(idx % shapeCount)
+		highPrefix := 20 + int((shape*7)%44)
+		lowPrefix := 20 + int((shape*11)%44)
+		highAddr := uint64(idx) * 0x9E37_79B9_7F4A_7C15
+		lowAddr := uint64(idx)*0xBF58_476D_1CE4_E5B9 ^ 0xABCD_EF01_2345_6789
+		blocks[idx] = mustBiContiguousFromHalves(
+			highAddr,
+			highPrefix,
+			lowAddr,
+			lowPrefix,
+		)
+	}
+	return blocks
+}
+
+// aggregateBiContiguousGeo builds site-wide high blocks whose low /32 rows
+// nest inside low /16 rows at the same small pool of sites.
+func aggregateBiContiguousGeo(count int) []xnetip.BiContiguous {
+	siteCount := min(max(count/50, 4), 2000)
+	blocks := make([]xnetip.BiContiguous, count)
+	for idx := range count {
+		site := uint64(idx % siteCount)
+		lowPrefix := 16
+		if idx%2 == 0 {
+			lowPrefix = 32
+		}
+		blocks[idx] = mustBiContiguousFromHalves(
+			site*0x9E37_79B9_7F4A_7C15,
+			40,
+			uint64(idx)*0xBF58_476D_1CE4_E5B9,
+			lowPrefix,
+		)
+	}
+	return blocks
+}
+
+// aggregateBiContiguousMergeableGrid builds low buddy rows under consecutive
+// high buddy blocks so both aggregation phases cascade densely.
+func aggregateBiContiguousMergeableGrid(count int) []xnetip.BiContiguous {
+	blocks := make([]xnetip.BiContiguous, count)
+	for idx := range count {
+		highIndex := uint64(idx / 64)
+		lowIndex := uint64(idx % 64)
+		blocks[idx] = mustBiContiguousFromHalves(
+			0x2001_0db8_0000_0000|(highIndex<<16),
+			48,
+			lowIndex<<16,
+			48,
+		)
+	}
+	return blocks
+}
+
+// aggregateBiContiguousReparentCascade builds a high-buddy chain beside an
+// inert coarse-prefix block that makes localized re-sorting observable.
+func aggregateBiContiguousReparentCascade(count int) []xnetip.BiContiguous {
+	const (
+		cascadeFloor = 8
+		marker       = uint64(1) << 63
+	)
+	blocks := make([]xnetip.BiContiguous, 0, count)
+	blocks = append(
+		blocks,
+		mustBiContiguousFromHalves(marker, 64, 0, 0),
+		mustBiContiguousFromHalves(marker|1, 64, 0, 0),
+	)
+	for prefix := cascadeFloor + 1; prefix < 64; prefix++ {
+		buddyBit := uint64(1) << (64 - prefix)
+		blocks = append(blocks, mustBiContiguousFromHalves(
+			marker|buddyBit,
+			prefix,
+			0,
+			0,
+		))
+	}
+	inertCount := max(count-len(blocks), 0)
+	shapeCount := min(16, max(inertCount, 1))
+	for idx := range inertCount {
+		shape := uint64(idx % shapeCount)
+		lowPrefix := 20 + int((shape*11)%44)
+		lowAddr := uint64(idx)*0xBF58_476D_1CE4_E5B9 ^ 0xABCD_EF01_2345_6789
+		blocks = append(blocks, mustBiContiguousFromHalves(0, 4, lowAddr, lowPrefix))
+	}
+	return blocks
+}
+
+// aggregateBiContiguousContainmentSmall builds one wildcard ancestor and a
+// many-shape fan with alternating contained and disjoint descendants.
+func aggregateBiContiguousContainmentSmall(count int) []xnetip.BiContiguous {
+	blocks := make([]xnetip.BiContiguous, 0, count)
+	blocks = append(blocks, mustBiContiguousFromHalves(0, 8, 0, 0))
+	for idx := 1; idx < count; idx++ {
+		tag := uint64(idx & 0xFF)
+		if idx%2 == 0 {
+			tag = 0
+		}
+		highPrefix := 9 + idx%56
+		lowPrefix := idx % 65
+		highAddr := tag<<56 |
+			(uint64(idx) * 0x9E37_79B9_7F4A_7C15 & 0x00FF_FFFF_FFFF_FFFF)
+		lowAddr := uint64(idx)*0xBF58_476D_1CE4_E5B9 ^ 0xABCD_EF01_2345_6789
+		blocks = append(blocks, mustBiContiguousFromHalves(
+			highAddr,
+			highPrefix,
+			lowAddr,
+			lowPrefix,
+		))
+	}
+	return blocks
+}
+
+// verifies empty, singleton, inert, merge-heavy, containment and reparenting
+// fixtures allocate no heap memory, including their in-place refresh copies.
+func Test_AggregateBiContiguous6_AllocationFree(t *testing.T) {
+	empty := []xnetip.BiContiguous{}
+	requireNoAllocs(t, func() {
+		intSink = len(xnetip.AggregateBiContiguous6(empty))
+	})
+	singleTemplate := []xnetip.BiContiguous{xnetip.MustParseBiContiguous("2001:db8::/32")}
+	singleWork := make([]xnetip.BiContiguous, len(singleTemplate))
+	requireNoAllocs(t, func() {
+		copy(singleWork, singleTemplate)
+		intSink = len(xnetip.AggregateBiContiguous6(singleWork))
+	})
+	fixtures := [][]xnetip.BiContiguous{
+		aggregateBiContiguousNeverMerges(256, 16),
+		aggregateBiContiguousMergeableGrid(256),
+		aggregateBiContiguousGeo(256),
+		aggregateBiContiguousReparentCascade(256),
+	}
+	for _, template := range fixtures {
+		work := make([]xnetip.BiContiguous, len(template))
+		requireNoAllocs(t, func() {
+			copy(work, template)
+			intSink = len(xnetip.AggregateBiContiguous6(work))
+		})
+	}
+}
+
+func benchmarkAggregateBiContiguous6(
+	b *testing.B,
+	template []xnetip.BiContiguous,
+) {
+	work := make([]xnetip.BiContiguous, len(template))
+	b.ReportAllocs()
+	for b.Loop() {
+		// The O(N) fixture refresh is part of the timed aggregate cost.
+		copy(work, template)
+		intSink = len(xnetip.AggregateBiContiguous6(work))
+	}
+}
+
+func benchmarkAggregateBiContiguous6NeverMerges(
+	b *testing.B,
+	count int,
+) {
+	template := aggregateBiContiguousNeverMerges(count, 16)
+	b.Run("BiContiguous", func(b *testing.B) {
+		benchmarkAggregateBiContiguous6(b, template)
+	})
+	plainTemplate := make([]xnetip.Network6, len(template))
+	for idx, block := range template {
+		plainTemplate[idx] = block.Network()
+	}
+	b.Run("Aggregate6", func(b *testing.B) {
+		work := make([]xnetip.Network6, len(plainTemplate))
+		b.ReportAllocs()
+		for b.Loop() {
+			copy(work, plainTemplate)
+			intSink = len(xnetip.Aggregate6(work))
+		}
+	})
+}
+
+func BenchmarkAggregateBiContiguous6_ContainmentSmall_16(b *testing.B) {
+	benchmarkAggregateBiContiguous6(b, aggregateBiContiguousContainmentSmall(16))
+}
+
+func BenchmarkAggregateBiContiguous6_ContainmentSmall_64(b *testing.B) {
+	benchmarkAggregateBiContiguous6(b, aggregateBiContiguousContainmentSmall(64))
+}
+
+func BenchmarkAggregateBiContiguous6_ContainmentSmall_256(b *testing.B) {
+	benchmarkAggregateBiContiguous6(b, aggregateBiContiguousContainmentSmall(256))
+}
+
+func BenchmarkAggregateBiContiguous6_NeverMerges_1024(b *testing.B) {
+	benchmarkAggregateBiContiguous6NeverMerges(b, 1024)
+}
+
+func BenchmarkAggregateBiContiguous6_NeverMerges_4096(b *testing.B) {
+	benchmarkAggregateBiContiguous6NeverMerges(b, 4096)
+}
+
+func BenchmarkAggregateBiContiguous6_Geo_1024(b *testing.B) {
+	benchmarkAggregateBiContiguous6(b, aggregateBiContiguousGeo(1024))
+}
+
+func BenchmarkAggregateBiContiguous6_Geo_4096(b *testing.B) {
+	benchmarkAggregateBiContiguous6(b, aggregateBiContiguousGeo(4096))
+}
+
+func BenchmarkAggregateBiContiguous6_MergeableGrid_1024(b *testing.B) {
+	benchmarkAggregateBiContiguous6(b, aggregateBiContiguousMergeableGrid(1024))
+}
+
+func BenchmarkAggregateBiContiguous6_MergeableGrid_4096(b *testing.B) {
+	benchmarkAggregateBiContiguous6(b, aggregateBiContiguousMergeableGrid(4096))
+}
+
+func BenchmarkAggregateBiContiguous6_ReparentCascade_1024(b *testing.B) {
+	benchmarkAggregateBiContiguous6(b, aggregateBiContiguousReparentCascade(1024))
+}
+
+func BenchmarkAggregateBiContiguous6_ReparentCascade_4096(b *testing.B) {
+	benchmarkAggregateBiContiguous6(b, aggregateBiContiguousReparentCascade(4096))
 }

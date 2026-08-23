@@ -41,7 +41,7 @@ net4.go net6.go net.go               Network4  Network6  Network{network Network
                    a type's whole API lives in its file (constructors, Parse*, formatters, marshalling, set algebra, Addrs, Difference)
 errors.go compact.go                 sentinels, Compact (function over an unexported wrapper)
 contiguous.go bicontiguous.go        Contiguous[T] CIDR wrapper + network[T] F-bound; concrete IPv6 BiContiguous wrapper
-range.go aggregate.go binary_split.go   free functions over ranges and slices (RangeToNetworks*, Aggregate*, BinarySplit*), one file each
+range.go aggregate.go binary_split.go   free range, aggregate (including the bi-contiguous cover), split functions
 *_test.go          mirror of the source file, package xnetip_test; white-box files (package xnetip): uint128_test.go and the kernel suites addr4_test.go, addr6_test.go, errors_test.go
 testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by the type's birth session
 .roadmap/          gitignored session plan: 00-overview.md (order, status, backlog) + NNN-slug.md per pending session (deleted once done)
@@ -61,7 +61,9 @@ testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by t
 - `Contiguous[T]` proves one global leading-one mask run. Concrete
   `BiContiguous` over `Network6` proves one run per 64-bit half. Their storage
   is unexported; equality and ordering match the wrapped network; zero values
-  are valid universe networks.
+  are valid universe networks. `AggregateBiContiguous6` is an in-place,
+  allocation-free class-closed greedy cover sorted by numeric mask then
+  address; it is deliberately not a minimum rectangle cover.
 - `Network` stores IPv4 mapped: address `::ffff:a.b.c.d`, mask
   `ffff:ffff:ffff:ffff:ffff:ffff:M`; `is4` implies
   `network.IsIPv4MappedIPv6()`. Operations delegate to 128 bits and
