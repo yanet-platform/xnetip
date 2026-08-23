@@ -47,6 +47,51 @@ func maskHalfPrefixLenOracle(mask [16]byte, offset int) int {
 	return prefix
 }
 
+// boundedPrefixMember reports membership in a four-bit leading-prefix block.
+func boundedPrefixMember(value, base, prefix int) bool {
+	for bitOffset := range prefix {
+		bit := 1 << uint(3-bitOffset)
+		if value&bit != base&bit {
+			return false
+		}
+	}
+	return true
+}
+
+// boundedRectangleContainsOracle defines rectangle containment by exhaustive
+// membership over a four-bit high axis and a four-bit low axis.
+func boundedRectangleContainsOracle(
+	outerAddrHigh, outerAddrLow, outerPrefixHigh, outerPrefixLow int,
+	innerAddrHigh, innerAddrLow, innerPrefixHigh, innerPrefixLow int,
+) bool {
+	for candidateHigh := range 16 {
+		for candidateLow := range 16 {
+			innerMember := boundedPrefixMember(
+				candidateHigh,
+				innerAddrHigh,
+				innerPrefixHigh,
+			) && boundedPrefixMember(
+				candidateLow,
+				innerAddrLow,
+				innerPrefixLow,
+			)
+			outerMember := boundedPrefixMember(
+				candidateHigh,
+				outerAddrHigh,
+				outerPrefixHigh,
+			) && boundedPrefixMember(
+				candidateLow,
+				outerAddrLow,
+				outerPrefixLow,
+			)
+			if innerMember && !outerMember {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // verifies that the bi-contiguous shape rejection has its own stable
 // sentinel text, distinct from the stricter CIDR shape rejection.
 func Test_ErrNonBiContiguousMask_HasDedicatedText(t *testing.T) {
@@ -962,6 +1007,345 @@ func Test_BiContiguous_CompareMatchesNetworkProperty(t *testing.T) {
 		require.Equal(t, first.Network().Compare(second.Network()), comparison)
 		require.Equal(t, first == second, comparison == 0)
 	})
+}
+
+// verifies rectangle containment at the identity, universe, host, axis,
+// address and globally-contiguous boundaries.
+func Test_BiContiguous_Contains_UnitAndBoundaries(t *testing.T) {
+	cases := []struct {
+		name  string
+		outer string
+		inner string
+		want  bool
+	}{
+		{
+			name:  "motivating rectangle contains itself",
+			outer: "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			inner: "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			want:  true,
+		},
+		{
+			name:  "universe contains arbitrary rectangle",
+			outer: "::/0",
+			inner: "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			want:  true,
+		},
+		{
+			name:  "host contains itself",
+			outer: "2001:db8::1/128",
+			inner: "2001:db8::1/128",
+			want:  true,
+		},
+		{
+			name:  "host rejects a different host",
+			outer: "2001:db8::1/128",
+			inner: "2001:db8::2/128",
+			want:  false,
+		},
+		{
+			name:  "proper rectangle contains narrower axes",
+			outer: "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			inner: "2001:db8:1:0:abcd:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+			want:  true,
+		},
+		{
+			name:  "narrow high axis rejects wider high axis",
+			outer: "2001:db8::abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+			inner: "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			want:  false,
+		},
+		{
+			name:  "narrow low axis rejects wider low axis",
+			outer: "2001:db8::abcd:0:0:0/ffff:ffff::ffff:ffff:0:0",
+			inner: "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			want:  false,
+		},
+		{
+			name:  "incomparable rectangle rejects wider high axis",
+			outer: "2001:db8::abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+			inner: "2001:db8::abcd:0:0:0/ffff:ffff::ffff:ffff:0:0",
+			want:  false,
+		},
+		{
+			name:  "incomparable rectangle rejects wider low axis",
+			outer: "2001:db8::abcd:0:0:0/ffff:ffff::ffff:ffff:0:0",
+			inner: "2001:db8::abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+			want:  false,
+		},
+		{
+			name:  "compatible shapes reject high address mismatch",
+			outer: "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			inner: "2001:db9:1:0:abcd:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+			want:  false,
+		},
+		{
+			name:  "compatible shapes reject low address mismatch",
+			outer: "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			inner: "2001:db8:1:0:abce:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+			want:  false,
+		},
+		{
+			name:  "prefix forty contains matching prefix ninety six",
+			outer: "2001:db8:1200::/40",
+			inner: "2001:db8:12ab:cd00:1234:5678::/96",
+			want:  true,
+		},
+		{
+			name:  "low-only rectangle contains narrower low axis",
+			outer: "::abcd:0:0:0/::ffff:0:0:0",
+			inner: "::abcd:1234:0:0/::ffff:ffff:0:0",
+			want:  true,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			outer := xnetip.MustParseBiContiguous(testCase.outer)
+			inner := xnetip.MustParseBiContiguous(testCase.inner)
+			require.Equal(t, testCase.want, outer.Contains(inner))
+		})
+	}
+}
+
+// verifies that typed containment equals general IPv6 network containment
+// for every generated pair of bi-contiguous masks.
+func Test_BiContiguous_Contains_MatchesNetworkProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outer := genBiContiguous.Draw(t, "outer")
+		inner := genBiContiguous.Draw(t, "inner")
+		require.Equal(
+			t,
+			outer.Network().Contains(inner.Network()),
+			outer.Contains(inner),
+		)
+	})
+}
+
+// verifies that rectangle containment is reflexive, antisymmetric and
+// transitive over generated wrapper values.
+func Test_BiContiguous_Contains_PartialOrderProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := genBiContiguous.Draw(t, "first")
+		second := genBiContiguous.Draw(t, "second")
+		third := genBiContiguous.Draw(t, "third")
+		require.True(t, first.Contains(first))
+		if first.Contains(second) && second.Contains(first) {
+			require.Equal(t, first, second)
+		}
+		if first.Contains(second) && second.Contains(third) {
+			require.True(t, first.Contains(third))
+		}
+	})
+}
+
+// verifies that extending either per-half prefix while preserving the
+// constrained address bits always produces a contained rectangle.
+func Test_BiContiguous_Contains_AxisMonotonicityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := netipAddrFrom6Bits(
+			rapid.Uint64().Draw(t, "addr high"),
+			rapid.Uint64().Draw(t, "addr low"),
+		)
+		outerHigh := rapid.IntRange(0, 63).Draw(t, "outer high prefix")
+		outerLow := rapid.IntRange(0, 63).Draw(t, "outer low prefix")
+		innerHigh := rapid.IntRange(outerHigh+1, 64).Draw(t, "inner high prefix")
+		innerLow := rapid.IntRange(outerLow+1, 64).Draw(t, "inner low prefix")
+
+		wrap := func(highPrefix, lowPrefix int) xnetip.BiContiguous {
+			block, err := xnetip.BiContiguousFrom(
+				addr,
+				netipAddrFrom6Bits(
+					prefixMask64(highPrefix),
+					prefixMask64(lowPrefix),
+				),
+			)
+			require.NoError(t, err)
+			return block
+		}
+
+		outer := wrap(outerHigh, outerLow)
+		require.True(t, outer.Contains(wrap(innerHigh, outerLow)))
+		require.True(t, outer.Contains(wrap(outerHigh, innerLow)))
+		require.True(t, outer.Contains(wrap(innerHigh, innerLow)))
+	})
+}
+
+// verifies typed containment against exhaustive set inclusion on a bounded
+// rectangle whose high and low axes each contain sixteen points.
+func Test_BiContiguous_Contains_BoundedRectangleOracleProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		outerAddrHigh := rapid.IntRange(0, 15).Draw(t, "outer address high")
+		outerAddrLow := rapid.IntRange(0, 15).Draw(t, "outer address low")
+		outerPrefixHigh := rapid.IntRange(0, 4).Draw(t, "outer prefix high")
+		outerPrefixLow := rapid.IntRange(0, 4).Draw(t, "outer prefix low")
+		innerAddrHigh := rapid.IntRange(0, 15).Draw(t, "inner address high")
+		innerAddrLow := rapid.IntRange(0, 15).Draw(t, "inner address low")
+		innerPrefixHigh := rapid.IntRange(0, 4).Draw(t, "inner prefix high")
+		innerPrefixLow := rapid.IntRange(0, 4).Draw(t, "inner prefix low")
+
+		outer, err := xnetip.BiContiguousFrom(
+			netipAddrFrom6Bits(uint64(outerAddrHigh)<<60, uint64(outerAddrLow)<<60),
+			netipAddrFrom6Bits(
+				prefixMask64(outerPrefixHigh),
+				prefixMask64(outerPrefixLow),
+			),
+		)
+		require.NoError(t, err)
+		inner, err := xnetip.BiContiguousFrom(
+			netipAddrFrom6Bits(uint64(innerAddrHigh)<<60, uint64(innerAddrLow)<<60),
+			netipAddrFrom6Bits(
+				prefixMask64(innerPrefixHigh),
+				prefixMask64(innerPrefixLow),
+			),
+		)
+		require.NoError(t, err)
+
+		want := boundedRectangleContainsOracle(
+			outerAddrHigh,
+			outerAddrLow,
+			outerPrefixHigh,
+			outerPrefixLow,
+			innerAddrHigh,
+			innerAddrLow,
+			innerPrefixHigh,
+			innerPrefixLow,
+		)
+		require.Equal(t, want, outer.Contains(inner))
+	})
+}
+
+// verifies that successful, address-rejected and shape-rejected containment
+// paths allocate no heap memory.
+func Test_BiContiguous_Contains_AllocationFree(t *testing.T) {
+	cases := []struct {
+		name  string
+		outer xnetip.BiContiguous
+		inner xnetip.BiContiguous
+	}{
+		{
+			name:  "successful containment",
+			outer: mustBiContiguous(t, "2a02:6b8:c00::1234:0:0:0/ffff:ffff:ff00::ffff:0:0:0"),
+			inner: mustBiContiguous(t, "2a02:6b8:c01:0:1234:abcd:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0"),
+		},
+		{
+			name:  "address rejection",
+			outer: mustBiContiguous(t, "2a02:6b8:c00::1234:0:0:0/ffff:ffff:ff00::ffff:0:0:0"),
+			inner: mustBiContiguous(t, "2a02:6b8:c01:0:5678:abcd:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0"),
+		},
+		{
+			name:  "shape rejection",
+			outer: mustBiContiguous(t, "2001:db8::abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0"),
+			inner: mustBiContiguous(t, "2001:db8::abcd:0:0:0/ffff:ffff::ffff:ffff:0:0"),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			requireNoAllocs(t, func() { okSink = testCase.outer.Contains(testCase.inner) })
+		})
+	}
+}
+
+func BenchmarkBiContiguous_Contains_TrueTwoRun(b *testing.B) {
+	outer := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c00::1234:0:0:0/ffff:ffff:ff00::ffff:0:0:0",
+	)
+	inner := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c01:0:1234:abcd:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+	)
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
+func BenchmarkNetwork6_Contains_BiContiguousTrueTwoRun(b *testing.B) {
+	outer := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c00::1234:0:0:0/ffff:ffff:ff00::ffff:0:0:0",
+	)
+	inner := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c01:0:1234:abcd:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+	)
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Network().Contains(inner.Network())
+	}
+}
+
+func BenchmarkBiContiguous_Contains_FalseHighShape(b *testing.B) {
+	outer := xnetip.MustParseBiContiguous(
+		"2001:db8::abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+	)
+	inner := xnetip.MustParseBiContiguous(
+		"2001:db8::abcd:0:0:0/ffff:ffff::ffff:ffff:0:0",
+	)
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
+func BenchmarkNetwork6_Contains_BiContiguousFalseHighShape(b *testing.B) {
+	outer := xnetip.MustParseBiContiguous(
+		"2001:db8::abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+	)
+	inner := xnetip.MustParseBiContiguous(
+		"2001:db8::abcd:0:0:0/ffff:ffff::ffff:ffff:0:0",
+	)
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Network().Contains(inner.Network())
+	}
+}
+
+func BenchmarkBiContiguous_Contains_FalseLowShape(b *testing.B) {
+	outer := xnetip.MustParseBiContiguous(
+		"2001:db8::abcd:0:0:0/ffff:ffff::ffff:ffff:0:0",
+	)
+	inner := xnetip.MustParseBiContiguous(
+		"2001:db8::abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+	)
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
+func BenchmarkNetwork6_Contains_BiContiguousFalseLowShape(b *testing.B) {
+	outer := xnetip.MustParseBiContiguous(
+		"2001:db8::abcd:0:0:0/ffff:ffff::ffff:ffff:0:0",
+	)
+	inner := xnetip.MustParseBiContiguous(
+		"2001:db8::abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+	)
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Network().Contains(inner.Network())
+	}
+}
+
+func BenchmarkBiContiguous_Contains_FalseAddress(b *testing.B) {
+	outer := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c00::1234:0:0:0/ffff:ffff:ff00::ffff:0:0:0",
+	)
+	inner := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c01:0:5678:abcd:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+	)
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Contains(inner)
+	}
+}
+
+func BenchmarkNetwork6_Contains_BiContiguousFalseAddress(b *testing.B) {
+	outer := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c00::1234:0:0:0/ffff:ffff:ff00::ffff:0:0:0",
+	)
+	inner := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c01:0:5678:abcd:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+	)
+	b.ReportAllocs()
+	for b.Loop() {
+		okSink = outer.Network().Contains(inner.Network())
+	}
 }
 
 // verifies that every successful construction, view and comparison hot path

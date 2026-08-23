@@ -150,6 +150,26 @@ func (m BiContiguous) Compare(other BiContiguous) int {
 	return m.network6.Compare(other.network6)
 }
 
+// Contains reports whether every address of other is also an address
+// of m.
+//
+// Each mask half is a leading run of ones, so a receiver half constrains
+// a subset of the other's bits exactly when its unsigned mask word is no
+// greater. Checking both halves replaces the general whole-mask subset AND;
+// normalized addresses still must agree on every receiver-constrained bit.
+func (m BiContiguous) Contains(other BiContiguous) bool {
+	receiverMask := m.network6.mask.bits
+	otherMask := other.network6.mask.bits
+	if receiverMask.hi <= otherMask.hi && receiverMask.lo <= otherMask.lo {
+		receiverAddr := m.network6.addr.bits
+		maskedOtherAddr := other.network6.addr.bits.And(receiverMask)
+		if maskedOtherAddr.hi == receiverAddr.hi {
+			return maskedOtherAddr.lo == receiverAddr.lo
+		}
+	}
+	return false
+}
+
 // String returns the canonical text form of the bi-contiguous network.
 //
 // The format is exactly the wrapped IPv6 network's: a globally contiguous
