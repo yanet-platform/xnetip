@@ -1348,6 +1348,451 @@ func BenchmarkNetwork6_Contains_BiContiguousFalseAddress(b *testing.B) {
 	}
 }
 
+// verifies typed intersection at proper two-axis overlap, disjoint axes,
+// identity, CIDR and motivating rectangle boundaries.
+func Test_BiContiguous_Intersection_UnitAndBoundaries(t *testing.T) {
+	cases := []struct {
+		name   string
+		left   string
+		right  string
+		want   string
+		wantOK bool
+	}{
+		{
+			name:   "proper two-axis overlap takes narrower half from each input",
+			left:   "2001:db8:1:0:abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+			right:  "2001:db8:0:0:abcd:1234:0:0/ffff:ffff:0:0:ffff:ffff:0:0",
+			want:   "2001:db8:1:0:abcd:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+			wantOK: true,
+		},
+		{
+			name:   "high-axis conflict is disjoint",
+			left:   "2001:db8:1:0:abcd:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+			right:  "2001:db8:2:0:abcd:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+			wantOK: false,
+		},
+		{
+			name:   "low-axis conflict is disjoint",
+			left:   "2001:db8:1:0:abcd:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+			right:  "2001:db8:1:0:abcd:5678:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+			wantOK: false,
+		},
+		{
+			name:   "self intersection preserves the rectangle",
+			left:   "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			right:  "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			want:   "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			wantOK: true,
+		},
+		{
+			name:   "degenerate CIDR members yield the nested block",
+			left:   "2001:db8:1200::/40",
+			right:  "2001:db8:12ab:cd00:1234:5678::/96",
+			want:   "2001:db8:12ab:cd00:1234:5678::/96",
+			wantOK: true,
+		},
+		{
+			name:   "motivating masks yield the narrower low axis",
+			left:   "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			right:  "2a02:6b8:c00::1234:0:0:0/ffff:ffff:ff00::ffff:0:0:0",
+			want:   "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0",
+			wantOK: true,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			left := xnetip.MustParseBiContiguous(testCase.left)
+			right := xnetip.MustParseBiContiguous(testCase.right)
+			want := xnetip.BiContiguous{}
+			if testCase.wantOK {
+				want = xnetip.MustParseBiContiguous(testCase.want)
+			}
+			got, ok := left.Intersection(right)
+			require.Equal(t, testCase.wantOK, ok)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+// verifies typed buddy merging at duplicate, containment, per-half boundary,
+// non-boundary, nonadjacent and zero-value cases.
+func Test_BiContiguous_MergeByLowestMaskBit_UnitAndBoundaries(t *testing.T) {
+	cases := []struct {
+		name   string
+		left   string
+		right  string
+		want   string
+		wantOK bool
+	}{
+		{
+			name:   "duplicate rectangle stays unchanged",
+			left:   "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			right:  "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			want:   "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			wantOK: true,
+		},
+		{
+			name:   "left containment returns the left container",
+			left:   "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			right:  "2001:db8:1:0:abcd:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+			want:   "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			wantOK: true,
+		},
+		{
+			name:   "right containment returns the right container",
+			left:   "2001:db8:1:0:abcd:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+			right:  "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			want:   "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			wantOK: true,
+		},
+		{
+			name:   "low-run buddies drop the low boundary bit",
+			left:   "2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+			right:  "2001:db8::abcc:0:0:0/ffff:ffff::ffff:0:0:0",
+			want:   "2001:db8::abcc:0:0:0/ffff:ffff::fffe:0:0:0",
+			wantOK: true,
+		},
+		{
+			name:   "high-run buddies without a low run drop the high boundary bit",
+			left:   "2001:db8::/48",
+			right:  "2001:db8:1::/48",
+			want:   "2001:db8::/47",
+			wantOK: true,
+		},
+		{
+			name:   "high-run buddies with a low run are not global boundary buddies",
+			left:   "2001:db8::abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+			right:  "2001:db8:1:0:abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+			wantOK: false,
+		},
+		{
+			name:   "interior adjacency would punch a hole",
+			left:   "::/2",
+			right:  "8000::/2",
+			wantOK: false,
+		},
+		{
+			name:   "multiple differing address bits are nonadjacent",
+			left:   "::/4",
+			right:  "3000::/4",
+			wantOK: false,
+		},
+		{
+			name:   "duplicate zero wrapper stays the universe",
+			left:   "::/0",
+			right:  "::/0",
+			want:   "::/0",
+			wantOK: true,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			left := xnetip.MustParseBiContiguous(testCase.left)
+			right := xnetip.MustParseBiContiguous(testCase.right)
+			want := xnetip.BiContiguous{}
+			if testCase.wantOK {
+				want = xnetip.MustParseBiContiguous(testCase.want)
+			}
+			got, ok := left.MergeByLowestMaskBit(right)
+			require.Equal(t, testCase.wantOK, ok)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+// verifies that general adjacency above the global boundary still merges,
+// while the typed operation refuses it to retain its exact contract.
+func Test_BiContiguous_MergeByLowestMaskBit_RefusesNonBoundaryGeneralMerges(t *testing.T) {
+	cases := []struct {
+		name  string
+		left  string
+		right string
+	}{
+		{
+			name:  "high-run boundary is above a nonempty low run",
+			left:  "2001:db8::abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+			right: "2001:db8:1:0:abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+		},
+		{
+			name:  "top constrained bit is interior to the high run",
+			left:  "::/2",
+			right: "8000::/2",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			left := xnetip.MustParseBiContiguous(testCase.left)
+			right := xnetip.MustParseBiContiguous(testCase.right)
+			_, generalOK := left.Network().Merge(right.Network())
+			require.True(t, generalOK)
+			merged, ok := left.MergeByLowestMaskBit(right)
+			require.False(t, ok)
+			require.Equal(t, xnetip.BiContiguous{}, merged)
+		})
+	}
+}
+
+// verifies that typed intersection equals the wrapped operation and every
+// successful result remains inside the per-half prefix class.
+func Test_BiContiguous_Intersection_MatchesNetworkAndClosureProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genBiContiguous.Draw(t, "left")
+		right := genBiContiguous.Draw(t, "right")
+		wantNetwork, wantOK := left.Network().Intersection(right.Network())
+		got, ok := left.Intersection(right)
+		require.Equal(t, wantOK, ok)
+		if !ok {
+			require.Equal(t, xnetip.BiContiguous{}, got)
+			return
+		}
+		validated, valid := xnetip.BiContiguousFrom6(wantNetwork)
+		require.True(t, valid)
+		require.Equal(t, wantNetwork, got.Network())
+		require.Equal(t, validated, got)
+	})
+}
+
+// verifies that typed buddy merging equals the wrapped operation and every
+// successful result remains inside the per-half prefix class.
+func Test_BiContiguous_MergeByLowestMaskBit_MatchesNetworkAndClosureProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genBiContiguous.Draw(t, "left")
+		right := genBiContiguous.Draw(t, "right")
+		wantNetwork, wantOK := left.Network().MergeByLowestMaskBit(right.Network())
+		got, ok := left.MergeByLowestMaskBit(right)
+		require.Equal(t, wantOK, ok)
+		if !ok {
+			require.Equal(t, xnetip.BiContiguous{}, got)
+			return
+		}
+		validated, valid := xnetip.BiContiguousFrom6(wantNetwork)
+		require.True(t, valid)
+		require.Equal(t, wantNetwork, got.Network())
+		require.Equal(t, validated, got)
+	})
+}
+
+// verifies that rectangle intersection is commutative and idempotent in both
+// its result and presence flag.
+func Test_BiContiguous_Intersection_AlgebraProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genBiContiguous.Draw(t, "left")
+		right := genBiContiguous.Draw(t, "right")
+		forward, forwardOK := left.Intersection(right)
+		backward, backwardOK := right.Intersection(left)
+		require.Equal(t, forwardOK, backwardOK)
+		require.Equal(t, forward, backward)
+
+		self, selfOK := left.Intersection(left)
+		require.True(t, selfOK)
+		require.Equal(t, left, self)
+	})
+}
+
+// verifies that typed buddy merging is commutative in both its result and
+// presence flag.
+func Test_BiContiguous_MergeByLowestMaskBit_CommutativityProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		left := genBiContiguous.Draw(t, "left")
+		right := genBiContiguous.Draw(t, "right")
+		forward, forwardOK := left.MergeByLowestMaskBit(right)
+		backward, backwardOK := right.MergeByLowestMaskBit(left)
+		require.Equal(t, forwardOK, backwardOK)
+		require.Equal(t, forward, backward)
+	})
+}
+
+// verifies that a compatible rectangle intersection chooses the longer
+// prefix independently on each 64-bit axis.
+func Test_BiContiguous_Intersection_ComponentwiseMaximumShapeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addr := netipAddrFrom6Bits(
+			rapid.Uint64().Draw(t, "address high"),
+			rapid.Uint64().Draw(t, "address low"),
+		)
+		leftHigh := drawBiContiguousPrefix(t, "left high prefix")
+		leftLow := drawBiContiguousPrefix(t, "left low prefix")
+		rightHigh := drawBiContiguousPrefix(t, "right high prefix")
+		rightLow := drawBiContiguousPrefix(t, "right low prefix")
+		left, err := xnetip.BiContiguousFrom(
+			addr,
+			netipAddrFrom6Bits(prefixMask64(leftHigh), prefixMask64(leftLow)),
+		)
+		require.NoError(t, err)
+		right, err := xnetip.BiContiguousFrom(
+			addr,
+			netipAddrFrom6Bits(prefixMask64(rightHigh), prefixMask64(rightLow)),
+		)
+		require.NoError(t, err)
+
+		intersected, ok := left.Intersection(right)
+		require.True(t, ok)
+		require.Equal(t, max(leftHigh, rightHigh), intersected.HighPrefixLen())
+		require.Equal(t, max(leftLow, rightLow), intersected.LowPrefixLen())
+	})
+}
+
+// verifies that every proper boundary sibling pair merges to a rectangle
+// containing both inputs and drops exactly its bottommost run bit.
+func Test_BiContiguous_MergeByLowestMaskBit_ProperSiblingShapeProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		addrHigh := rapid.Uint64().Draw(t, "address high")
+		addrLow := rapid.Uint64().Draw(t, "address low")
+		highPrefix := rapid.IntRange(0, 64).Draw(t, "high prefix")
+		lowPrefix := 0
+		if rapid.Bool().Draw(t, "boundary in low half") {
+			lowPrefix = rapid.IntRange(1, 64).Draw(t, "low prefix")
+		} else {
+			highPrefix = rapid.IntRange(1, 64).Draw(t, "nonempty high prefix")
+		}
+		maskHigh := prefixMask64(highPrefix)
+		maskLow := prefixMask64(lowPrefix)
+		buddyHigh := addrHigh
+		buddyLow := addrLow
+		if lowPrefix > 0 {
+			buddyLow ^= uint64(1) << uint(64-lowPrefix)
+		} else {
+			buddyHigh ^= uint64(1) << uint(64-highPrefix)
+		}
+		left, err := xnetip.BiContiguousFrom(
+			netipAddrFrom6Bits(addrHigh, addrLow),
+			netipAddrFrom6Bits(maskHigh, maskLow),
+		)
+		require.NoError(t, err)
+		right, err := xnetip.BiContiguousFrom(
+			netipAddrFrom6Bits(buddyHigh, buddyLow),
+			netipAddrFrom6Bits(maskHigh, maskLow),
+		)
+		require.NoError(t, err)
+
+		merged, ok := left.MergeByLowestMaskBit(right)
+		require.True(t, ok)
+		require.True(t, merged.Contains(left))
+		require.True(t, merged.Contains(right))
+		if lowPrefix > 0 {
+			require.Equal(t, highPrefix, merged.HighPrefixLen())
+			require.Equal(t, lowPrefix-1, merged.LowPrefixLen())
+		} else {
+			require.Equal(t, highPrefix-1, merged.HighPrefixLen())
+			require.Zero(t, merged.LowPrefixLen())
+		}
+	})
+}
+
+// verifies rectangle intersection by exhaustive membership over independent
+// four-bit high and low axes.
+func Test_BiContiguous_Intersection_BoundedRectangleOracleProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		leftAddressHigh := rapid.IntRange(0, 15).Draw(t, "left address high")
+		leftAddressLow := rapid.IntRange(0, 15).Draw(t, "left address low")
+		leftPrefixHigh := rapid.IntRange(0, 4).Draw(t, "left prefix high")
+		leftPrefixLow := rapid.IntRange(0, 4).Draw(t, "left prefix low")
+		rightAddressHigh := rapid.IntRange(0, 15).Draw(t, "right address high")
+		rightAddressLow := rapid.IntRange(0, 15).Draw(t, "right address low")
+		rightPrefixHigh := rapid.IntRange(0, 4).Draw(t, "right prefix high")
+		rightPrefixLow := rapid.IntRange(0, 4).Draw(t, "right prefix low")
+
+		left, err := xnetip.BiContiguousFrom(
+			netipAddrFrom6Bits(uint64(leftAddressHigh)<<60, uint64(leftAddressLow)<<60),
+			netipAddrFrom6Bits(
+				prefixMask64(leftPrefixHigh),
+				prefixMask64(leftPrefixLow),
+			),
+		)
+		require.NoError(t, err)
+		right, err := xnetip.BiContiguousFrom(
+			netipAddrFrom6Bits(uint64(rightAddressHigh)<<60, uint64(rightAddressLow)<<60),
+			netipAddrFrom6Bits(
+				prefixMask64(rightPrefixHigh),
+				prefixMask64(rightPrefixLow),
+			),
+		)
+		require.NoError(t, err)
+		intersected, ok := left.Intersection(right)
+
+		anyMember := false
+		for candidateHigh := range 16 {
+			for candidateLow := range 16 {
+				leftMember := boundedPrefixMember(
+					candidateHigh,
+					leftAddressHigh,
+					leftPrefixHigh,
+				) && boundedPrefixMember(
+					candidateLow,
+					leftAddressLow,
+					leftPrefixLow,
+				)
+				rightMember := boundedPrefixMember(
+					candidateHigh,
+					rightAddressHigh,
+					rightPrefixHigh,
+				) && boundedPrefixMember(
+					candidateLow,
+					rightAddressLow,
+					rightPrefixLow,
+				)
+				wantMember := leftMember && rightMember
+				anyMember = anyMember || wantMember
+				addr := netipAddrFrom6Bits(
+					uint64(candidateHigh)<<60,
+					uint64(candidateLow)<<60,
+				)
+				gotMember := ok && intersected.Network().ContainsAddr(addr)
+				require.Equal(t, wantMember, gotMember)
+			}
+		}
+		require.Equal(t, anyMember, ok)
+	})
+}
+
+// verifies that successful, false and containment paths of both class-closed
+// operations allocate no heap memory.
+func Test_BiContiguous_IntersectionAndMergeByLowestMaskBit_AllocationFree(t *testing.T) {
+	overlapLeft := mustBiContiguous(
+		t,
+		"2001:db8:1:0:abcd:0:0:0/ffff:ffff:ffff:0:ffff:0:0:0",
+	)
+	overlapRight := mustBiContiguous(
+		t,
+		"2001:db8:0:0:abcd:1234:0:0/ffff:ffff:0:0:ffff:ffff:0:0",
+	)
+	disjoint := mustBiContiguous(
+		t,
+		"2001:db9:1:0:abcd:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+	)
+	container := mustBiContiguous(
+		t,
+		"2001:db8::abcd:0:0:0/ffff:ffff::ffff:0:0:0",
+	)
+	contained := mustBiContiguous(
+		t,
+		"2001:db8:1:0:abcd:1234:0:0/ffff:ffff:ffff:0:ffff:ffff:0:0",
+	)
+	sibling := mustBiContiguous(t, "2001:db8::/48")
+	buddy := mustBiContiguous(t, "2001:db8:1::/48")
+	nonBoundary := mustBiContiguous(t, "8000::/2")
+	interiorPeer := mustBiContiguous(t, "::/2")
+
+	requireNoAllocs(t, func() {
+		biContiguousSink, okSink = overlapLeft.Intersection(overlapRight)
+	})
+	requireNoAllocs(t, func() {
+		biContiguousSink, okSink = overlapLeft.Intersection(disjoint)
+	})
+	requireNoAllocs(t, func() {
+		biContiguousSink, okSink = container.Intersection(contained)
+	})
+	requireNoAllocs(t, func() {
+		biContiguousSink, okSink = sibling.MergeByLowestMaskBit(buddy)
+	})
+	requireNoAllocs(t, func() {
+		biContiguousSink, okSink = interiorPeer.MergeByLowestMaskBit(nonBoundary)
+	})
+	requireNoAllocs(t, func() {
+		biContiguousSink, okSink = container.MergeByLowestMaskBit(contained)
+	})
+}
+
 // verifies that every successful construction, view and comparison hot path
 // allocates no heap memory.
 func Test_BiContiguous_OperationsAllocationFree(t *testing.T) {

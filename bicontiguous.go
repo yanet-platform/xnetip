@@ -170,6 +170,39 @@ func (m BiContiguous) Contains(other BiContiguous) bool {
 	return false
 }
 
+// Intersection returns the bi-contiguous network common to m and other,
+// or false when they are disjoint.
+//
+// The mask union takes the longer leading run independently in each
+// 64-bit half, so the result stays bi-contiguous and needs no
+// revalidation. On false the first result is the zero wrapper.
+func (m BiContiguous) Intersection(other BiContiguous) (BiContiguous, bool) {
+	intersected, ok := m.network6.Intersection(other.network6)
+	if !ok {
+		return BiContiguous{}, false
+	}
+	// The mask OR keeps a leading run in each half and therefore
+	// wraps without revalidation.
+	return BiContiguous{network6: intersected}, true
+}
+
+// MergeByLowestMaskBit merges containment or lowest-mask-bit siblings
+// while preserving bi-contiguity.
+//
+// Containment returns an input unchanged. A sibling merge clears the
+// low run's boundary bit when that run is nonempty, or the high run's
+// boundary bit otherwise, so every successful result remains in the
+// class. On false the first result is the zero wrapper.
+func (m BiContiguous) MergeByLowestMaskBit(other BiContiguous) (BiContiguous, bool) {
+	merged, ok := m.network6.MergeByLowestMaskBit(other.network6)
+	if !ok {
+		return BiContiguous{}, false
+	}
+	// The result is either an unchanged input or has one bottommost
+	// run shortened by one bit, so it wraps without revalidation.
+	return BiContiguous{network6: merged}, true
+}
+
 // String returns the canonical text form of the bi-contiguous network.
 //
 // The format is exactly the wrapped IPv6 network's: a globally contiguous
