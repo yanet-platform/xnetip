@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"math"
 	"net/netip"
 	"slices"
@@ -2118,6 +2119,324 @@ func Test_BiContiguous_Difference_AllocationFree(t *testing.T) {
 			biContiguousSink = part
 		}
 	})
+}
+
+// verifies that the low host counter exhausts before carrying into the high
+// host counter, producing the exact row-major rectangle order.
+func Test_BiContiguous_Addrs_RowMajorCarry(t *testing.T) {
+	block := xnetip.MustParseBiContiguous(
+		"2a02:6b8:c00:0:0:1234:0:0/ffff:ffff:ffff:fffe:ffff:ffff:ffff:fffc",
+	)
+	want := []netip.Addr{
+		netip.MustParseAddr("2a02:6b8:c00:0:0:1234:0:0"),
+		netip.MustParseAddr("2a02:6b8:c00:0:0:1234:0:1"),
+		netip.MustParseAddr("2a02:6b8:c00:0:0:1234:0:2"),
+		netip.MustParseAddr("2a02:6b8:c00:0:0:1234:0:3"),
+		netip.MustParseAddr("2a02:6b8:c00:1:0:1234:0:0"),
+		netip.MustParseAddr("2a02:6b8:c00:1:0:1234:0:1"),
+		netip.MustParseAddr("2a02:6b8:c00:1:0:1234:0:2"),
+		netip.MustParseAddr("2a02:6b8:c00:1:0:1234:0:3"),
+	}
+	require.Equal(t, want, slices.Collect(block.Addrs()))
+}
+
+// verifies that two interleaved traversals of one sequence keep independent
+// cursor state and each exhausts every address exactly once.
+func Test_BiContiguous_Addrs_InterleavedTraversalsRemainIndependent(t *testing.T) {
+	block := xnetip.MustParseBiContiguous(
+		"2001:db8:1234:5678:9abc:def0:0:0/ffff:ffff:ffff:fffc:ffff:ffff:ffff:fffc",
+	)
+	want := slices.Collect(block.Network().Addrs())
+	sequence := block.Addrs()
+	firstNext, firstStop := iter.Pull(sequence)
+	defer firstStop()
+	secondNext, secondStop := iter.Pull(sequence)
+	defer secondStop()
+	firstSeen := map[netip.Addr]bool{}
+	secondSeen := map[netip.Addr]bool{}
+
+	for idx, expected := range want {
+		var firstAddr, secondAddr netip.Addr
+		var firstOK, secondOK bool
+		if idx%2 == 0 {
+			firstAddr, firstOK = firstNext()
+			secondAddr, secondOK = secondNext()
+		} else {
+			secondAddr, secondOK = secondNext()
+			firstAddr, firstOK = firstNext()
+		}
+		require.True(t, firstOK)
+		require.True(t, secondOK)
+		require.Equal(t, expected, firstAddr)
+		require.Equal(t, expected, secondAddr)
+		require.False(t, firstSeen[firstAddr], "first traversal repeated an address")
+		require.False(t, secondSeen[secondAddr], "second traversal repeated an address")
+		firstSeen[firstAddr] = true
+		secondSeen[secondAddr] = true
+	}
+	_, firstOK := firstNext()
+	_, secondOK := secondNext()
+	require.False(t, firstOK)
+	require.False(t, secondOK)
+}
+
+// verifies that a block with a full high mask yields the exact ascending
+// sequence of its equivalent /124 prefix.
+func Test_BiContiguous_Addrs_ContiguousHighHalfFull(t *testing.T) {
+	block := xnetip.MustParseBiContiguous("2a02:6b8:c00::1234:0:ab00/124")
+	want := make([]netip.Addr, 0, 16)
+	next := block.Network().Addr()
+	for range 16 {
+		want = append(want, next)
+		next = next.Next()
+	}
+	require.Equal(t, want, slices.Collect(block.Addrs()))
+}
+
+// verifies that a block with an empty low mask starts in the same order as
+// the general sequence without attempting to exhaust its huge host space.
+func Test_BiContiguous_Addrs_ContiguousLowHalfEmptyHead(t *testing.T) {
+	block := xnetip.MustParseBiContiguous(
+		"2001:db8:1234:5670::/ffff:ffff:ffff:fff0::",
+	)
+	require.Equal(
+		t,
+		collectHead(block.Network().Addrs(), 16),
+		collectHead(block.Addrs(), 16),
+	)
+}
+
+// verifies that a host block yields its one address and then stops.
+func Test_BiContiguous_Addrs_HostSingle(t *testing.T) {
+	block := xnetip.MustParseBiContiguous("2001:db8::1/128")
+	require.Equal(
+		t,
+		[]netip.Addr{netip.MustParseAddr("2001:db8::1")},
+		slices.Collect(block.Addrs()),
+	)
+}
+
+// verifies that the zero wrapper starts at the unspecified address, advances
+// through low-half hosts and stops invoking the callback after an early break.
+func Test_BiContiguous_Addrs_ZeroUniverseHeadAndEarlyBreak(t *testing.T) {
+	var block xnetip.BiContiguous
+	sequence := block.Addrs()
+	callbacks := 0
+	var head []netip.Addr
+	sequence(func(addr netip.Addr) bool {
+		head = append(head, addr)
+		callbacks++
+		return callbacks < 4
+	})
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("::"),
+		netip.MustParseAddr("::1"),
+		netip.MustParseAddr("::2"),
+		netip.MustParseAddr("::3"),
+	}, head)
+	require.Equal(t, 4, callbacks)
+}
+
+// verifies that low-only host bits advance the low counter while the high
+// half stays fixed for the entire bounded sequence.
+func Test_BiContiguous_Addrs_LowOnlyHosts(t *testing.T) {
+	block := xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1234:5678:9abc:def0:1200/ffff:ffff:ffff:ffff:ffff:ffff:ffff:fff0",
+	)
+	want := make([]netip.Addr, 0, 16)
+	for suffix := range 16 {
+		want = append(want, netip.MustParseAddr(fmt.Sprintf(
+			"2001:db8:abcd:1234:5678:9abc:def0:12%02x",
+			suffix,
+		)))
+	}
+	require.Equal(t, want, slices.Collect(block.Addrs()))
+}
+
+// verifies that high-only host bits advance the high counter while the fixed
+// low run creates a genuine gap across the 64-bit half boundary.
+func Test_BiContiguous_Addrs_HighOnlyHostsWithFixedLowHalf(t *testing.T) {
+	block := xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1230:1234:5678:9abc:def0/ffff:ffff:ffff:fff0:ffff:ffff:ffff:ffff",
+	)
+	want := make([]netip.Addr, 0, 16)
+	for suffix := range 16 {
+		want = append(want, netip.MustParseAddr(fmt.Sprintf(
+			"2001:db8:abcd:123%x:1234:5678:9abc:def0",
+			suffix,
+		)))
+	}
+	require.Equal(t, want, slices.Collect(block.Addrs()))
+}
+
+// drawBoundedBiContiguous draws a rectangle with no more than the requested
+// total host bits, split arbitrarily across its two mask halves.
+func drawBoundedBiContiguous(t *rapid.T, maxHostBits int) xnetip.BiContiguous {
+	totalHostBits := rapid.IntRange(0, maxHostBits).Draw(t, "total host bits")
+	highHostBits := rapid.IntRange(0, totalHostBits).Draw(t, "high host bits")
+	lowHostBits := totalHostBits - highHostBits
+	block, err := xnetip.BiContiguousFrom(
+		netipAddrFrom6Bits(
+			rapid.Uint64().Draw(t, "address high"),
+			rapid.Uint64().Draw(t, "address low"),
+		),
+		netipAddrFrom6Bits(
+			prefixMask64(64-highHostBits),
+			prefixMask64(64-lowHostBits),
+		),
+	)
+	require.NoError(t, err)
+	return block
+}
+
+// verifies on bounded rectangles that the specialized sequence matches the
+// general host-index sequence item for item and in the same order.
+func Test_BiContiguous_Addrs_MatchesNetworkProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := drawBoundedBiContiguous(t, 12)
+		require.Equal(
+			t,
+			slices.Collect(block.Network().Addrs()),
+			slices.Collect(block.Addrs()),
+		)
+	})
+}
+
+// verifies on bounded rectangles that every item is a member, the endpoints
+// are exact and the count is two raised to the total host-bit count.
+func Test_BiContiguous_Addrs_MembershipEndpointsAndCountProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := drawBoundedBiContiguous(t, 12)
+		addresses := slices.Collect(block.Addrs())
+		require.Len(t, addresses, 1<<block.Network().NumHostBits())
+		require.Equal(t, block.Network().Addr(), addresses[0])
+		require.Equal(t, block.Network().LastAddr(), addresses[len(addresses)-1])
+		for _, addr := range addresses {
+			require.True(t, block.Network().ContainsAddr(addr))
+		}
+	})
+}
+
+// verifies that returning false at any bounded item stops callbacks exactly
+// there and that the same sequence remains fully re-iterable afterward.
+func Test_BiContiguous_Addrs_EarlyBreakAndReiterationProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := drawBoundedBiContiguous(t, 10)
+		sequence := block.Addrs()
+		full := slices.Collect(sequence)
+		breakAfter := rapid.IntRange(1, len(full)).Draw(t, "break after")
+		callbacks := 0
+		sequence(func(addr netip.Addr) bool {
+			require.Equal(t, full[callbacks], addr)
+			callbacks++
+			return callbacks < breakAfter
+		})
+		require.Equal(t, breakAfter, callbacks)
+		require.Equal(t, full, slices.Collect(sequence))
+	})
+}
+
+// verifies every normalized rectangle in a four-bit-per-half model against
+// the general sequence, covering all prefix pairs and base patterns exactly.
+func Test_BiContiguous_Addrs_ExhaustsFourBitRectangleMatrix(t *testing.T) {
+	const (
+		fixedHigh = uint64(0x2001_0db8_abcd_1230)
+		fixedLow  = uint64(0x5678_9abc_def0_1230)
+	)
+	for highPrefix := range 5 {
+		for lowPrefix := range 5 {
+			for highBase := range 1 << highPrefix {
+				for lowBase := range 1 << lowPrefix {
+					block, err := xnetip.BiContiguousFrom(
+						netipAddrFrom6Bits(
+							fixedHigh|uint64(highBase<<(4-highPrefix)),
+							fixedLow|uint64(lowBase<<(4-lowPrefix)),
+						),
+						netipAddrFrom6Bits(
+							prefixMask64(60+highPrefix),
+							prefixMask64(60+lowPrefix),
+						),
+					)
+					require.NoError(t, err)
+					want := slices.Collect(block.Network().Addrs())
+					require.Len(t, want, 1<<(8-highPrefix-lowPrefix))
+					require.Equal(t, want, slices.Collect(block.Addrs()))
+				}
+			}
+		}
+	}
+}
+
+// verifies that genuine two-run, contiguous and host traversals allocate no
+// heap memory when consumed directly by range loops.
+func Test_BiContiguous_Addrs_AllocationFree(t *testing.T) {
+	twoRun := xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1230:5678:9abc:def0:1230/ffff:ffff:ffff:fff0:ffff:ffff:ffff:fff0",
+	)
+	contiguous := xnetip.MustParseBiContiguous("2001:db8::/120")
+	host := xnetip.MustParseBiContiguous("2001:db8::1/128")
+	requireNoAllocs(t, func() {
+		for addr := range twoRun.Addrs() {
+			addrSink = addr
+		}
+	})
+	requireNoAllocs(t, func() {
+		for addr := range contiguous.Addrs() {
+			addrSink = addr
+		}
+	})
+	requireNoAllocs(t, func() {
+		for addr := range host.Addrs() {
+			addrSink = addr
+		}
+	})
+}
+
+// consumeBiContiguousAddress keeps every benchmarked address observable.
+func consumeBiContiguousAddress(addr netip.Addr) bool {
+	addrSink = addr
+	return true
+}
+
+func benchmarkBiContiguousAddrs(b *testing.B, block xnetip.BiContiguous) {
+	b.Run("BiContiguous", func(b *testing.B) {
+		sequence := block.Addrs()
+		b.ReportAllocs()
+		for b.Loop() {
+			sequence(consumeBiContiguousAddress)
+		}
+	})
+	b.Run("Network6", func(b *testing.B) {
+		sequence := block.Network().Addrs()
+		b.ReportAllocs()
+		for b.Loop() {
+			sequence(consumeBiContiguousAddress)
+		}
+	})
+}
+
+func BenchmarkBiContiguous_Addrs_TwoRun4x4(b *testing.B) {
+	benchmarkBiContiguousAddrs(b, xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1230:5678:9abc:def0:1230/ffff:ffff:ffff:fff0:ffff:ffff:ffff:fff0",
+	))
+}
+
+func BenchmarkBiContiguous_Addrs_LowFixedHigh8(b *testing.B) {
+	benchmarkBiContiguousAddrs(b, xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1200:5678:9abc:def0:1234/ffff:ffff:ffff:ff00:ffff:ffff:ffff:ffff",
+	))
+}
+
+func BenchmarkBiContiguous_Addrs_RowCarry(b *testing.B) {
+	benchmarkBiContiguousAddrs(b, xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1230:5678:9abc:def0:1230/ffff:ffff:ffff:fffe:ffff:ffff:ffff:fffc",
+	))
+}
+
+func BenchmarkBiContiguous_Addrs_ContiguousSlash120(b *testing.B) {
+	benchmarkBiContiguousAddrs(b, xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1234:5678:9abc:def0:1200/120",
+	))
 }
 
 // verifies that every successful construction, view and comparison hot path

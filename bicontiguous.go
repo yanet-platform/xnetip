@@ -226,6 +226,53 @@ func (m BiContiguous) Difference(other BiContiguous) iter.Seq[BiContiguous] {
 	}
 }
 
+// Addrs returns every address in row-major host-index order.
+//
+// The low half's host counter cycles fastest and carries into the high
+// half after its trailing host run is exhausted. The order, membership
+// and count are exactly those of the wrapped network's Addrs sequence.
+// Every yielded address is an Is6 netip.Addr, zone-free. The sequence is
+// re-iterable, allocation-free and stops early when the consumer breaks.
+func (m BiContiguous) Addrs() iter.Seq[netip.Addr] {
+	return func(yield func(netip.Addr) bool) {
+		base := m.network6.addr.bits
+		mask := m.network6.mask.bits
+		lastHigh := ^mask.hi
+		lastLow := ^mask.lo
+		if lastHigh == 0 {
+			for hostLow := uint64(0); ; hostLow++ {
+				if !yield(addr6FromBits(base.hi, base.lo|hostLow).Netip()) ||
+					hostLow == lastLow {
+					return
+				}
+			}
+		}
+		if lastLow == 0 {
+			for hostHigh := uint64(0); ; hostHigh++ {
+				if !yield(addr6FromBits(base.hi|hostHigh, base.lo).Netip()) ||
+					hostHigh == lastHigh {
+					return
+				}
+			}
+		}
+		var hostHigh, hostLow uint64
+		for {
+			if !yield(addr6FromBits(base.hi|hostHigh, base.lo|hostLow).Netip()) {
+				return
+			}
+			if hostLow != lastLow {
+				hostLow++
+				continue
+			}
+			if hostHigh == lastHigh {
+				return
+			}
+			hostLow = 0
+			hostHigh++
+		}
+	}
+}
+
 // String returns the canonical text form of the bi-contiguous network.
 //
 // The format is exactly the wrapped IPv6 network's: a globally contiguous
