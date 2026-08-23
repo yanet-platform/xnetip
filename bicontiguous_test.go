@@ -2439,6 +2439,274 @@ func BenchmarkBiContiguous_Addrs_ContiguousSlash120(b *testing.B) {
 	))
 }
 
+// verifies that reverse row-major order decrements the low host counter
+// before borrowing into the high host counter at a row boundary.
+func Test_BiContiguous_AddrsBackward_RowMajorBorrow(t *testing.T) {
+	block := xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1230:5678:9abc:def0:1200/ffff:ffff:ffff:fffe:ffff:ffff:ffff:fffc",
+	)
+	want := []netip.Addr{
+		netip.MustParseAddr("2001:db8:abcd:1231:5678:9abc:def0:1203"),
+		netip.MustParseAddr("2001:db8:abcd:1231:5678:9abc:def0:1202"),
+		netip.MustParseAddr("2001:db8:abcd:1231:5678:9abc:def0:1201"),
+		netip.MustParseAddr("2001:db8:abcd:1231:5678:9abc:def0:1200"),
+		netip.MustParseAddr("2001:db8:abcd:1230:5678:9abc:def0:1203"),
+		netip.MustParseAddr("2001:db8:abcd:1230:5678:9abc:def0:1202"),
+		netip.MustParseAddr("2001:db8:abcd:1230:5678:9abc:def0:1201"),
+		netip.MustParseAddr("2001:db8:abcd:1230:5678:9abc:def0:1200"),
+	}
+	require.Equal(t, want, slices.Collect(block.AddrsBackward()))
+}
+
+// verifies that a host block yields its one address in reverse and stops.
+func Test_BiContiguous_AddrsBackward_HostSingle(t *testing.T) {
+	block := xnetip.MustParseBiContiguous("2001:db8::1/128")
+	require.Equal(
+		t,
+		[]netip.Addr{netip.MustParseAddr("2001:db8::1")},
+		slices.Collect(block.AddrsBackward()),
+	)
+}
+
+// verifies that the universe starts at the final IPv6 addresses and stops
+// invoking the callback after an early reverse break.
+func Test_BiContiguous_AddrsBackward_ZeroUniverseTailAndEarlyBreak(t *testing.T) {
+	var block xnetip.BiContiguous
+	callbacks := 0
+	var head []netip.Addr
+	block.AddrsBackward()(func(addr netip.Addr) bool {
+		head = append(head, addr)
+		callbacks++
+		return callbacks < 4
+	})
+	require.Equal(t, []netip.Addr{
+		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
+		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe"),
+		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffd"),
+		netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffc"),
+	}, head)
+	require.Equal(t, 4, callbacks)
+}
+
+// verifies that low-only host bits form the descending numeric order of a
+// bounded contiguous prefix.
+func Test_BiContiguous_AddrsBackward_LowOnlyHosts(t *testing.T) {
+	block := xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1234:5678:9abc:def0:1200/124",
+	)
+	want := make([]netip.Addr, 0, 16)
+	previous := block.Network().LastAddr()
+	for range 16 {
+		want = append(want, previous)
+		previous = previous.Prev()
+	}
+	require.Equal(t, want, slices.Collect(block.AddrsBackward()))
+}
+
+// verifies that high-only host bits decrement the high counter while the
+// fully fixed low half remains unchanged.
+func Test_BiContiguous_AddrsBackward_HighOnlyHosts(t *testing.T) {
+	block := xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1230:5678:9abc:def0:1234/ffff:ffff:ffff:fff0:ffff:ffff:ffff:ffff",
+	)
+	want := make([]netip.Addr, 0, 16)
+	for suffix := 15; suffix >= 0; suffix-- {
+		want = append(want, netip.MustParseAddr(fmt.Sprintf(
+			"2001:db8:abcd:123%x:5678:9abc:def0:1234",
+			suffix,
+		)))
+	}
+	require.Equal(t, want, slices.Collect(block.AddrsBackward()))
+}
+
+// verifies that every bounded iteration shape from the forward fast path is
+// reversed exactly and agrees item-for-item with the general reverse path.
+func Test_BiContiguous_AddrsBackward_BoundedFixturesReverseForward(t *testing.T) {
+	fixtures := []struct {
+		name string
+		text string
+	}{
+		{
+			name: "genuine two-run four by four",
+			text: "2001:db8:abcd:1230:5678:9abc:def0:1230/ffff:ffff:ffff:fff0:ffff:ffff:ffff:fff0",
+		},
+		{
+			name: "fixed low half and eight high hosts",
+			text: "2001:db8:abcd:1200:5678:9abc:def0:1234/ffff:ffff:ffff:ff00:ffff:ffff:ffff:ffff",
+		},
+		{
+			name: "row boundary borrow",
+			text: "2001:db8:abcd:1230:5678:9abc:def0:1230/ffff:ffff:ffff:fffe:ffff:ffff:ffff:fffc",
+		},
+		{
+			name: "contiguous slash one hundred twenty",
+			text: "2001:db8:abcd:1234:5678:9abc:def0:1200/120",
+		},
+		{
+			name: "contiguous slash one hundred twenty-four",
+			text: "2a02:6b8:c00::1234:0:ab00/124",
+		},
+		{
+			name: "high-only hosts with fixed low half",
+			text: "2001:db8:abcd:1230:1234:5678:9abc:def0/ffff:ffff:ffff:fff0:ffff:ffff:ffff:ffff",
+		},
+		{
+			name: "host route",
+			text: "2001:db8::1/128",
+		},
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			block := xnetip.MustParseBiContiguous(fixture.text)
+			want := slices.Collect(block.Addrs())
+			slices.Reverse(want)
+			require.Equal(t, want, slices.Collect(block.AddrsBackward()))
+			require.Equal(t, want, slices.Collect(block.Network().AddrsBackward()))
+		})
+	}
+}
+
+// verifies on bounded rectangles that reverse order, membership, endpoints
+// and count all match the forward and general host-index sequences.
+func Test_BiContiguous_AddrsBackward_ReverseMembershipEndpointsAndCountProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := drawBoundedBiContiguous(t, 12)
+		want := slices.Collect(block.Addrs())
+		slices.Reverse(want)
+		addresses := slices.Collect(block.AddrsBackward())
+		require.Equal(t, want, addresses)
+		require.Equal(t, slices.Collect(block.Network().AddrsBackward()), addresses)
+		require.Len(t, addresses, 1<<block.Network().NumHostBits())
+		require.Equal(t, block.Network().LastAddr(), addresses[0])
+		require.Equal(t, block.Network().Addr(), addresses[len(addresses)-1])
+		for _, addr := range addresses {
+			require.True(t, block.Network().ContainsAddr(addr))
+		}
+	})
+}
+
+// verifies that an early reverse break stops at the selected bounded item and
+// leaves the same sequence independently re-iterable from its last address.
+func Test_BiContiguous_AddrsBackward_EarlyBreakAndReiterationProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := drawBoundedBiContiguous(t, 10)
+		sequence := block.AddrsBackward()
+		full := slices.Collect(sequence)
+		breakAfter := rapid.IntRange(1, len(full)).Draw(t, "break after")
+		callbacks := 0
+		sequence(func(addr netip.Addr) bool {
+			require.Equal(t, full[callbacks], addr)
+			callbacks++
+			return callbacks < breakAfter
+		})
+		require.Equal(t, breakAfter, callbacks)
+		require.Equal(t, full, slices.Collect(sequence))
+	})
+}
+
+// verifies every normalized rectangle in a four-bit-per-half model against
+// reversed forward order and the general reverse sequence.
+func Test_BiContiguous_AddrsBackward_ExhaustsFourBitRectangleMatrix(t *testing.T) {
+	const (
+		fixedHigh = uint64(0x2001_0db8_abcd_1230)
+		fixedLow  = uint64(0x5678_9abc_def0_1230)
+	)
+	for highPrefix := range 5 {
+		for lowPrefix := range 5 {
+			for highBase := range 1 << highPrefix {
+				for lowBase := range 1 << lowPrefix {
+					block, err := xnetip.BiContiguousFrom(
+						netipAddrFrom6Bits(
+							fixedHigh|uint64(highBase<<(4-highPrefix)),
+							fixedLow|uint64(lowBase<<(4-lowPrefix)),
+						),
+						netipAddrFrom6Bits(
+							prefixMask64(60+highPrefix),
+							prefixMask64(60+lowPrefix),
+						),
+					)
+					require.NoError(t, err)
+					want := slices.Collect(block.Addrs())
+					slices.Reverse(want)
+					require.Len(t, want, 1<<(8-highPrefix-lowPrefix))
+					require.Equal(t, want, slices.Collect(block.AddrsBackward()))
+					require.Equal(
+						t,
+						want,
+						slices.Collect(block.Network().AddrsBackward()),
+					)
+				}
+			}
+		}
+	}
+}
+
+// verifies that genuine two-run, contiguous and host reverse traversals
+// allocate no heap memory when consumed directly by range loops.
+func Test_BiContiguous_AddrsBackward_AllocationFree(t *testing.T) {
+	twoRun := xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1230:5678:9abc:def0:1230/ffff:ffff:ffff:fff0:ffff:ffff:ffff:fff0",
+	)
+	contiguous := xnetip.MustParseBiContiguous("2001:db8::/120")
+	host := xnetip.MustParseBiContiguous("2001:db8::1/128")
+	requireNoAllocs(t, func() {
+		for addr := range twoRun.AddrsBackward() {
+			addrSink = addr
+		}
+	})
+	requireNoAllocs(t, func() {
+		for addr := range contiguous.AddrsBackward() {
+			addrSink = addr
+		}
+	})
+	requireNoAllocs(t, func() {
+		for addr := range host.AddrsBackward() {
+			addrSink = addr
+		}
+	})
+}
+
+func benchmarkBiContiguousAddrsBackward(b *testing.B, block xnetip.BiContiguous) {
+	b.Run("BiContiguous", func(b *testing.B) {
+		sequence := block.AddrsBackward()
+		b.ReportAllocs()
+		for b.Loop() {
+			sequence(consumeBiContiguousAddress)
+		}
+	})
+	b.Run("Network6", func(b *testing.B) {
+		sequence := block.Network().AddrsBackward()
+		b.ReportAllocs()
+		for b.Loop() {
+			sequence(consumeBiContiguousAddress)
+		}
+	})
+}
+
+func BenchmarkBiContiguous_AddrsBackward_TwoRun4x4(b *testing.B) {
+	benchmarkBiContiguousAddrsBackward(b, xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1230:5678:9abc:def0:1230/ffff:ffff:ffff:fff0:ffff:ffff:ffff:fff0",
+	))
+}
+
+func BenchmarkBiContiguous_AddrsBackward_LowFixedHigh8(b *testing.B) {
+	benchmarkBiContiguousAddrsBackward(b, xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1200:5678:9abc:def0:1234/ffff:ffff:ffff:ff00:ffff:ffff:ffff:ffff",
+	))
+}
+
+func BenchmarkBiContiguous_AddrsBackward_RowBorrow(b *testing.B) {
+	benchmarkBiContiguousAddrsBackward(b, xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1230:5678:9abc:def0:1230/ffff:ffff:ffff:fffe:ffff:ffff:ffff:fffc",
+	))
+}
+
+func BenchmarkBiContiguous_AddrsBackward_ContiguousSlash120(b *testing.B) {
+	benchmarkBiContiguousAddrsBackward(b, xnetip.MustParseBiContiguous(
+		"2001:db8:abcd:1234:5678:9abc:def0:1200/120",
+	))
+}
+
 // verifies that every successful construction, view and comparison hot path
 // allocates no heap memory.
 func Test_BiContiguous_OperationsAllocationFree(t *testing.T) {

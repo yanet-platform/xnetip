@@ -273,6 +273,58 @@ func (m BiContiguous) Addrs() iter.Seq[netip.Addr] {
 	}
 }
 
+// AddrsBackward returns every address in reverse row-major host-index order.
+//
+// The low half's host counter decrements fastest and borrows from the high
+// half after reaching zero. The order, membership and count are exactly those
+// of the wrapped network's AddrsBackward sequence. Every yielded address is
+// an Is6 netip.Addr, zone-free. The sequence is re-iterable, allocation-free
+// and stops early when the consumer breaks.
+func (m BiContiguous) AddrsBackward() iter.Seq[netip.Addr] {
+	return func(yield func(netip.Addr) bool) {
+		base := m.network6.addr.bits
+		mask := m.network6.mask.bits
+		lastHigh := ^mask.hi
+		lastLow := ^mask.lo
+		if lastHigh == 0 {
+			for hostLow := lastLow; ; hostLow-- {
+				addr := addr6{bits: uint128{hi: base.hi, lo: base.lo | hostLow}}
+				if !yield(addr.Netip()) ||
+					hostLow == 0 {
+					return
+				}
+			}
+		}
+		if lastLow == 0 {
+			for hostHigh := lastHigh; ; hostHigh-- {
+				addr := addr6{bits: uint128{hi: base.hi | hostHigh, lo: base.lo}}
+				if !yield(addr.Netip()) ||
+					hostHigh == 0 {
+					return
+				}
+			}
+		}
+		hostHigh, hostLow := lastHigh, lastLow
+		for {
+			addr := addr6{
+				bits: uint128{hi: base.hi | hostHigh, lo: base.lo | hostLow},
+			}
+			if !yield(addr.Netip()) {
+				return
+			}
+			if hostLow != 0 {
+				hostLow--
+				continue
+			}
+			if hostHigh == 0 {
+				return
+			}
+			hostLow = lastLow
+			hostHigh--
+		}
+	}
+}
+
 // String returns the canonical text form of the bi-contiguous network.
 //
 // The format is exactly the wrapped IPv6 network's: a globally contiguous
