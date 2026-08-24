@@ -8,28 +8,29 @@ import (
 
 // Network is an IPv4 or IPv6 network with a mask of arbitrary shape.
 //
-// It is the family-agnostic counterpart of Network4 and Network6:
+// It is the family-agnostic counterpart of [Network4] and [Network6]:
 // every operation of the concrete types exists here and delegates to
 // them, operations across families are false, ok=false or empty as
-// documented on each method, and Compare orders every IPv4 network
+// documented on each method, and [Network.Compare] orders every IPv4 network
 // before every IPv6 network. An IPv4 network is stored as its image
-// under Network4.ToIPv6Mapped, which preserves every set relation,
-// while the accessors keep returning unmapped Is4 views. The zero
+// under [Network4.ToIPv6Mapped], which preserves every set relation,
+// while the accessors keep returning unmapped [netip.Addr.Is4] views. The zero
 // value is ::/0. Values are immutable and safe to copy.
 type Network struct {
 	network Network6 // IPv4 networks are stored IPv4-mapped.
 	is4     bool
 }
 
-// NetworkFrom4 returns the Network holding an IPv4 network.
+// NetworkFrom4 returns the [Network] holding an IPv4 network.
 func NetworkFrom4(network Network4) Network {
 	return Network{network: network.ToIPv6Mapped(), is4: true}
 }
 
-// NetworkFrom6 returns the Network holding an IPv6 network.
+// NetworkFrom6 returns the [Network] holding an IPv6 network.
 //
-// An IPv6 network that happens to be IPv4-mapped stays IPv6, as in
-// netip, where an IPv4-mapped address reports Is6 and not Is4.
+// An IPv6 network that happens to be IPv4-mapped stays IPv6, following
+// [net/netip] semantics, where an IPv4-mapped address satisfies
+// [netip.Addr.Is6] and not [netip.Addr.Is4].
 func NetworkFrom6(network Network6) Network {
 	return Network{network: network}
 }
@@ -37,9 +38,10 @@ func NetworkFrom6(network Network6) Network {
 // NetworkFrom returns the network with the given address and mask,
 // normalizing the address by the mask.
 //
-// Both arguments must belong to the same address family (Is4 with Is4,
-// Is6 with Is6 — an IPv4-mapped address is Is6), otherwise
-// ErrAddrFamilyMismatch is returned; the invalid zero netip.Addr is
+// Both arguments must belong to the same address family (both satisfying
+// [netip.Addr.Is4] or both satisfying [netip.Addr.Is6]). An IPv4-mapped
+// address satisfies [netip.Addr.Is6]. Otherwise [ErrAddrFamilyMismatch]
+// is returned. The invalid zero [netip.Addr] is
 // rejected the same way. Any mask bit pattern of the family is
 // accepted, non-contiguous ones included. An IPv4 pair produces an
 // IPv4 network, an IPv6 pair (IPv4-mapped addresses included) an IPv6
@@ -63,10 +65,11 @@ func NetworkFrom(addr, mask netip.Addr) (Network, error) {
 // NetworkFromAddr returns the host route that contains exactly addr,
 // in the address family of addr.
 //
-// An Is4 address yields an IPv4 network (/32) and an Is6 address an
-// IPv6 network (/128). An IPv4-mapped IPv6 address is Is6 and yields
+// An address satisfying [netip.Addr.Is4] yields an IPv4 network (/32),
+// while one satisfying [netip.Addr.Is6] yields an IPv6 network (/128).
+// An IPv4-mapped IPv6 address satisfies [netip.Addr.Is6] and yields
 // an IPv6 network, a zone is dropped silently, and the invalid zero
-// netip.Addr is rejected with ErrAddrFamilyMismatch.
+// [netip.Addr] is rejected with [ErrAddrFamilyMismatch].
 func NetworkFromAddr(addr netip.Addr) (Network, error) {
 	// The family dispatch makes the typed constructors total here, so
 	// their errors are impossible.
@@ -82,14 +85,14 @@ func NetworkFromAddr(addr netip.Addr) (Network, error) {
 	}
 }
 
-// NetworkFromCIDR returns the network of addr with the top bits
-// bits masked, in addr's own family.
+// NetworkFromCIDR returns the network of addr with the prefix bits
+// preserved in addr's own family and host bits cleared.
 //
 // The length is bounded by the family, 0 through 32 for IPv4 and 0
-// through 128 for IPv6, otherwise ErrCIDROverflow is returned. An
-// IPv4-mapped address is IPv6 and stays IPv6, as in netip. The invalid
-// zero netip.Addr is rejected with ErrAddrFamilyMismatch. Host bits of
-// addr are cleared.
+// through 128 for IPv6, otherwise [ErrCIDROverflow] is returned. An
+// IPv4-mapped address is IPv6 and stays IPv6, following [net/netip]
+// semantics. The invalid zero [netip.Addr] is rejected with
+// [ErrAddrFamilyMismatch].
 func NetworkFromCIDR(addr netip.Addr, bits int) (Network, error) {
 	var network Network
 	var err error
@@ -112,14 +115,14 @@ func NetworkFromCIDR(addr netip.Addr, bits int) (Network, error) {
 	return network, nil
 }
 
-// NetworkFromPrefix converts a netip.Prefix into a Network.
+// NetworkFromPrefix converts a [netip.Prefix] into a [Network].
 //
 // The family follows the prefix address: an IPv4 prefix becomes an
-// IPv4 network, anything else — an IPv4-mapped IPv6 prefix included —
-// an IPv6 network, as in netip. The result is normalized: host bits
-// of the prefix address are cleared, the same network
-// netip.Prefix.Masked would report. ok is false only for the invalid
-// zero prefix. The inverse of Prefix.
+// IPv4 network. Anything else, including an IPv4-mapped IPv6 prefix,
+// becomes an IPv6 network, following [net/netip] semantics. The result is
+// normalized: host bits of the prefix address are cleared, the same network
+// [netip.Prefix.Masked] would report. ok is false only for the invalid
+// zero prefix. The inverse of [Network.Prefix].
 func NetworkFromPrefix(p netip.Prefix) (Network, bool) {
 	if !p.IsValid() {
 		return Network{}, false
@@ -148,9 +151,9 @@ func NetworkFromPrefix(p netip.Prefix) (Network, bool) {
 // "2001:db8::/ffff:ffff::ffff:ffff:0:0", "10.0.0.1" and "2001:db8::1"
 // are all accepted. An IPv4-mapped address such as "::ffff:192.0.2.0"
 // is IPv6, so the network stays IPv6. Text whose address part is no
-// address of either family wraps ErrParse with the net/netip cause;
+// address of either family wraps [ErrParse] with the net/netip cause.
 // past that point the per-family grammar and errors are those of
-// ParseNetwork4 and ParseNetwork6.
+// [ParseNetwork4] and [ParseNetwork6].
 func ParseNetwork(s string) (Network, error) {
 	addrText, suffix, hasSuffix := strings.Cut(s, "/")
 	addr, err := netip.ParseAddr(addrText)
@@ -172,7 +175,7 @@ func ParseNetwork(s string) (Network, error) {
 }
 
 // parseText parses CIDR-block text for the generic contiguous
-// wrapper, exactly as ParseContiguous does, its error labels included.
+// wrapper, exactly as [ParseContiguous] does, its error labels included.
 //
 // The receiver is a zero-value dispatch token: a generic method
 // cannot name a per-family function, so the constraint carries this
@@ -182,7 +185,7 @@ func (Network) parseText(s string) (Network, error) {
 	return block.Network(), err
 }
 
-// MustParseNetwork calls ParseNetwork and panics on error.
+// MustParseNetwork calls [ParseNetwork] and panics on error.
 //
 // It is intended for tests and package-level constants built from
 // literals.
@@ -231,11 +234,11 @@ func (m Network) IPv6() (Network6, bool) {
 	return m.network, true
 }
 
-// Addr returns the network address as a netip.Addr of the network's
-// own family: Is4 for an IPv4 network, Is6 otherwise.
+// Addr returns the network address as a [netip.Addr] in its own family.
 //
-// An IPv4 network answers with the unmapped view of the low 32 stored
-// address bits, which the mapped-storage invariant makes exact.
+// An IPv4 result satisfies [netip.Addr.Is4], and an IPv6 result satisfies
+// [netip.Addr.Is6]. The IPv4 view exposes the low 32 stored address bits,
+// which the mapped-storage invariant makes exact.
 func (m Network) Addr() netip.Addr {
 	if m.is4 {
 		_, lo := m.network.addr.Bits()
@@ -244,12 +247,12 @@ func (m Network) Addr() netip.Addr {
 	return m.network.addr.Netip()
 }
 
-// Mask returns the network mask as a netip.Addr of the network's own
-// family: Is4 for an IPv4 network, Is6 otherwise.
+// Mask returns the network mask as a [netip.Addr] in its own family.
 //
-// An IPv4 network answers with the unmapped view of the low 32 stored
-// mask bits, the upper 96 being all ones by the mapped-storage
-// invariant. A non-contiguous mask comes back verbatim.
+// An IPv4 result satisfies [netip.Addr.Is4], and an IPv6 result satisfies
+// [netip.Addr.Is6]. The IPv4 view exposes the low 32 stored mask bits. Its
+// upper 96 bits are all ones by the mapped-storage invariant. A
+// non-contiguous mask comes back verbatim.
 func (m Network) Mask() netip.Addr {
 	if m.is4 {
 		_, lo := m.network.mask.Bits()
@@ -261,8 +264,9 @@ func (m Network) Mask() netip.Addr {
 // LastAddr returns the greatest address in this network, in the
 // network's address family.
 //
-// For an IPv4 network the result is an Is4 netip.Addr, for an IPv6
-// network an Is6 one, zone-free either way. The value is the family's
+// For an IPv4 network the result is a [netip.Addr] satisfying
+// [netip.Addr.Is4]. For an IPv6 network it satisfies [netip.Addr.Is6],
+// and either result is zone-free. The value is the family's
 // greatest member: the broadcast address of a CIDR block, or the
 // network address with every host bit set for a non-contiguous mask.
 // It is computed once on the stored 128-bit form — the mapped mask of
@@ -292,9 +296,10 @@ func (m Network) NumHostBits() int {
 // Addrs returns every address of the network in host-index order,
 // each carrying the network's address family.
 //
-// An IPv4 network yields Is4 addresses, an IPv6 network Is6 ones,
-// zone-free, in exactly the order of Network4.Addrs and
-// Network6.Addrs. The number of addresses is 1 << NumHostBits().
+// An IPv4 network yields addresses satisfying [netip.Addr.Is4], while an
+// IPv6 network yields addresses satisfying [netip.Addr.Is6]. They are
+// zone-free and follow exactly the order of [Network4.Addrs] and
+// [Network6.Addrs]. The number of addresses is 1 << [Network.NumHostBits].
 func (m Network) Addrs() iter.Seq[netip.Addr] {
 	// The dispatch lives inside a single returned closure so a range
 	// over it stays a direct call in both families.
@@ -312,13 +317,14 @@ func (m Network) Addrs() iter.Seq[netip.Addr] {
 // AddrsBackward returns every address of the network in reverse
 // host-index order, each carrying the network's address family.
 //
-// It yields exactly the addresses of Addrs in the opposite order:
-// Is4 netip.Addr values for an IPv4 network, Is6 for an IPv6 one,
-// zone-free either way. The walk starts at LastAddr(), and for a
-// contiguous mask it is descending numeric order down to Addr().
+// It yields exactly the addresses of [Network.Addrs] in the opposite order:
+// [netip.Addr] values satisfying [netip.Addr.Is4] for an IPv4 network and
+// [netip.Addr.Is6] for an IPv6 one, zone-free either way. The walk starts at
+// [Network.LastAddr], and for a contiguous mask it is descending numeric
+// order down to [Network.Addr].
 // The sequence is re-iterable, allocation-free and stops early when
 // the consumer breaks. The number of addresses is exactly
-// 1 << NumHostBits().
+// 1 << [Network.NumHostBits].
 func (m Network) AddrsBackward() iter.Seq[netip.Addr] {
 	// The dispatch lives inside a single returned closure so a range
 	// over it stays a direct call in both families.
@@ -337,8 +343,8 @@ func (m Network) AddrsBackward() iter.Seq[netip.Addr] {
 // other.
 //
 // Every IPv4 network sorts before every IPv6 network, the order
-// netip.Addr.Compare gives across families. Within a family the order
-// is that of Network4.Compare or Network6.Compare: lexicographic
+// [netip.Addr.Compare] gives across families. Within a family the order
+// is that of [Network4.Compare] or [Network6.Compare]: lexicographic
 // on (address, mask). An IPv4-mapped IPv6 network is an IPv6 network
 // and sorts among IPv6 networks, not next to its IPv4 counterpart.
 func (m Network) Compare(other Network) int {
@@ -357,7 +363,7 @@ func (m Network) Compare(other Network) int {
 // of m.
 //
 // Networks of different address families never contain each other.
-// Within a family the result is the family's Contains, so masks may
+// Within a family the result follows the concrete containment operation, so masks may
 // be non-contiguous and the usual rules apply: identical networks
 // contain each other, the family universe contains every network of
 // its family, a host route contains only itself.
@@ -372,7 +378,7 @@ func (m Network) Contains(other Network) bool {
 	return m.is4 == other.is4 && m.network.Contains(other.network)
 }
 
-// containsContiguous is Contains for two CIDR networks, the
+// containsContiguous is [Network.Contains] for two CIDR networks, the
 // mask-subset conjunct collapsed to one unsigned compare.
 //
 // The family check must come first: without it the IPv6 universe
@@ -388,11 +394,11 @@ func (m Network) containsContiguous(other Network) bool {
 
 // ContainsAddr reports whether addr is an address of this network.
 //
-// The test is total, the netip.Prefix.Contains rule: an address of
+// The test is total, following [netip.Prefix.Contains]. An address of
 // the other family — an IPv4-mapped IPv6 address against an IPv4
-// network included — the invalid zero netip.Addr, or a zoned address
+// network included — the invalid zero [netip.Addr], or a zoned address
 // is simply not contained. Within the network's family the answer is
-// that of Network4.ContainsAddr or Network6.ContainsAddr, so the
+// that of [Network4.ContainsAddr] or [Network6.ContainsAddr], so the
 // mask may be non-contiguous.
 func (m Network) ContainsAddr(addr netip.Addr) bool {
 	// An IPv4 network answers on the low 32 stored bits, an IPv6
@@ -410,11 +416,12 @@ func (m Network) ContainsAddr(addr netip.Addr) bool {
 // Intersection returns the network of addresses common to m and other.
 //
 // Networks of different address families are disjoint and yield
-// ok=false. Within a family the result is the family's Intersection:
+// ok=false. Within a family the result follows [Network4.Intersection]
+// or [Network6.Intersection]:
 // always a single network, ok=false only when the two disagree on a
 // bit position both masks constrain. Masks may be non-contiguous. The
 // result keeps the family of the inputs, and on ok=false the returned
-// value is the zero Network.
+// value is the zero [Network].
 func (m Network) Intersection(other Network) (Network, bool) {
 	// The family check must come first: without it the IPv6 universe
 	// would intersect the mapped storage form of every IPv4 network.
@@ -438,7 +445,7 @@ func (m Network) Intersection(other Network) (Network, bool) {
 // address.
 //
 // Networks of different families never intersect. Within a family the
-// result equals the corresponding Network4 or Network6 method,
+// result equals [Network4.Intersects] or [Network6.Intersects],
 // for contiguous and non-contiguous masks alike.
 func (m Network) Intersects(other Network) bool {
 	// The family check must come first: without it the IPv6 universe
@@ -454,7 +461,7 @@ func (m Network) Intersects(other Network) bool {
 // IsDisjoint reports whether the two networks share no address.
 //
 // Networks of different families are always disjoint. Within a family
-// it is the logical complement of Intersects.
+// it is the logical complement of [Network.Intersects].
 func (m Network) IsDisjoint(other Network) bool {
 	return !m.Intersects(other)
 }
@@ -465,7 +472,7 @@ func (m Network) IsDisjoint(other Network) bool {
 // Same-family operands delegate to the concrete peel: exactly
 // popcount(d) pairwise-disjoint parts with d the mask bits fixed by
 // the intersection but free in m, most significant bit of d first,
-// as documented on Network4.Difference and Network6.Difference.
+// as documented on [Network4.Difference] and [Network6.Difference].
 // Operands of different families share no address, so the difference
 // is m itself, yielded once. Masks may be non-contiguous. The
 // sequence is allocation-free and re-iterable.
@@ -514,8 +521,7 @@ func (m Network) contiguousLadderPart(bits int) Network {
 // in exactly one masked bit.
 //
 // Networks of different families are never adjacent. Within a family
-// the result equals the corresponding Network4 or Network6
-// method.
+// the result equals [Network4.IsAdjacent] or [Network6.IsAdjacent].
 func (m Network) IsAdjacent(other Network) bool {
 	// The family check must come first: without it an IPv4 network
 	// could count as adjacent to the IPv6 twin of its sibling.
@@ -531,8 +537,8 @@ func (m Network) IsAdjacent(other Network) bool {
 // mask and differ in exactly the lowest set bit of that mask.
 //
 // Networks of different families are never adjacent. Within a family
-// the result equals the corresponding Network4 or Network6
-// method.
+// the result equals [Network4.IsAdjacentByLowestMaskBit] or
+// [Network6.IsAdjacentByLowestMaskBit].
 func (m Network) IsAdjacentByLowestMaskBit(other Network) bool {
 	// The family check must come first: without it an IPv4 network
 	// could count as adjacent to the IPv6 twin of its buddy.
@@ -549,9 +555,9 @@ func (m Network) IsAdjacentByLowestMaskBit(other Network) bool {
 // the two inputs, and false when no such network exists.
 //
 // Networks of different families never merge. Within a family the
-// result equals the corresponding Network4 or Network6 method
+// result equals [Network4.Merge] or [Network6.Merge]
 // and keeps the family of the inputs. On ok=false the returned value
-// is the zero Network.
+// is the zero [Network].
 func (m Network) Merge(other Network) (Network, bool) {
 	// The family check must come first: without it the IPv6 universe
 	// would absorb the mapped storage form of every IPv4 network.
@@ -577,9 +583,10 @@ func (m Network) Merge(other Network) (Network, bool) {
 //
 // Networks of different families never merge and report false.
 // Within a family the result and the flag are exactly those of the
-// Network4 or Network6 method, and the result keeps the
+// [Network4.MergeByLowestMaskBit] or [Network6.MergeByLowestMaskBit],
+// and the result keeps the
 // operands' family. On ok=false the returned value is the zero
-// Network.
+// [Network].
 func (m Network) MergeByLowestMaskBit(other Network) (Network, bool) {
 	// The family check must come first: without it the IPv6 universe
 	// would absorb the mapped storage form of every IPv4 network.
@@ -608,9 +615,10 @@ func (m Network) MergeByLowestMaskBit(other Network) (Network, bool) {
 // Any element of the other address family makes ok false: no network
 // spans both families, so a mixed slice has no supernet and yields
 // false rather than a silently narrowed answer. Within one family
-// the result is exactly the Network4 or Network6 fold and
+// the result is exactly the [Network4.SupernetFor] or
+// [Network6.SupernetFor] fold and
 // keeps that family. An empty slice returns the network itself. On
-// ok=false the returned value is the zero Network.
+// ok=false the returned value is the zero [Network].
 func (m Network) SupernetFor(nets []Network) (Network, bool) {
 	// The family check rides the fold loop, so one pass both rejects
 	// a foreign element and folds a same-family one.
@@ -633,8 +641,8 @@ func (m Network) SupernetFor(nets []Network) (Network, bool) {
 // IsContiguous reports whether the mask, in the network's own family,
 // is a CIDR prefix mask: leading one bits followed only by zero bits.
 //
-// For an IPv4 network the answer is that of Network4.IsContiguous,
-// for an IPv6 network that of Network6.IsContiguous. The stored
+// For an IPv4 network the answer is that of [Network4.IsContiguous],
+// for an IPv6 network that of [Network6.IsContiguous]. The stored
 // mask of an IPv4 network carries 96 leading ones above the 32 IPv4
 // mask bits, extending the leading run, so the 128-bit predicate of
 // the stored form answers for both families without a branch. When
@@ -670,14 +678,15 @@ func (m Network) PrefixLen() (int, bool) {
 	return prefix, ok
 }
 
-// Prefix returns the network as a netip.Prefix in its own family.
+// Prefix returns the network as a [netip.Prefix] in its own family.
 //
-// An IPv4 network yields an Is4 prefix with its 0 through 32 length,
+// An IPv4 network yields a prefix whose address satisfies
+// [netip.Addr.Is4], with a length from 0 through 32,
 // never the IPv4-mapped storage form, while an IPv4-mapped IPv6
 // network stays IPv6. ok is false when the mask is not contiguous,
-// and the first result is then the invalid zero netip.Prefix. The
+// and the first result is then the invalid zero [netip.Prefix]. The
 // returned prefix is already masked. The inverse of
-// NetworkFromPrefix.
+// [NetworkFromPrefix].
 func (m Network) Prefix() (netip.Prefix, bool) {
 	if network, ok := m.IPv4(); ok {
 		return network.Prefix()
@@ -688,9 +697,9 @@ func (m Network) Prefix() (netip.Prefix, bool) {
 // ToContiguous returns the CIDR block whose mask is the leading run
 // of one bits of this mask, keeping the address family.
 //
-// See Network4.ToContiguous and Network6.ToContiguous for the
+// See [Network4.ToContiguous] and [Network6.ToContiguous] for the
 // per-family contract. An IPv4 network stays an IPv4 network. The
-// exact, non-widening conversion is ContiguousFrom.
+// exact, non-widening conversion is [ContiguousFrom].
 func (m Network) ToContiguous() Contiguous[Network] {
 	// One truncation of the stored form serves both families and
 	// keeps the family flag.
@@ -706,7 +715,7 @@ func (m Network) ToContiguous() Contiguous[Network] {
 	}}
 }
 
-// String returns the text form of the network, see AppendTo.
+// String returns the text form of the network, see [Network.AppendTo].
 func (m Network) String() string {
 	// The buffer covers the longest form of either family, so the
 	// string conversion is the only allocation.
@@ -718,9 +727,9 @@ func (m Network) String() string {
 // extended buffer.
 //
 // An IPv4 network is written in the IPv4 form ("10.0.0.0/8"), never in
-// its IPv4-mapped storage form. See Network4.AppendTo and
-// Network6.AppendTo for the per-family format. The output parses
-// back with ParseNetwork.
+// its IPv4-mapped storage form. See [Network4.AppendTo] and
+// [Network6.AppendTo] for the per-family format. The output parses
+// back with [ParseNetwork].
 func (m Network) AppendTo(b []byte) []byte {
 	if network, ok := m.IPv4(); ok {
 		return network.AppendTo(b)
@@ -728,9 +737,9 @@ func (m Network) AppendTo(b []byte) []byte {
 	return m.network.AppendTo(b)
 }
 
-// MarshalText implements encoding.TextMarshaler.
+// MarshalText implements [encoding.TextMarshaler].
 //
-// The text is the String form of the network in its own address
+// The text is the [Network.String] form of the network in its own address
 // family: an IPv4 network prints in dotted form even though it is
 // stored IPv4-mapped, an IPv6 network prints compressed. It never
 // fails and allocates only the returned slice.
@@ -738,13 +747,13 @@ func (m Network) MarshalText() ([]byte, error) {
 	return m.AppendTo(make([]byte, 0, maxNetworkTextLen)), nil
 }
 
-// UnmarshalText implements encoding.TextUnmarshaler.
+// UnmarshalText implements [encoding.TextUnmarshaler].
 //
-// The text must be accepted by ParseNetwork, which detects the
+// The text must be accepted by [ParseNetwork], which detects the
 // family from the address part, so a zone suffix is rejected and
-// IPv4-mapped text stays IPv6. Empty text wraps ErrEmptyInput rather
+// IPv4-mapped text stays IPv6. Empty text wraps [ErrEmptyInput] rather
 // than yielding the zero value the way it yields the invalid zero
-// netip.Prefix: the zero Network is the valid network ::/0, so empty
+// [netip.Prefix]. The zero [Network] is the valid network ::/0, so empty
 // text would silently hide a missing field. The receiver is untouched
 // on any error.
 func (m *Network) UnmarshalText(text []byte) error {
@@ -777,11 +786,11 @@ func (m Network) ToIPv6Mapped() Network6 {
 //
 // An IPv4 network is returned unchanged. An IPv6 network that is
 // IPv4-mapped (address ::ffff:a.b.c.d and a mask whose top 96 bits are
-// all ones, see Network6.IsIPv4MappedIPv6) collapses to the
+// all ones, see [Network6.IsIPv4MappedIPv6]) collapses to the
 // equivalent IPv4 network, non-contiguous masks included. Any other
 // IPv6 network, including IPv4-compatible ::a.b.c.d addresses and
 // mapped addresses whose mask does not pin the top 96 bits, is
-// returned unchanged. The inverse of ToIPv6Mapped on mapped values.
+// returned unchanged. The inverse of [Network.ToIPv6Mapped] on mapped values.
 func (m Network) ToCanonical() Network {
 	if m.is4 {
 		return m

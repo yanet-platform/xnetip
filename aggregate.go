@@ -11,7 +11,7 @@ import (
 // mergeable pairs are replaced by their merge until no pair merges:
 // the address union of the result equals that of the input. The input
 // order is destroyed (the slice is sorted first) and the tail beyond
-// the returned prefix holds unspecified values, like slices.Compact.
+// the returned prefix holds unspecified values, like [slices.Compact].
 // The output order is a deterministic function of the input but not
 // guaranteed sorted, and for non-contiguous input the result is not
 // guaranteed minimal. Works with non-contiguous masks.
@@ -83,11 +83,11 @@ func Aggregate4(nets []Network4) []Network4 {
 // Duplicates are removed, contained blocks eliminated and CIDR
 // buddies merged, cascading, down to the unique smallest set of
 // blocks whose address union equals the input's. The result is
-// sorted by Compare and every block stays contiguous. Unlike
-// Aggregate4 and Aggregate6, the cover is minimal and the pass runs
+// sorted by [Contiguous.Compare] and every block stays contiguous. Unlike
+// [Aggregate4] and [Aggregate6], the cover is minimal and the pass runs
 // in O(N log N): sorted contiguous blocks form a laminar family, so
 // each candidate can only interact with the running top. The input
-// slice is reordered; only the returned prefix is meaningful.
+// slice is reordered. Only the returned prefix is meaningful.
 func AggregateContiguous[T network[T]](nets []Contiguous[T]) []Contiguous[T] {
 	if len(nets) <= 1 {
 		return nets
@@ -129,7 +129,7 @@ func AggregateContiguous[T network[T]](nets []Contiguous[T]) []Contiguous[T] {
 // mergeable pairs are replaced by their merge until no pair merges:
 // the address union of the result equals that of the input. The input
 // order is destroyed (the slice is sorted first) and the tail beyond
-// the returned prefix holds unspecified values, like slices.Compact.
+// the returned prefix holds unspecified values, like [slices.Compact].
 // The output order is a deterministic function of the input but not
 // guaranteed sorted, and for non-contiguous input the result is not
 // guaranteed minimal. Works with non-contiguous masks.
@@ -198,11 +198,11 @@ func Aggregate6(nets []Network6) []Network6 {
 // AggregateBiContiguous6 aggregates bi-contiguous IPv6 networks in place
 // into a class-closed cover of the same address union.
 //
-// Duplicates and containment are removed; low-half buddies and high-half
+// Duplicates and containment are removed. Low-half buddies and high-half
 // buddies with equal canonical low sets merge. Every survivor stays in the
 // class, no class-preserving pair remains, and a second call is a set no-op.
-// The input is reordered; only the returned prefix is meaningful. Results
-// sort by numeric (mask, address), not BiContiguous.Compare. The cover is not
+// The input is reordered. Only the returned prefix is meaningful. Results
+// sort by numeric (mask, address), not [BiContiguous.Compare]. The cover is not
 // minimum: three rectangles can tile a parent with no accepted pair. For N
 // inputs and S present shapes, it is O(N*S*log N) amortized plus bounded
 // 65-level work, uses fixed stack state and allocates no heap memory.

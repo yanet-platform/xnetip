@@ -5,7 +5,7 @@
 // pattern, not only a run of leading ones. All operations — containment,
 // intersection, difference, merge, adjacency, aggregation, iteration —
 // are defined on those pairs and stay correct for non-contiguous masks.
-// Addresses at the API boundary are plain zone-free netip.Addr values,
+// Addresses at the API boundary are plain zone-free [netip.Addr] values,
 // while all mask algebra runs on host-order integers internally.
 // The package depends only on the standard library.
 package xnetip

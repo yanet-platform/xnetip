@@ -5,7 +5,7 @@ import "net/netip"
 // addr6 is an IPv6 address stored as a 128-bit integer.
 //
 // It is the internal address kernel of the IPv6 network type: the public
-// API speaks netip.Addr, while the mask algebra runs on this plain bit
+// API speaks [netip.Addr], while the mask algebra runs on this plain bit
 // pattern, which has no zone and no invalid state by construction.
 // IPv4-mapped addresses (::ffff:a.b.c.d) are ordinary IPv6 addresses
 // here, as in netip's 16-byte form.
@@ -28,10 +28,10 @@ func addr6FromBits(hi, lo uint64) addr6 {
 	return addr6{uint128FromHalves(hi, lo)}
 }
 
-// addr6FromNetip converts a netip.Addr to addr6, dropping any zone.
+// addr6FromNetip converts a [netip.Addr] to addr6, dropping any zone.
 //
-// ok is false unless a.Is6() reports true: an IPv4 address and the
-// invalid zero netip.Addr are not converted, while an IPv4-mapped
+// ok is false unless [netip.Addr.Is6] reports true: an IPv4 address and the
+// invalid zero [netip.Addr] are not converted, while an IPv4-mapped
 // address such as ::ffff:1.2.3.4 is IPv6 and converts as its 16-byte
 // form, never unmapped. A zone is discarded silently because the
 // addresses of this package are zone-free by design — a zone only scopes
@@ -55,11 +55,12 @@ func (m addr6) Bits() (hi, lo uint64) {
 	return m.bits.hi, m.bits.lo
 }
 
-// Netip returns the address as a netip.Addr (Is6 true, no zone).
+// Netip returns the address as a [netip.Addr] ([netip.Addr.Is6] true, no zone).
 //
 // The view is always valid, so it can flow into every standard API that
-// takes a netip.Addr, and converting it back always succeeds. An
-// IPv4-mapped value keeps its 16-byte form (Is4In6, not Is4).
+// takes a [netip.Addr], and converting it back always succeeds. An
+// IPv4-mapped value keeps its 16-byte form ([netip.Addr.Is4In6], not
+// [netip.Addr.Is4]).
 func (m addr6) Netip() netip.Addr {
 	return netip.AddrFrom16(m.As16())
 }
@@ -69,7 +70,7 @@ func (m addr6) Netip() netip.Addr {
 //
 // The second result is false for every address outside ::ffff:0:0/96,
 // including the deprecated IPv4-compatible form ::a.b.c.d (RFC 4291
-// section 2.5.5.1), which netip.Addr.Unmap does not unwrap either.
+// section 2.5.5.1), which [netip.Addr.Unmap] does not unwrap either.
 func (m addr6) ToIPv4Mapped() (addr4, bool) {
 	if !m.Is4In6() {
 		return addr4{}, false
@@ -93,7 +94,7 @@ func (m addr6) Is4In6() bool {
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after other.
 //
 // The order is the numeric order of the 128-bit address, high half first
-// and low half on a tie, the same order netip.Addr.Compare gives two
+// and low half on a tie, the same order [netip.Addr.Compare] gives two
 // IPv6 addresses without zones. It is the order every sorting operation
 // in this package uses for IPv6 addresses, and the key the network order
 // packs together with the mask.

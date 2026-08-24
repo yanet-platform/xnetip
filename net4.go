@@ -26,9 +26,9 @@ type Network4 struct {
 // The address is normalized by the mask: 192.168.1.1/255.255.255.0
 // becomes 192.168.1.0/255.255.255.0 and 192.168.1.1/255.255.0.255
 // becomes 192.168.0.1/255.255.0.255. Any mask bit pattern is accepted.
-// Both arguments must be Is4 addresses: an IPv6 address (IPv4-mapped
-// included) or the invalid zero netip.Addr is rejected with
-// ErrAddrFamilyMismatch.
+// Both arguments must satisfy [netip.Addr.Is4]. An IPv6 address
+// (IPv4-mapped included) or the invalid zero [netip.Addr] is rejected
+// with [ErrAddrFamilyMismatch].
 func Network4From(addr, mask netip.Addr) (Network4, error) {
 	addrKernel, addrOk := addr4FromNetip(addr)
 	maskKernel, maskOk := addr4FromNetip(mask)
@@ -52,15 +52,16 @@ func fromBits4(addr, mask addr4) Network4 {
 	}
 }
 
-// Network4FromCIDR returns the network of addr with the top bits
-// bits masked.
+// Network4FromCIDR returns the network of addr with the prefix bits
+// preserved and host bits cleared.
 //
 // Host bits of addr are cleared: 192.168.1.5 with 24 gives
-// 192.168.1.0/24, the same network netip.Prefix.Masked would report.
-// The address must be Is4 — an IPv6 address, IPv4-mapped included, or
-// the invalid zero netip.Addr is rejected with ErrAddrFamilyMismatch —
+// 192.168.1.0/24, the same network [netip.Prefix.Masked] would report.
+// The address must satisfy [netip.Addr.Is4]. An IPv6 address,
+// IPv4-mapped included, or the invalid zero [netip.Addr] is rejected
+// with [ErrAddrFamilyMismatch],
 // and bits must be in the range 0 through 32, otherwise
-// ErrCIDROverflow is returned.
+// [ErrCIDROverflow] is returned.
 func Network4FromCIDR(addr netip.Addr, bits int) (Network4, error) {
 	network, err := network4FromCIDRKernel(addr, bits)
 	if err != nil {
@@ -86,13 +87,13 @@ func network4FromCIDRKernel(addr netip.Addr, bits int) (Network4, error) {
 	return fromBits4(addrKernel, ipv4MaskFromPrefix(bits)), nil
 }
 
-// Network4FromPrefix converts a netip.Prefix into a Network4.
+// Network4FromPrefix converts a [netip.Prefix] into a [Network4].
 //
 // The result is normalized: host bits of the prefix address are
-// cleared, the same network netip.Prefix.Masked would report. ok is
-// false when the prefix is invalid or its address is not Is4 — an
-// IPv4-mapped IPv6 prefix is IPv6, convert it through
-// Network6FromPrefix instead. The inverse of Prefix.
+// cleared, the same network [netip.Prefix.Masked] would report. ok is
+// false when the prefix is invalid or its address does not satisfy
+// [netip.Addr.Is4]. An IPv4-mapped IPv6 prefix is IPv6, so convert it
+// through [Network6FromPrefix] instead. The inverse of [Network4.Prefix].
 func Network4FromPrefix(p netip.Prefix) (Network4, bool) {
 	if !p.IsValid() || !p.Addr().Is4() {
 		return Network4{}, false
@@ -105,9 +106,9 @@ func Network4FromPrefix(p netip.Prefix) (Network4, bool) {
 // addr.
 //
 // The mask is all ones (/32), so the result is normalized by
-// construction and no address bit is cleared. addr must be Is4: an
-// IPv6 address (IPv4-mapped included) or the invalid zero netip.Addr
-// is rejected with ErrAddrFamilyMismatch.
+// construction and no address bit is cleared. addr must satisfy
+// [netip.Addr.Is4]. An IPv6 address (IPv4-mapped included) or the invalid
+// zero [netip.Addr] is rejected with [ErrAddrFamilyMismatch].
 func Network4FromAddr(addr netip.Addr) (Network4, error) {
 	addrKernel, ok := addr4FromNetip(addr)
 	if !ok {
@@ -130,9 +131,9 @@ var ipv4AllBits = addr4FromBits(^uint32(0))
 // route, "/32"). The address is normalized under the mask, so
 // "10.0.0.1/8" is the network "10.0.0.0/8". The prefix length after
 // "/" is one or more decimal digits with no sign and no leading zero,
-// at most 32. Errors wrap ErrAddrFamilyMismatch (an IPv6 literal),
-// ErrCIDROverflow, ErrInvalidMask or, for text that is not an address
-// in any form, ErrParse together with the net/netip cause.
+// at most 32. Errors wrap [ErrAddrFamilyMismatch] (an IPv6 literal),
+// [ErrCIDROverflow], [ErrInvalidMask] or, for text that is not an address
+// in any form, [ErrParse] together with the net/netip cause.
 func ParseNetwork4(s string) (Network4, error) {
 	addrText, suffix, hasSuffix := strings.Cut(s, "/")
 	addr, err := netip.ParseAddr(addrText)
@@ -208,7 +209,7 @@ func parsePrefixLenText(text string, limit int) (bits int, isPrefixForm, ok bool
 }
 
 // parseText parses CIDR-block text for the generic contiguous
-// wrapper, exactly as ParseContiguous4 does, its error labels included.
+// wrapper, exactly as [ParseContiguous4] does, its error labels included.
 //
 // The receiver is a zero-value dispatch token: a generic method
 // cannot name a per-family function, so the constraint carries this
@@ -218,7 +219,7 @@ func (Network4) parseText(s string) (Network4, error) {
 	return block.Network(), err
 }
 
-// MustParseNetwork4 calls ParseNetwork4 and panics on error.
+// MustParseNetwork4 calls [ParseNetwork4] and panics on error.
 //
 // It is intended for tests and package-level constants built from
 // literals.
@@ -231,12 +232,13 @@ func MustParseNetwork4(s string) Network4 {
 }
 
 // Addr returns the network address (already normalized by the mask) as
-// an Is4 netip.Addr.
+// a [netip.Addr] satisfying [netip.Addr.Is4].
 func (m Network4) Addr() netip.Addr {
 	return m.addr.Netip()
 }
 
-// Mask returns the network mask as an Is4 netip.Addr.
+// Mask returns the network mask as a [netip.Addr] satisfying
+// [netip.Addr.Is4].
 func (m Network4) Mask() netip.Addr {
 	return m.mask.Netip()
 }
@@ -248,7 +250,8 @@ func (m Network4) Mask() netip.Addr {
 // set: masking that back yields the network address, so it is a
 // member, and no member can set a bit the mask clears beyond all of
 // them, so none is greater. Host bits need not form a trailing run
-// for either fact to hold. The result is an Is4 netip.Addr.
+// for either fact to hold. The result is a [netip.Addr] satisfying
+// [netip.Addr.Is4].
 func (m Network4) LastAddr() netip.Addr {
 	return addr4FromBits(m.addr.Bits() | ^m.mask.Bits()).Netip()
 }
@@ -267,14 +270,13 @@ func (m Network4) NumHostBits() int {
 
 // Addrs returns every address of the network in host-index order.
 //
-// The k host positions (mask bits that are zero) are filled with the
-// successive values 0 through 2^k-1, least-significant host bit
-// first. For a contiguous mask this is ascending numeric order from
-// Addr() to LastAddr(). For a non-contiguous mask the numeric order
-// of the yielded addresses differs from the iteration order. Every
-// yielded address is an Is4 netip.Addr, zone-free. The sequence is
+// The k host positions take successive values 0 through 2^k-1, with
+// the least-significant host bit first. A contiguous mask yields
+// ascending numeric order from [Network4.Addr] to [Network4.LastAddr],
+// while a non-contiguous mask may not. Each result is a zone-free
+// [netip.Addr] for which [netip.Addr.Is4] reports true. The sequence is
 // re-iterable, allocation-free and stops early when the consumer
-// breaks. The number of addresses is exactly 1 << NumHostBits().
+// breaks. Its length is exactly 1 << [Network4.NumHostBits].
 func (m Network4) Addrs() iter.Seq[netip.Addr] {
 	return func(yield func(netip.Addr) bool) {
 		base, mask := m.addr.Bits(), m.mask.Bits()
@@ -310,14 +312,15 @@ func (m Network4) Addrs() iter.Seq[netip.Addr] {
 }
 
 // AddrsBackward returns every address of the network in reverse
-// host-index order, starting at LastAddr().
+// host-index order, starting at [Network4.LastAddr].
 //
-// It yields exactly the addresses of Addrs in the opposite order, so
-// for a contiguous mask this is descending numeric order from
-// LastAddr() to Addr(). Every yielded address is an Is4 netip.Addr,
-// zone-free. The sequence is re-iterable, allocation-free and stops
-// early when the consumer breaks. The number of addresses is exactly
-// 1 << NumHostBits().
+// It yields exactly the addresses of [Network4.Addrs] in the opposite
+// order. For a contiguous mask this is descending numeric order from
+// [Network4.LastAddr] to [Network4.Addr]. Every yielded address is a
+// zone-free [netip.Addr] for which [netip.Addr.Is4] reports true. The
+// sequence is re-iterable, allocation-free and stops early when the
+// consumer breaks. The number of addresses is exactly 1 <<
+// [Network4.NumHostBits].
 func (m Network4) AddrsBackward() iter.Seq[netip.Addr] {
 	return func(yield func(netip.Addr) bool) {
 		base, mask := m.addr.Bits(), m.mask.Bits()
@@ -359,8 +362,7 @@ func (m Network4) AddrsBackward() iter.Seq[netip.Addr] {
 // unsigned 32-bit integers: the address decides first and the mask
 // breaks ties, so a container sorts before the networks nested under
 // the same address. This order is a documented contract: it is the
-// sort Aggregate4 applies before its greedy pass and the order
-// BinarySplit4 expects of its input.
+// order [Aggregate4] applies before its greedy pass.
 func (m Network4) Compare(other Network4) int {
 	if order := m.addr.Compare(other.addr); order != 0 {
 		return order
@@ -390,7 +392,7 @@ func (m Network4) Contains(other Network4) bool {
 	return a2&m1 == a1 && m2&m1 == m1
 }
 
-// containsContiguous is Contains for two CIDR networks, the
+// containsContiguous is [Network4.Contains] for two CIDR networks, the
 // mask-subset conjunct collapsed to one unsigned compare.
 //
 // With this network as `(a1, m1)` and the other as `(a2, m2)`, both
@@ -408,11 +410,11 @@ func (m Network4) containsContiguous(other Network4) bool {
 
 // ContainsAddr reports whether addr is an address of this network.
 //
-// The test is total, the netip.Prefix.Contains rule: an address that
-// is not Is4 — an IPv6 address, IPv4-mapped included, or the invalid
-// zero netip.Addr — is simply not contained. The mask may be
-// non-contiguous: membership is agreement with the network address on
-// every mask bit. Equivalent to Contains of the host route of addr,
+// The test is total, following [netip.Prefix.Contains]. An address that
+// does not satisfy [netip.Addr.Is4] — an IPv6 address, IPv4-mapped
+// included, or the invalid zero [netip.Addr] — is simply not contained.
+// The mask may be non-contiguous: membership is agreement with the network address on
+// every mask bit. Equivalent to [Network4.Contains] of the host route of addr,
 // without the construction.
 func (m Network4) ContainsAddr(addr netip.Addr) bool {
 	// The network address is normalized, so masking the argument
@@ -457,7 +459,7 @@ func (m Network4) Intersection(other Network4) (Network4, bool) {
 // address.
 //
 // Two networks intersect when their addresses agree on every bit that
-// both masks constrain. The check is equivalent to Intersection
+// both masks constrain. The check is equivalent to [Network4.Intersection]
 // returning ok, and holds for non-contiguous masks. A network always
 // intersects itself and the unspecified network 0.0.0.0/0 intersects
 // everything.
@@ -468,7 +470,7 @@ func (m Network4) Intersects(other Network4) bool {
 
 // IsDisjoint reports whether the two networks share no address.
 //
-// It is the logical complement of Intersects and holds the same
+// It is the logical complement of [Network4.Intersects] and holds the same
 // guarantees for non-contiguous masks.
 func (m Network4) IsDisjoint(other Network4) bool {
 	return !m.Intersects(other)
@@ -622,7 +624,7 @@ func (m Network4) Merge(other Network4) (Network4, bool) {
 // IsAdjacentByLowestMaskBit reports whether the two networks share a
 // mask and differ in exactly the lowest set bit of that mask.
 //
-// It is the restriction of IsAdjacent to the boundary bit between a
+// It is the restriction of [Network4.IsAdjacent] to the boundary bit between a
 // block and its parent: every pair accepted here is adjacent, but
 // adjacency at any higher masked bit is rejected. Merging such a pair
 // never leaves the mask's structural class, so two contiguous
@@ -645,10 +647,10 @@ func (m Network4) IsAdjacentByLowestMaskBit(other Network4) bool {
 // false: containment returns the larger network, and a sibling pair
 // sharing a mask and differing in precisely its lowest set bit
 // returns the common address under that mask with the bit removed.
-// Adjacency at any higher masked bit is refused even though Merge
+// Adjacency at any higher masked bit is refused even though [Network4.Merge]
 // accepts it, so the result stays in the inputs' class — for a
 // non-contiguous mask only the lowest run's boundary bit is a merge
-// point. Whenever ok is true the result equals Merge's.
+// point. Whenever ok is true the result equals [Network4.Merge]'s.
 func (m Network4) MergeByLowestMaskBit(other Network4) (Network4, bool) {
 	if m.mask == other.mask {
 		if m.addr == other.addr {
@@ -739,12 +741,12 @@ func (m Network4) PrefixLen() (int, bool) {
 	return bits.LeadingZeros32(^m.mask.Bits()), true
 }
 
-// Prefix returns the network as a netip.Prefix.
+// Prefix returns the network as a [netip.Prefix].
 //
-// ok is false when the mask is not contiguous, because netip.Prefix
+// ok is false when the mask is not contiguous, because [netip.Prefix]
 // can only express prefix lengths, and the first result is then the
-// invalid zero netip.Prefix. The returned prefix is already masked.
-// The inverse of Network4FromPrefix.
+// invalid zero [netip.Prefix]. The returned prefix is already masked.
+// The inverse of [Network4FromPrefix].
 func (m Network4) Prefix() (netip.Prefix, bool) {
 	bits, ok := m.PrefixLen()
 	if !ok {
@@ -760,7 +762,7 @@ func (m Network4) Prefix() (netip.Prefix, bool) {
 // non-contiguous mask every one bit after the first zero bit is
 // cleared, so the block is spanned by the leading run and contains
 // every address of this network. The exact, non-widening conversion
-// is ContiguousFrom.
+// is [ContiguousFrom].
 func (m Network4) ToContiguous() Contiguous[Network4] {
 	// The mask's leading ones are its complement's leading zeros.
 	//
@@ -770,7 +772,7 @@ func (m Network4) ToContiguous() Contiguous[Network4] {
 	return Contiguous[Network4]{network: fromBits4(m.addr, mask)}
 }
 
-// String returns the text form of the network, see AppendTo.
+// String returns the text form of the network, see [Network4.AppendTo].
 func (m Network4) String() string {
 	// The buffer covers the longest form (a dotted mask, 31 bytes),
 	// so the string conversion is the only allocation.
@@ -784,7 +786,7 @@ func (m Network4) String() string {
 // A contiguous network is written as "addr/prefix", a non-contiguous
 // one as "addr/mask" with the mask in dotted-decimal form. The suffix
 // is always present, so a host route is written with "/32". The output
-// parses back with ParseNetwork4.
+// parses back with [ParseNetwork4].
 func (m Network4) AppendTo(b []byte) []byte {
 	b = m.addr.AppendTo(b)
 	b = append(b, '/')
@@ -794,9 +796,9 @@ func (m Network4) AppendTo(b []byte) []byte {
 	return m.mask.AppendTo(b)
 }
 
-// MarshalText implements encoding.TextMarshaler.
+// MarshalText implements [encoding.TextMarshaler].
 //
-// The text is the String form of the network: an address, "/" and
+// The text is the [Network4.String] form of the network: an address, "/" and
 // either a prefix length (contiguous mask) or a dotted mask
 // (non-contiguous mask). It never fails and allocates only the
 // returned slice.
@@ -804,11 +806,11 @@ func (m Network4) MarshalText() ([]byte, error) {
 	return m.AppendTo(make([]byte, 0, len("255.255.255.255/255.255.255.255"))), nil
 }
 
-// UnmarshalText implements encoding.TextUnmarshaler.
+// UnmarshalText implements [encoding.TextUnmarshaler].
 //
-// The text must be accepted by ParseNetwork4. Empty text wraps
-// ErrEmptyInput rather than yielding the zero value the way it yields
-// the invalid zero netip.Prefix: the zero Network4 is the valid
+// The text must be accepted by [ParseNetwork4]. Empty text wraps
+// [ErrEmptyInput] rather than yielding the zero value the way it yields
+// the invalid zero [netip.Prefix]: the zero [Network4] is the valid
 // network 0.0.0.0/0, so empty text would silently hide a missing
 // field. The receiver is untouched on any error.
 func (m *Network4) UnmarshalText(text []byte) error {
@@ -829,13 +831,13 @@ func (m *Network4) UnmarshalText(text []byte) error {
 // bits set, so the result pins the mapped prefix and carries the IPv4
 // mask, contiguous or not, in its low 32 bits. Set relations are
 // preserved: two IPv4 networks contain or intersect each other exactly
-// when their mapped forms do. Network6.ToIPv4Mapped inverts it.
+// when their mapped forms do. [Network6.ToIPv4Mapped] inverts it.
 func (m Network4) ToIPv6Mapped() Network6 {
 	mappedMask := addr6FromBits(^uint64(0), 0xffffffff_00000000|uint64(m.mask.Bits()))
 	return fromBits6(m.addr.ToIPv6Mapped(), mappedMask)
 }
 
-// Network returns this IPv4 network as a Network.
+// Network returns this IPv4 network as a [Network].
 func (m Network4) Network() Network {
 	return NetworkFrom4(m)
 }

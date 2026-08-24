@@ -29,10 +29,10 @@ type Network6 struct {
 // The address is normalized by the mask:
 // 2a02:6b8:c00:1:2:3:4:5/ffff:ffff:ff00:: becomes
 // 2a02:6b8:c00::/ffff:ffff:ff00::. Any mask bit pattern is accepted.
-// Both arguments must be Is6 addresses (an IPv4-mapped address is IPv6
-// and converts as its 16-byte form, a zone is dropped silently): an Is4
-// address or the invalid zero netip.Addr is rejected with
-// ErrAddrFamilyMismatch.
+// Both arguments must satisfy [netip.Addr.Is6]. An IPv4-mapped address is
+// IPv6 and converts as its 16-byte form, while a zone is dropped silently.
+// An address satisfying [netip.Addr.Is4] or the invalid zero [netip.Addr]
+// is rejected with [ErrAddrFamilyMismatch].
 func Network6From(addr, mask netip.Addr) (Network6, error) {
 	addrKernel, addrOk := addr6FromNetip(addr)
 	maskKernel, maskOk := addr6FromNetip(mask)
@@ -56,16 +56,17 @@ func fromBits6(addr, mask addr6) Network6 {
 	}
 }
 
-// Network6FromCIDR returns the network of addr with the top bits
-// bits masked.
+// Network6FromCIDR returns the network of addr with the prefix bits
+// preserved and host bits cleared.
 //
 // Host bits of addr are cleared: 2001:db8::1 with 64 gives
-// 2001:db8::/64, the same network netip.Prefix.Masked would report.
-// The address must be Is6 (an IPv4-mapped address is IPv6 and converts
-// as its 16-byte form, a zone is dropped silently) — an Is4 address or
-// the invalid zero netip.Addr is rejected with ErrAddrFamilyMismatch —
+// 2001:db8::/64, the same network [netip.Prefix.Masked] would report.
+// The address must satisfy [netip.Addr.Is6]. An IPv4-mapped address is
+// IPv6 and converts as its 16-byte form, while a zone is dropped silently.
+// An address satisfying [netip.Addr.Is4] or the invalid zero [netip.Addr]
+// is rejected with [ErrAddrFamilyMismatch],
 // and bits must be in the range 0 through 128, otherwise
-// ErrCIDROverflow is returned.
+// [ErrCIDROverflow] is returned.
 func Network6FromCIDR(addr netip.Addr, bits int) (Network6, error) {
 	network, err := network6FromCIDRKernel(addr, bits)
 	if err != nil {
@@ -91,15 +92,15 @@ func network6FromCIDRKernel(addr netip.Addr, bits int) (Network6, error) {
 	return fromBits6(addrKernel, addr6{uint128MaskFromPrefix(bits)}), nil
 }
 
-// Network6FromPrefix converts a netip.Prefix into a Network6.
+// Network6FromPrefix converts a [netip.Prefix] into a [Network6].
 //
 // The result is normalized: host bits of the prefix address are
-// cleared, the same network netip.Prefix.Masked would report. An
+// cleared, the same network [netip.Prefix.Masked] would report. An
 // IPv4-mapped IPv6 prefix (::ffff:a.b.c.d/n) is IPv6 and is accepted,
-// and a zone never appears because netip.Prefix carries none. ok is
-// false when the prefix is invalid or its address is Is4 — convert
-// that one through Network4FromPrefix instead. The inverse of
-// Prefix.
+// and a zone never appears because [netip.Prefix] carries none. ok is
+// false when the prefix is invalid or its address satisfies
+// [netip.Addr.Is4]. Convert that one through [Network4FromPrefix]
+// instead. The inverse of [Network6.Prefix].
 func Network6FromPrefix(p netip.Prefix) (Network6, bool) {
 	if !p.IsValid() || !p.Addr().Is6() {
 		return Network6{}, false
@@ -112,10 +113,10 @@ func Network6FromPrefix(p netip.Prefix) (Network6, bool) {
 // addr.
 //
 // The mask is all ones (/128), so the result is normalized by
-// construction and no address bit is cleared. addr must be Is6 (an
-// IPv4-mapped address is IPv6, a zone is dropped silently): an Is4
-// address or the invalid zero netip.Addr is rejected with
-// ErrAddrFamilyMismatch.
+// construction and no address bit is cleared. addr must satisfy
+// [netip.Addr.Is6]. An IPv4-mapped address is IPv6, and a zone is dropped
+// silently. An address satisfying [netip.Addr.Is4] or the invalid zero
+// [netip.Addr] is rejected with [ErrAddrFamilyMismatch].
 func Network6FromAddr(addr netip.Addr) (Network6, error) {
 	addrKernel, ok := addr6FromNetip(addr)
 	if !ok {
@@ -139,8 +140,8 @@ var ipv6AllBits = addr6FromBits(^uint64(0), ^uint64(0))
 // here. The address is normalized under the mask. The prefix length
 // after "/" is decimal digits with no sign and no leading zero, at
 // most 128. A zone suffix ("%eth0") anywhere is an error. Errors wrap
-// ErrZone, ErrAddrFamilyMismatch (an IPv4 literal), ErrCIDROverflow,
-// ErrInvalidMask or ErrParse together with the net/netip cause.
+// [ErrZone], [ErrAddrFamilyMismatch] (an IPv4 literal), [ErrCIDROverflow],
+// [ErrInvalidMask] or [ErrParse] together with the net/netip cause.
 func ParseNetwork6(s string) (Network6, error) {
 	addrText, suffix, hasSuffix := strings.Cut(s, "/")
 	addr, err := netip.ParseAddr(addrText)
@@ -187,8 +188,8 @@ func parseNetwork6Parts(function, input string, addr netip.Addr, suffix string, 
 // rejecting what the parsers must not accept.
 //
 // Unlike the checked constructors, which drop a zone silently, parse
-// input carrying a zone is an error: the result is the bare ErrZone or
-// ErrAddrFamilyMismatch sentinel for the caller to wrap under its own
+// input carrying a zone is an error: the result is the bare [ErrZone] or
+// [ErrAddrFamilyMismatch] sentinel for the caller to wrap under its own
 // position, address or mask.
 func ipv6ParsedKernel(addr netip.Addr) (addr6, error) {
 	if addr.Zone() != "" {
@@ -202,7 +203,7 @@ func ipv6ParsedKernel(addr netip.Addr) (addr6, error) {
 }
 
 // parseText parses CIDR-block text for the generic contiguous
-// wrapper, exactly as ParseContiguous6 does, its error labels included.
+// wrapper, exactly as [ParseContiguous6] does, its error labels included.
 //
 // The receiver is a zero-value dispatch token: a generic method
 // cannot name a per-family function, so the constraint carries this
@@ -212,7 +213,7 @@ func (Network6) parseText(s string) (Network6, error) {
 	return block.Network(), err
 }
 
-// MustParseNetwork6 calls ParseNetwork6 and panics on error.
+// MustParseNetwork6 calls [ParseNetwork6] and panics on error.
 //
 // It is intended for tests and package-level constants built from
 // literals.
@@ -225,12 +226,13 @@ func MustParseNetwork6(s string) Network6 {
 }
 
 // Addr returns the network address (already normalized by the mask) as
-// an Is6 netip.Addr.
+// a [netip.Addr] satisfying [netip.Addr.Is6].
 func (m Network6) Addr() netip.Addr {
 	return m.addr.Netip()
 }
 
-// Mask returns the network mask as an Is6 netip.Addr.
+// Mask returns the network mask as a [netip.Addr] satisfying
+// [netip.Addr.Is6].
 func (m Network6) Mask() netip.Addr {
 	return m.mask.Netip()
 }
@@ -242,8 +244,8 @@ func (m Network6) Mask() netip.Addr {
 // every host bit set: masking that back yields the network address,
 // so it is a member, and no member can set a bit the mask clears
 // beyond all of them, so none is greater. Host bits need not form a
-// trailing run for either fact to hold. The result is an Is6
-// netip.Addr, zone-free.
+// trailing run for either fact to hold. The result is a zone-free
+// [netip.Addr] satisfying [netip.Addr.Is6].
 func (m Network6) LastAddr() netip.Addr {
 	return addr6{m.addr.bits.Or(m.mask.bits.Not())}.Netip()
 }
@@ -262,14 +264,14 @@ func (m Network6) NumHostBits() int {
 
 // Addrs returns every address of the network in host-index order.
 //
-// The k host positions (mask bits that are zero) are filled with the
-// successive values 0 through 2^k-1, least-significant host bit
-// first. For a contiguous mask this is ascending numeric order from
-// Addr() to LastAddr(), for a non-contiguous mask the numeric order
-// differs from the iteration order. Every yielded address is an Is6
-// netip.Addr, zone-free. The sequence is re-iterable, allocation-free
-// and stops early when the consumer breaks. The count is exactly
-// 1 << NumHostBits(), which may exceed any integer type.
+// The k host positions take successive values 0 through 2^k-1, with
+// the least-significant host bit first. A contiguous mask yields
+// ascending numeric order from [Network6.Addr] to [Network6.LastAddr],
+// while a non-contiguous mask may not. Each result is a zone-free
+// [netip.Addr] for which [netip.Addr.Is6] reports true. The sequence is
+// re-iterable, allocation-free and stops early when the consumer
+// breaks. Its length is 1 << [Network6.NumHostBits], which may exceed
+// any integer type.
 func (m Network6) Addrs() iter.Seq[netip.Addr] {
 	return func(yield func(netip.Addr) bool) {
 		base, mask := m.addr.bits, m.mask.bits
@@ -305,14 +307,15 @@ func (m Network6) Addrs() iter.Seq[netip.Addr] {
 }
 
 // AddrsBackward returns every address of the network in reverse
-// host-index order, starting at LastAddr().
+// host-index order, starting at [Network6.LastAddr].
 //
-// It yields exactly the addresses of Addrs in the opposite order, so
-// for a contiguous mask this is descending numeric order from
-// LastAddr() to Addr(). Every yielded address is an Is6 netip.Addr,
-// zone-free. The sequence is re-iterable, allocation-free and stops
-// early when the consumer breaks. The number of addresses is exactly
-// 1 << NumHostBits().
+// It yields exactly the addresses of [Network6.Addrs] in the opposite
+// order. For a contiguous mask this is descending numeric order from
+// [Network6.LastAddr] to [Network6.Addr]. Every yielded address is a
+// zone-free [netip.Addr] for which [netip.Addr.Is6] reports true. The
+// sequence is re-iterable, allocation-free and stops early when the
+// consumer breaks. The number of addresses is exactly 1 <<
+// [Network6.NumHostBits].
 func (m Network6) AddrsBackward() iter.Seq[netip.Addr] {
 	return func(yield func(netip.Addr) bool) {
 		base, mask := m.addr.bits, m.mask.bits
@@ -354,8 +357,7 @@ func (m Network6) AddrsBackward() iter.Seq[netip.Addr] {
 // unsigned 128-bit integers: the address decides first and the mask
 // breaks ties, so a container sorts before the networks nested under
 // the same address. This order is a documented contract: it is the
-// sort Aggregate6 applies before its greedy pass and the order
-// BinarySplit6 expects of its input.
+// order [Aggregate6] applies before its greedy pass.
 func (m Network6) Compare(other Network6) int {
 	if order := m.addr.Compare(other.addr); order != 0 {
 		return order
@@ -385,7 +387,7 @@ func (m Network6) Contains(other Network6) bool {
 	return a2.And(m1) == a1 && m2.And(m1) == m1
 }
 
-// containsContiguous is Contains for two CIDR networks, the
+// containsContiguous is [Network6.Contains] for two CIDR networks, the
 // mask-subset conjunct collapsed to one unsigned compare.
 //
 // With this network as `(a1, m1)` and the other as `(a2, m2)`, both
@@ -403,18 +405,19 @@ func (m Network6) containsContiguous(other Network6) bool {
 
 // ContainsAddr reports whether addr is an address of this network.
 //
-// The test is total, the netip.Prefix.Contains rule: an address that
-// is not Is6 — an Is4 address or the invalid zero netip.Addr — is
+// The test is total, following [netip.Prefix.Contains]. An address that
+// does not satisfy [netip.Addr.Is6] — one satisfying [netip.Addr.Is4]
+// or the invalid zero [netip.Addr] — is
 // simply not contained, and an address carrying a zone is not
 // contained either. An IPv4-mapped address is IPv6 and is tested by
 // its 16-byte form. The mask may be non-contiguous: membership is
 // agreement with the network address on every mask bit. Equivalent to
-// Contains of the host route of addr, without the construction.
+// [Network6.Contains] of the host route of addr, without the construction.
 func (m Network6) ContainsAddr(addr netip.Addr) bool {
 	// The zone check must precede the conversion, which drops zones
 	// silently.
 	//
-	// Relational operations mirror netip.Prefix.Contains, where a
+	// Relational operations mirror [netip.Prefix.Contains], where a
 	// zoned address is never contained. The network address is
 	// normalized, so masking the argument alone decides membership.
 	if addr.Zone() != "" {
@@ -460,7 +463,7 @@ func (m Network6) Intersection(other Network6) (Network6, bool) {
 // address.
 //
 // Two networks intersect when their addresses agree on every bit that
-// both masks constrain. The check is equivalent to Intersection
+// both masks constrain. The check is equivalent to [Network6.Intersection]
 // returning ok, and holds for non-contiguous masks. A network always
 // intersects itself and the unspecified network ::/0 intersects
 // everything.
@@ -471,7 +474,7 @@ func (m Network6) Intersects(other Network6) bool {
 
 // IsDisjoint reports whether the two networks share no address.
 //
-// It is the logical complement of Intersects and holds the same
+// It is the logical complement of [Network6.Intersects] and holds the same
 // guarantees for non-contiguous masks.
 func (m Network6) IsDisjoint(other Network6) bool {
 	return !m.Intersects(other)
@@ -625,7 +628,7 @@ func (m Network6) Merge(other Network6) (Network6, bool) {
 // IsAdjacentByLowestMaskBit reports whether the two networks share a
 // mask and differ in exactly the lowest set bit of that mask.
 //
-// It is the restriction of IsAdjacent to the boundary bit between a
+// It is the restriction of [Network6.IsAdjacent] to the boundary bit between a
 // block and its parent: every pair accepted here is adjacent, but
 // adjacency at any higher masked bit is rejected. Merging such a pair
 // never leaves the mask's structural class, so two contiguous
@@ -648,10 +651,10 @@ func (m Network6) IsAdjacentByLowestMaskBit(other Network6) bool {
 // false: containment returns the larger network, and a sibling pair
 // sharing a mask and differing in precisely its lowest set bit
 // returns the common address under that mask with the bit removed.
-// Adjacency at any higher masked bit is refused even though Merge
+// Adjacency at any higher masked bit is refused even though [Network6.Merge]
 // accepts it, so the result stays in the inputs' class — for a
 // non-contiguous mask only the lowest run's boundary bit is a merge
-// point. Whenever ok is true the result equals Merge's.
+// point. Whenever ok is true the result equals [Network6.Merge]'s.
 func (m Network6) MergeByLowestMaskBit(other Network6) (Network6, bool) {
 	if m.mask == other.mask {
 		if m.addr == other.addr {
@@ -757,12 +760,12 @@ func (m Network6) PrefixLen() (int, bool) {
 	return m.mask.bits.LeadingOnes(), true
 }
 
-// Prefix returns the network as a netip.Prefix.
+// Prefix returns the network as a [netip.Prefix].
 //
-// ok is false when the mask is not contiguous, because netip.Prefix
+// ok is false when the mask is not contiguous, because [netip.Prefix]
 // can only express prefix lengths, and the first result is then the
-// invalid zero netip.Prefix. The returned prefix is already masked
-// and carries no zone. The inverse of Network6FromPrefix.
+// invalid zero [netip.Prefix]. The returned prefix is already masked
+// and carries no zone. The inverse of [Network6FromPrefix].
 func (m Network6) Prefix() (netip.Prefix, bool) {
 	bits, ok := m.PrefixLen()
 	if !ok {
@@ -778,7 +781,7 @@ func (m Network6) Prefix() (netip.Prefix, bool) {
 // non-contiguous mask every one bit after the first zero bit is
 // cleared, so the block is spanned by the leading run and contains
 // every address of this network. The exact, non-widening conversion
-// is ContiguousFrom.
+// is [ContiguousFrom].
 func (m Network6) ToContiguous() Contiguous[Network6] {
 	// A mask rebuilt from the leading-ones count is a leading run by
 	// construction, so the result is wrapped without revalidation.
@@ -791,8 +794,8 @@ func (m Network6) ToContiguous() Contiguous[Network6] {
 //
 // Each mask half keeps its longest leading run of one bits and clears
 // every later constrained bit. The address is normalized under the
-// widened mask. A bi-contiguous network is returned wrapped unchanged;
-// the exact, non-widening conversion is BiContiguousFrom6.
+// widened mask. A bi-contiguous network is returned wrapped unchanged.
+// The exact, non-widening conversion is [BiContiguousFrom6].
 func (m Network6) ToBiContiguous() BiContiguous {
 	mask := m.mask.bits
 	widenedMask := addr6{uint128FromHalves(
@@ -802,7 +805,7 @@ func (m Network6) ToBiContiguous() BiContiguous {
 	return BiContiguous{network6: fromBits6(m.addr, widenedMask)}
 }
 
-// String returns the text form of the network, see AppendTo.
+// String returns the text form of the network, see [Network6.AppendTo].
 func (m Network6) String() string {
 	// The buffer covers the longest form (address and mask of 39
 	// bytes each), so the string conversion is the only allocation.
@@ -816,7 +819,7 @@ func (m Network6) String() string {
 // A contiguous network is written as "addr/prefix", a non-contiguous
 // one as "addr/mask" with the mask in the same compressed form as an
 // address. The suffix is always present, so a host route is written
-// with "/128". The output parses back with ParseNetwork6.
+// with "/128". The output parses back with [ParseNetwork6].
 func (m Network6) AppendTo(b []byte) []byte {
 	b = m.addr.AppendTo(b)
 	b = append(b, '/')
@@ -826,9 +829,9 @@ func (m Network6) AppendTo(b []byte) []byte {
 	return m.mask.AppendTo(b)
 }
 
-// MarshalText implements encoding.TextMarshaler.
+// MarshalText implements [encoding.TextMarshaler].
 //
-// The text is the String form of the network: a compressed address,
+// The text is the [Network6.String] form of the network: a compressed address,
 // "/" and either a prefix length (contiguous mask) or a colon-form
 // mask (non-contiguous mask). It never fails and allocates only the
 // returned slice.
@@ -836,12 +839,12 @@ func (m Network6) MarshalText() ([]byte, error) {
 	return m.AppendTo(make([]byte, 0, maxNetworkTextLen)), nil
 }
 
-// UnmarshalText implements encoding.TextUnmarshaler.
+// UnmarshalText implements [encoding.TextUnmarshaler].
 //
-// The text must be accepted by ParseNetwork6, so a zone suffix is
-// rejected. Empty text wraps ErrEmptyInput rather than yielding the
-// zero value the way it yields the invalid zero netip.Prefix: the zero
-// Network6 is the valid network ::/0, so empty text would silently
+// The text must be accepted by [ParseNetwork6], so a zone suffix is
+// rejected. Empty text wraps [ErrEmptyInput] rather than yielding the
+// zero value the way it yields the invalid zero [netip.Prefix]. The zero
+// [Network6] is the valid network ::/0, so empty text would silently
 // hide a missing field. The receiver is untouched on any error.
 func (m *Network6) UnmarshalText(text []byte) error {
 	if len(text) == 0 {
@@ -860,7 +863,7 @@ func (m *Network6) UnmarshalText(text []byte) error {
 //
 // True when the address lies in ::ffff:0:0/96 and the mask keeps all
 // of those upper 96 bits, so the network is exactly the image of an
-// IPv4 network under Network4.ToIPv6Mapped. An address with the
+// IPv4 network under [Network4.ToIPv6Mapped]. An address with the
 // ::ffff pattern under a mask that does not pin the upper bits is not
 // mapped: collapsing it to IPv4 would lose addresses.
 func (m Network6) IsIPv4MappedIPv6() bool {
@@ -872,9 +875,9 @@ func (m Network6) IsIPv4MappedIPv6() bool {
 // encodes.
 //
 // The result is the low 32 bits of the address and the mask, valid
-// only when IsIPv4MappedIPv6 holds, otherwise ok is false. Truncation
+// only when [Network6.IsIPv4MappedIPv6] holds, otherwise ok is false. Truncation
 // preserves normalization, because the upper 96 bits of a mapped
-// network are fully masked. The inverse of Network4.ToIPv6Mapped.
+// network are fully masked. The inverse of [Network4.ToIPv6Mapped].
 func (m Network6) ToIPv4Mapped() (Network4, bool) {
 	if !m.IsIPv4MappedIPv6() {
 		return Network4{}, false
@@ -884,7 +887,7 @@ func (m Network6) ToIPv4Mapped() (Network4, bool) {
 	return fromBits4(addr4FromBits(uint32(addrLo)), addr4FromBits(uint32(maskLo))), true
 }
 
-// Network returns this IPv6 network as a Network.
+// Network returns this IPv6 network as a [Network].
 func (m Network6) Network() Network {
 	return NetworkFrom6(m)
 }

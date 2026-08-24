@@ -28,9 +28,9 @@ func halfPrefixMask(prefix int) uint64 {
 // ParseBiContiguous parses an IPv6 network whose two mask halves are
 // independently contiguous.
 //
-// The grammar and ordinary parse errors are exactly ParseNetwork6's.
+// The grammar and ordinary parse errors are exactly [ParseNetwork6]'s.
 // A valid network whose mask has an interior hole in either 64-bit
-// half instead wraps ErrNonBiContiguousMask under this function's
+// half instead wraps [ErrNonBiContiguousMask] under this function's
 // name.
 func ParseBiContiguous(s string) (BiContiguous, error) {
 	network, err := ParseNetwork6(s)
@@ -48,7 +48,7 @@ func ParseBiContiguous(s string) (BiContiguous, error) {
 	return BiContiguous{network6: network}, nil
 }
 
-// MustParseBiContiguous calls ParseBiContiguous and panics on error.
+// MustParseBiContiguous calls [ParseBiContiguous] and panics on error.
 //
 // It is intended for tests and package-level constants built from
 // literals.
@@ -63,11 +63,11 @@ func MustParseBiContiguous(s string) BiContiguous {
 // BiContiguousFrom returns the normalized bi-contiguous network
 // with the given IPv6 address and mask.
 //
-// Both arguments must be Is6 addresses. IPv4-mapped IPv6 is accepted
-// and zones are dropped silently. An Is4 or invalid zero address wraps
-// ErrAddrFamilyMismatch. A valid mask whose 64-bit halves are not each
-// leading runs of ones wraps ErrNonBiContiguousMask. The zero wrapper is
-// returned on every error.
+// Both arguments must satisfy [netip.Addr.Is6]. IPv4-mapped IPv6 is accepted
+// and zones are dropped silently. An address satisfying [netip.Addr.Is4] or
+// an invalid zero address wraps [ErrAddrFamilyMismatch]. A valid mask whose
+// 64-bit halves are not each leading runs of ones wraps
+// [ErrNonBiContiguousMask]. The zero wrapper is returned on every error.
 func BiContiguousFrom(addr, mask netip.Addr) (BiContiguous, error) {
 	addrKernel, addrOk := addr6FromNetip(addr)
 	maskKernel, maskOk := addr6FromNetip(mask)
@@ -156,7 +156,7 @@ func (m BiContiguous) Compare(other BiContiguous) int {
 //
 // Each mask half is a leading run of ones, so a receiver half constrains
 // a subset of the other's bits exactly when its unsigned mask word is no
-// greater. Checking both halves replaces the general whole-mask subset AND;
+// greater. Checking both halves replaces the general whole-mask subset AND.
 // normalized addresses still must agree on every receiver-constrained bit.
 func (m BiContiguous) Contains(other BiContiguous) bool {
 	receiverMask := m.network6.mask.bits
@@ -230,8 +230,9 @@ func (m BiContiguous) Difference(other BiContiguous) iter.Seq[BiContiguous] {
 //
 // The low half's host counter cycles fastest and carries into the high
 // half after its trailing host run is exhausted. The order, membership
-// and count are exactly those of the wrapped network's Addrs sequence.
-// Every yielded address is an Is6 netip.Addr, zone-free. The sequence is
+// and count are exactly those of the wrapped [Network6.Addrs] sequence.
+// Every yielded address is a zone-free [netip.Addr] satisfying
+// [netip.Addr.Is6]. The sequence is
 // re-iterable, allocation-free and stops early when the consumer breaks.
 func (m BiContiguous) Addrs() iter.Seq[netip.Addr] {
 	return func(yield func(netip.Addr) bool) {
@@ -277,9 +278,9 @@ func (m BiContiguous) Addrs() iter.Seq[netip.Addr] {
 //
 // The low half's host counter decrements fastest and borrows from the high
 // half after reaching zero. The order, membership and count are exactly those
-// of the wrapped network's AddrsBackward sequence. Every yielded address is
-// an Is6 netip.Addr, zone-free. The sequence is re-iterable, allocation-free
-// and stops early when the consumer breaks.
+// of the wrapped [Network6.AddrsBackward] sequence. Every yielded address is
+// a zone-free [netip.Addr] satisfying [netip.Addr.Is6]. The sequence is
+// re-iterable, allocation-free and stops early when the consumer breaks.
 func (m BiContiguous) AddrsBackward() iter.Seq[netip.Addr] {
 	return func(yield func(netip.Addr) bool) {
 		base := m.network6.addr.bits
@@ -327,9 +328,9 @@ func (m BiContiguous) AddrsBackward() iter.Seq[netip.Addr] {
 
 // String returns the canonical text form of the bi-contiguous network.
 //
-// The format is exactly the wrapped IPv6 network's: a globally contiguous
-// mask uses a prefix length, while a genuine two-run mask is written as a
-// compressed IPv6 address. The output parses back with ParseBiContiguous.
+// The format matches [Network6.String]: a globally contiguous mask uses a
+// prefix length, while a genuine two-run mask is written as an explicit
+// compressed IPv6 mask. The output parses back with [ParseBiContiguous].
 func (m BiContiguous) String() string {
 	// The buffer covers the longest address-plus-mask form, so the string
 	// conversion is the only allocation.
@@ -339,24 +340,24 @@ func (m BiContiguous) String() string {
 
 // AppendTo appends the canonical text form to b.
 //
-// The format is exactly the wrapped IPv6 network's, including its choice
-// between a decimal prefix length and an explicit compressed mask.
+// The format matches [Network6.AppendTo], including its choice between a
+// decimal prefix length and an explicit compressed mask.
 func (m BiContiguous) AppendTo(b []byte) []byte {
 	return m.network6.AppendTo(b)
 }
 
-// MarshalText implements encoding.TextMarshaler.
+// MarshalText implements [encoding.TextMarshaler].
 //
-// The text is the String form of the bi-contiguous network. It never fails
+// The text is the [BiContiguous.String] form of the network. It never fails
 // and allocates only the returned slice.
 func (m BiContiguous) MarshalText() ([]byte, error) {
 	return m.AppendTo(make([]byte, 0, maxNetworkTextLen)), nil
 }
 
-// UnmarshalText implements encoding.TextUnmarshaler.
+// UnmarshalText implements [encoding.TextUnmarshaler].
 //
-// The text must be accepted by ParseBiContiguous. Empty text wraps
-// ErrEmptyInput because the zero wrapper is a valid block. The receiver is
+// The text must be accepted by [ParseBiContiguous]. Empty text wraps
+// [ErrEmptyInput] because the zero wrapper is a valid block. The receiver is
 // untouched on every error.
 func (m *BiContiguous) UnmarshalText(text []byte) error {
 	if len(text) == 0 {

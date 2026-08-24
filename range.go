@@ -12,10 +12,10 @@ import (
 // Blocks are yielded in ascending order and are pairwise disjoint,
 // each one a typed CIDR block aligned to its own size, and no CIDR
 // decomposition of the interval uses fewer blocks (at most 62). The
-// function is total: the sequence is empty when first > last, and
-// when either end — an IPv6 end (IPv4-mapped included) or the
-// invalid zero Addr — is not an Is4 netip.Addr, because such an
-// interval holds no IPv4 addresses. The sequence is allocation-free
+// function is total: the sequence is empty when first > last or either
+// end fails [netip.Addr.Is4]. An IPv6 end (IPv4-mapped included) and
+// the invalid zero [netip.Addr] both fail that predicate, because such
+// an interval holds no IPv4 addresses. The sequence is allocation-free
 // and re-iterable.
 func RangeToNetworks4(first, last netip.Addr) iter.Seq[Contiguous[Network4]] {
 	return func(yield func(Contiguous[Network4]) bool) {
@@ -82,13 +82,12 @@ func RangeToNetworks4(first, last netip.Addr) iter.Seq[Contiguous[Network4]] {
 // RangeToNetworks6 returns the minimum set of CIDR blocks covering
 // the closed address interval [first, last].
 //
-// Blocks are yielded in ascending order and are pairwise disjoint,
-// each one a typed CIDR block aligned to its own size, and no CIDR
-// decomposition of the interval uses fewer blocks (at most 254). The
-// function is total: the sequence is empty when first > last, and
-// when either end — an Is4 end or the invalid zero Addr — is not an
-// Is6 netip.Addr, because such an interval holds no IPv6 addresses.
-// An IPv4-mapped end is IPv6 and accepted, a zone is dropped
+// Blocks are yielded in ascending order and are pairwise disjoint. Each
+// is a typed CIDR block aligned to its size, and no CIDR decomposition
+// uses fewer blocks (at most 254). The sequence is empty when first >
+// last or either end fails [netip.Addr.Is6]. An end satisfying
+// [netip.Addr.Is4] and the invalid zero [netip.Addr] both fail that
+// predicate. An IPv4-mapped end is accepted, while a zone is dropped
 // silently. The sequence is allocation-free and re-iterable.
 func RangeToNetworks6(first, last netip.Addr) iter.Seq[Contiguous[Network6]] {
 	return func(yield func(Contiguous[Network6]) bool) {

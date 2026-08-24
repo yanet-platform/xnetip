@@ -10,14 +10,14 @@ import (
 // form.
 //
 // Every parser of this package wraps it, together with the net/netip error
-// that carries the detail, so errors.Is recognizes a rejection whatever
+// that carries the detail, so [errors.Is] recognizes a rejection whatever
 // its cause.
 var ErrParse = errors.New("invalid address or network text")
 
 // ErrAddrFamilyMismatch reports an address of the other IP family where one
 // family was required.
 //
-// Examples are IPv6 text given to ParseNetwork4 or an IPv6 mask given to
+// Examples are IPv6 text given to [ParseNetwork4] or an IPv6 mask given to
 // an IPv4 network.
 var ErrAddrFamilyMismatch = errors.New("address family mismatch")
 
@@ -32,7 +32,7 @@ var ErrZone = errors.New("zone not allowed")
 // range, 0 through 32 for IPv4 and 0 through 128 for IPv6.
 //
 // The CIDR constructors return it wrapped with the address and length
-// echoed, so errors.Is recognizes the rejection whatever the entry
+// echoed, so [errors.Is] recognizes the rejection whatever the entry
 // point.
 var ErrCIDROverflow = errors.New("prefix length out of range")
 
@@ -41,14 +41,14 @@ var ErrCIDROverflow = errors.New("prefix length out of range")
 //
 // The network parsers return it, together with the underlying cause
 // when one exists: the net/netip error for a suffix that is no address
-// at all, ErrAddrFamilyMismatch for a mask of the other family, ErrZone
+// at all, [ErrAddrFamilyMismatch] for a mask of the other family, [ErrZone]
 // for a mask carrying a zone suffix.
 var ErrInvalidMask = errors.New("invalid network mask")
 
 // ErrNonContiguousMask reports network text whose mask is valid but
 // not a leading run of one bits, where a CIDR block was required.
 //
-// Only the Contiguous parsers return it: the text is a well-formed
+// Only the [Contiguous] parsers return it: the text is a well-formed
 // network that the plain network parsers accept.
 var ErrNonContiguousMask = errors.New("mask not contiguous")
 
@@ -61,13 +61,13 @@ var ErrNonBiContiguousMask = errors.New("mask not bi-contiguous")
 
 // ErrEmptyInput reports empty text where a network was required.
 //
-// Only the UnmarshalText implementations return it: their zero values
+// Only the text-unmarshaling methods return it: their zero values
 // are valid networks, so empty text must not silently produce one the
-// way it produces the invalid zero netip.Prefix. The parsers reject
-// empty text through ErrParse and the net/netip cause instead.
+// way it produces the invalid zero [netip.Prefix]. The parsers reject
+// empty text through [ErrParse] and the net/netip cause instead.
 var ErrEmptyInput = errors.New("empty input")
 
-// Ordinary network diagnostics fit in the stack buffer; longer arbitrary
+// Ordinary network diagnostics fit in the stack buffer. Longer arbitrary
 // input grows through append without changing the rendered text.
 const parseErrorBufferSize = 256
 
@@ -75,8 +75,8 @@ const parseErrorBufferSize = 256
 // return: the function name with the input echoed, then the cause.
 //
 // Rendering is postponed until the message is requested. Both the
-// sentinel and optional detail remain available to errors.Is and
-// errors.As.
+// sentinel and optional detail remain available to [errors.Is] and
+// [errors.As].
 type parseError struct {
 	function string
 	input    string

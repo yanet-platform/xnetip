@@ -1763,7 +1763,7 @@ func Test_Network4_Difference_NonContiguousExactPeel(t *testing.T) {
 // verifies the peel on an alternating subtrahend mask.
 //
 // The 16 parts accumulate the bits of 85.85.85.85 into their masks
-// from the top; the first three and the last are pinned by hand.
+// from the top. The first three and the last are pinned by hand.
 func Test_Network4_Difference_UniverseMinusAlternatingHost(t *testing.T) {
 	source := xnetip.MustParseNetwork4("0.0.0.0/0")
 	other := xnetip.MustParseNetwork4("1.2.3.4/85.85.85.85")

@@ -2083,7 +2083,7 @@ func Test_Network6_Difference_ReIterable(t *testing.T) {
 //
 // The low-byte hole in the subtrahend mask is peeled bit by bit,
 // highest first, every part keeping the source's non-contiguous
-// shape; the first part and the final two are pinned by hand.
+// shape. The first part and the final two are pinned by hand.
 func Test_Network6_Difference_NonContiguousLowBytePeel(t *testing.T) {
 	source := xnetip.MustParseNetwork6("2001::/ffff::")
 	other := xnetip.MustParseNetwork6("2001::1/ffff::ff")
