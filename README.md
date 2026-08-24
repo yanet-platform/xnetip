@@ -4,7 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/yanet-platform/xnetip.svg)](https://pkg.go.dev/github.com/yanet-platform/xnetip)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-IPv4 and IPv6 network types for Go: `(address, mask)` pairs with
+IPv4 and IPv6 network types for Go: `(addr, mask)` pairs with
 first-class non-contiguous masks and full set algebra.
 
 ```go
@@ -28,54 +28,89 @@ your build.
 
 ## Overview
 
-- **Three network types.** `Network4` and `Network6` are `(address, mask)`
-  pairs where the mask is any bit pattern; `Network` holds either family.
-  Values are small, immutable and always normalized
-  (`addr & mask == addr`); the zero values are valid networks
-  (`0.0.0.0/0`, `::/0`).
-- **Set algebra, correct on any mask.** `Contains`, `ContainsAddr`,
-  `Intersection`, `Intersects`, `IsDisjoint`, `IsAdjacent`, `Merge`,
-  `SupernetFor` and `Difference`, which carves one network out of another
-  into exact, pairwise-disjoint pieces.
-- **`Contiguous[T]` — CIDR guaranteed by the type.** A wrapper whose mask
-  is a leading run of ones by construction: `PrefixLen() int` and
-  `Prefix() netip.Prefix` become total, `Intersection` and `Difference`
-  stay closed over the class, and its parsers reject non-contiguous input
-  with `ErrNonContiguousMask`.
-- **Collections.** `Aggregate4`/`Aggregate6` fold a slice in place using
-  non-contiguous merges, `AggregateContiguous` computes a minimal CIDR
-  cover, `RangeToNetworks4`/`RangeToNetworks6` turn an arbitrary address
-  range into the minimal list of CIDR blocks.
-- **Iteration.** `Addrs` and `AddrsBackward` as `iter.Seq[netip.Addr]`,
-  `NumHostBits` for the exact address count.
-- **Text.** `String`, `AppendTo`, `MarshalText`/`UnmarshalText`: a
-  contiguous network prints as `addr/prefix`, a non-contiguous one as
-  `addr/mask`, and both forms parse back. `Compact` renders host routes as
-  a bare address. Parsing is strict: `net/netip` digit rules, no leading
-  zeros in the prefix length, zones rejected.
-- **`net/netip` interop.** Plain zone-free `netip.Addr` is the address
-  currency of the whole API, `Contiguous` converts to and from
-  `netip.Prefix`, and wherever an operation has a `net/netip` analogue it
-  keeps the analogue's name and semantics.
+- **Three network types**
+
+  Use `Network4` or `Network6` when the family is known. Their method
+  signatures prevent mixing IPv4 and IPv6 networks. Use `Network` when one
+  value must hold either family. All three store normalized `(addr, mask)`
+  pairs with arbitrary bit masks, giving each masked set a canonical
+  representation.
+
+- **Map keys**
+
+  Network types and guarantee wrappers are immutable, comparable values.
+  Use them directly as `map` keys for indexing, deduplication and map-backed
+  sets without converting networks to strings.
+
+- **Valid zero values**
+
+  `Network4{}` represents `0.0.0.0/0`. `Network6{}` and `Network{}`
+  represent `::/0`. Guarantee wrappers preserve those universe values, so
+  zero-initialized fields need no constructor or validity check.
+
+- **Set algebra on any mask**
+
+  `Contains`, `ContainsAddr`, `Intersection`, `Intersects`, `IsDisjoint`,
+  `IsAdjacent`, `Merge`, `SupernetFor` and `Difference` manipulate masked
+  sets exactly. They avoid enumerating individual members or approximating
+  a non-contiguous set with CIDRs.
+
+- **CIDR guarantee**
+
+  `Contiguous[T]` proves that the mask is a leading run of ones. Use it at
+  boundaries that require CIDRs. Once constructed, `PrefixLen() int` and
+  `Prefix() netip.Prefix` are total, `Intersection` and `Difference` stay
+  closed over the class, and parsers reject non-contiguous input with
+  `ErrNonContiguousMask`.
+
+- **Collection algorithms**
+
+  `Aggregate4` and `Aggregate6` fold slices in place using non-contiguous
+  merges. `AggregateContiguous` computes a minimal CIDR cover.
+  `RangeToNetworks4` and `RangeToNetworks6` turn an arbitrary IP range into
+  the minimal list of CIDR blocks. Use them to compact network tables or
+  prepare ranges for CIDR-only APIs.
+
+- **Lazy iteration**
+
+  `Addrs` and `AddrsBackward` stream members as `iter.Seq[netip.Addr]`, so
+  callers can stop early without materializing a slice. `NumHostBits`
+  carries the exact member count as its base-two exponent, even when the
+  count does not fit an integer type.
+
+- **Canonical text**
+
+  `String`, `AppendTo`, `MarshalText` and `UnmarshalText` provide
+  round-trippable forms for logs, configuration and encoding. Contiguous
+  networks print as `addr/prefix`, while non-contiguous networks print as
+  `addr/mask`. `Compact` renders host routes as a bare `addr`. Strict parsing
+  rejects leading zeros in the prefix length and zones at the input boundary.
+
+- **`net/netip` interop**
+
+  Plain zone-free `netip.Addr` is the value type throughout the public API.
+  `Contiguous` converts to and from `netip.Prefix`. Existing stdlib callers
+  need no additional IP type, while analogue operations keep `net/netip`
+  names and semantics.
 
 ## Why not net/netip
 
-`net/netip` models a network as `netip.Prefix` — an address plus a prefix
+`net/netip` models a network as `netip.Prefix` — an `addr` plus a prefix
 length — which can only express a mask that is a run of leading ones, and
 stops at membership tests. `xnetip` complements it where that is not
 enough:
 
 | | `net/netip` | `xnetip` |
 |---|---|---|
-| Network model | address + prefix length, contiguous masks only | `(address, mask)`, any mask |
+| Network model | `addr` + prefix length, contiguous masks only | `(addr, mask)`, any mask |
 | Notation | `10.0.0.0/8` | `10.0.0.0/8` and `10.0.0.0/255.0.255.0` |
 | Set algebra | `Contains`, `Overlaps` | containment, intersection, difference, merge, adjacency, supernet |
 | Slice operations | — | aggregation, range → CIDR list |
-| Address iteration | `Addr.Next`/`Prev` | `iter.Seq[netip.Addr]`, both directions |
+| Addr iteration | `Addr.Next`/`Prev` | `iter.Seq[netip.Addr]`, both directions |
 
 ## Examples
 
-**Address range → minimal CIDR list.**
+**Addr range → minimal CIDR list.**
 
 ```go
 first := netip.MustParseAddr("10.0.0.1")
@@ -83,36 +118,51 @@ last := netip.MustParseAddr("10.0.0.30")
 for block := range xnetip.RangeToNetworks4(first, last) {
 	fmt.Println(block)
 }
-// 10.0.0.1/32  10.0.0.2/31  10.0.0.4/30  10.0.0.8/29
-// 10.0.0.16/29 10.0.0.24/30 10.0.0.28/31 10.0.0.30/32
+// 10.0.0.1/32
+// 10.0.0.2/31
+// 10.0.0.4/30
+// 10.0.0.8/29
+// 10.0.0.16/29
+// 10.0.0.24/30
+// 10.0.0.28/31
+// 10.0.0.30/32
 ```
 
-**Aggregation beyond CIDR.** Non-contiguous merges collapse networks that
-no CIDR aggregator can combine — here two /25s fold into a /24, which then
-merges with a non-adjacent /24 across the gap:
+**Aggregation beyond CIDR.** Two `/24` networks separated by a gap cannot
+share one CIDR without including extra members. `Aggregate4` can still
+represent their exact union by clearing the differing bit in the mask:
 
 ```go
 nets := []xnetip.Network4{
 	xnetip.MustParseNetwork4("10.0.0.0/24"),
-	xnetip.MustParseNetwork4("10.0.1.0/25"),
-	xnetip.MustParseNetwork4("10.0.4.0/25"),
-	xnetip.MustParseNetwork4("10.0.4.128/25"),
+	xnetip.MustParseNetwork4("10.0.2.0/24"),
 }
 nets = xnetip.Aggregate4(nets) // in place, no allocation
-// [10.0.1.0/25 10.0.0.0/255.255.251.0]
+fmt.Println(nets)
+// [10.0.0.0/255.255.253.0]
 ```
 
-**Carving a block out of another.** `Difference` yields exact,
-pairwise-disjoint remainders — on CIDR blocks, the classic prefix ladder:
+The result contains `10.0.0.0/24` and `10.0.2.0/24`, but not the
+`10.0.1.0/24` gap.
+
+**Exclude a network from the IPv4 universe.** `Difference` splits the
+remainder into pairwise-disjoint CIDRs. Together, they cover the entire IPv4
+space except `10.0.0.0/8`:
 
 ```go
-outer := xnetip.MustParseContiguous4("10.0.0.0/16")
-inner := xnetip.MustParseContiguous4("10.0.4.0/22")
-for block := range outer.Difference(inner) {
+universe := xnetip.MustParseContiguous4("0.0.0.0/0")
+excluded := xnetip.MustParseContiguous4("10.0.0.0/8")
+for block := range universe.Difference(excluded) {
 	fmt.Println(block)
 }
-// 10.0.128.0/17 10.0.64.0/18 10.0.32.0/19
-// 10.0.16.0/20  10.0.8.0/21  10.0.0.0/22
+// 128.0.0.0/1
+// 64.0.0.0/2
+// 32.0.0.0/3
+// 16.0.0.0/4
+// 0.0.0.0/5
+// 12.0.0.0/6
+// 8.0.0.0/7
+// 11.0.0.0/8
 ```
 
 The full API is documented on
@@ -124,7 +174,7 @@ The full API is documented on
   results and error construction — and hot paths are pinned by
   `testing.AllocsPerRun` tests.
 - No `unsafe`, no cgo, no reflection.
-- IPv4 and IPv6 take the same algorithm through every operation; behavior
+- IPv4 and IPv6 take the same algorithm through every operation. Behavior
   never diverges between families.
 - Tested with property-based checks (differential against `net/netip`
   where an oracle exists) and fuzzed parsers.
