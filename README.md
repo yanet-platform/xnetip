@@ -4,17 +4,16 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/yanet-platform/xnetip.svg)](https://pkg.go.dev/github.com/yanet-platform/xnetip)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-IPv4 and IPv6 network types for Go: `(addr, mask)` pairs with
-first-class non-contiguous masks and full set algebra, plus immutable
-EUI-48 Ethernet addresses.
+IPv4 and IPv6 networks for Go with arbitrary subnet masks, exact set algebra,
+lazy traversal and immutable EUI-48 MAC addresses. The implementation follows
+Rust `netip` 0.4.0, with explicit Go API contracts described below.
 
 ```go
-// A mask net/netip cannot express — and every operation stays correct on it.
-n := xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")
+network := xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")
 
-n.ContainsAddr(netip.MustParseAddr("10.7.0.9")) // true
-n.ContainsAddr(netip.MustParseAddr("10.7.1.9")) // false
-fmt.Println(n.LastAddr())                       // 10.255.0.255
+network.ContainsAddr(netip.MustParseAddr("10.7.0.9")) // true
+network.ContainsAddr(netip.MustParseAddr("10.7.1.9")) // false
+fmt.Println(network.LastAddr())                     // 10.255.0.255
 ```
 
 ## Install
@@ -23,183 +22,248 @@ fmt.Println(n.LastAddr())                       // 10.255.0.255
 go get github.com/yanet-platform/xnetip
 ```
 
-Requires Go 1.24. The runtime code depends only on the standard library —
-the test dependencies in `go.mod` (testify, rapid) are never pulled into
-your build.
+Requires Go 1.24. Runtime code depends only on the standard library. The
+`testify` and `rapid` dependencies in `go.mod` are used only by tests.
+Examples below assume imports of `github.com/yanet-platform/xnetip`,
+`net/netip`, and other standard packages as used.
 
-## Overview
+## Networks and guarantees
 
-- **MAC addresses**
+| Type | Address family and mask |
+|---|---|
+| `Network4` | IPv4, any mask |
+| `Network6` | IPv6, any mask |
+| `Network` | Either family, preserved by set operations |
+| `Contiguous[T]` | A network whose mask is one leading run of ones |
+| `BiContiguous` | IPv6, one leading mask run per 64-bit half |
+| `MacAddr` | Six Ethernet address octets |
 
-  `MacAddr` is an immutable, comparable EUI-48 value. Parse colon, hyphen
-  or Cisco dotted text, format lowercase or uppercase, and use the address
-  directly as a map key. `MacHyphens` and `MacDots` provide alternate text
-  forms. Convert modified EUI-64 interface identifiers, derive IPv6
-  link-local addresses, and map IPv4 or IPv6 multicast groups to Ethernet
-  addresses. Parsing from bytes, text decoding and append formatting do not
-  allocate when output capacity is available.
+Networks store normalized `(address, mask)` pairs: host bits are always
+cleared. Values and guarantee wrappers are immutable, comparable map keys.
+`Network4{}` is `0.0.0.0/0`; `Network6{}` and `Network{}` are `::/0`.
+Wrapper zero values preserve those valid universe networks. `MacAddr{}`
+is `00:00:00:00:00:00`.
 
-- **Three network types**
+`Contains`, `ContainsAddr`, `Intersection`, `Intersects`, `IsDisjoint`,
+`IsAdjacent`, `Merge`, `Supernet` and `SupernetFor` work with arbitrary
+masks. `Hostmask` returns the free bits. `Supernet` clears the lowest fixed
+mask bit and fails on a universe network. `SupernetFor` keeps only bits fixed equally by every input, so its result
+may be non-contiguous.
 
-  Use `Network4` or `Network6` when the family is known. Their method
-  signatures prevent mixing IPv4 and IPv6 networks. Use `Network` when one
-  value must hold either family. All three store normalized `(addr, mask)`
-  pairs with arbitrary bit masks, giving each masked set a canonical
-  representation.
+`Contiguous[T]` gives total `PrefixLen() int` and `Prefix() netip.Prefix`
+access. Its typed intersection, parent and difference preserve the CIDR
+guarantee. `BiContiguous` provides the corresponding guarantee for masks
+used by site-by-subnet classifiers. Call a wrapper's `Network()` method
+for operations that return a general network.
 
-- **Map keys**
+## Parsing and formatting
 
-  Network types and guarantee wrappers are immutable, comparable values.
-  Use them directly as `map` keys for indexing, deduplication and map-backed
-  sets without converting networks to strings.
+Parsers accept CIDR (`10.0.0.0/8`), explicit masks
+(`10.0.0.0/255.0.255.0`) and bare addresses, which become host routes.
+`ParseNetwork4`, `ParseNetwork6` and `ParseNetwork` accept strings.
+`ParseNetwork4ASCII`, `ParseNetwork6ASCII` and `ParseNetworkASCII` parse
+complete byte buffers without a string conversion or allocation on success.
 
-- **Valid zero values**
-
-  `Network4{}` represents `0.0.0.0/0`. `Network6{}` and `Network{}`
-  represent `::/0`. Guarantee wrappers preserve those universe values, so
-  zero-initialized fields need no constructor or validity check.
-
-- **Set algebra on any mask**
-
-  `Contains`, `ContainsAddr`, `Intersection`, `Intersects`, `IsDisjoint`,
-  `IsAdjacent`, `Merge`, `SupernetFor` and `Difference` manipulate masked
-  sets exactly. They avoid enumerating individual members or approximating
-  a non-contiguous set with CIDRs.
-
-- **CIDR guarantee**
-
-  `Contiguous[T]` proves that the mask is a leading run of ones. Use it at
-  boundaries that require CIDRs. Once constructed, `PrefixLen() int` and
-  `Prefix() netip.Prefix` are total, `Intersection` and `Difference` stay
-  closed over the class, and parsers reject non-contiguous input with
-  `ErrNonContiguousMask`.
-
-- **Collection algorithms**
-
-  `Aggregate4` and `Aggregate6` fold slices in place using non-contiguous
-  merges. `AggregateContiguous` computes a minimal CIDR cover.
-  `RangeToNetworks4` and `RangeToNetworks6` turn an arbitrary IP range into
-  the minimal list of CIDR blocks. Use them to compact network tables or
-  prepare ranges for CIDR-only APIs.
-
-- **Lazy iteration**
-
-  `Addrs` and `AddrsBackward` stream members as `iter.Seq[netip.Addr]`, so
-  callers can stop early without materializing a slice. `NumHostBits`
-  carries the exact member count as its base-two exponent, even when the
-  count does not fit an integer type.
-
-- **Canonical text**
-
-  `String`, `AppendTo`, `MarshalText` and `UnmarshalText` provide
-  round-trippable forms for logs, configuration and encoding. Contiguous
-  networks print as `addr/prefix`, while non-contiguous networks print as
-  `addr/mask`. `Compact` renders host routes as a bare `addr`. Strict parsing
-  rejects leading zeros in the prefix length and zones at the input boundary.
-
-- **Byte parsing**
-
-  `ParseNetworkASCII` and its `4`/`6` variants parse byte buffers without
-  allocations. `ParseNextNetworkASCII` extracts the leading network token
-  and returns the remaining bytes without copying them. Tokens are maximal,
-  malformed tokens are rejected, and leading whitespace is never skipped.
-  The IPv4-only variant treats `:` as a delimiter, while the mixed and IPv6
-  variants include it in the token. All parsers keep the same strict prefix
-  grammar. `UnmarshalText` uses these byte kernels for every network type
-  and guarantee wrapper.
-
-- **`net/netip` interop**
-
-  Plain zone-free `netip.Addr` is the value type throughout the public API.
-  `Contiguous` converts to and from `netip.Prefix`. Existing stdlib callers
-  need no additional IP type, while analogue operations keep `net/netip`
-  names and semantics.
-
-## Why not net/netip
-
-`net/netip` models a network as `netip.Prefix` — an `addr` plus a prefix
-length — which can only express a mask that is a run of leading ones, and
-stops at membership tests. `xnetip` complements it where that is not
-enough:
-
-| | `net/netip` | `xnetip` |
-|---|---|---|
-| Network model | `addr` + prefix length, contiguous masks only | `(addr, mask)`, any mask |
-| Notation | `10.0.0.0/8` | `10.0.0.0/8` and `10.0.0.0/255.0.255.0` |
-| Set algebra | `Contains`, `Overlaps` | containment, intersection, difference, merge, adjacency, supernet |
-| Slice operations | — | aggregation, range → CIDR list |
-| Addr iteration | `Addr.Next`/`Prev` | `iter.Seq[netip.Addr]`, both directions |
-
-## Examples
-
-**Addr range → minimal CIDR list.**
+The leading-token variants return the network and the unconsumed bytes:
 
 ```go
-first := netip.MustParseAddr("10.0.0.1")
-last := netip.MustParseAddr("10.0.0.30")
-for block := range xnetip.RangeToNetworks4(first, last) {
-	fmt.Println(block)
+input := []byte("10.1.2.3/8 allow")
+network, rest, err := xnetip.ParseNextNetworkASCII(input)
+if err != nil {
+	panic(err)
 }
-// 10.0.0.1/32
-// 10.0.0.2/31
-// 10.0.0.4/30
-// 10.0.0.8/29
-// 10.0.0.16/29
-// 10.0.0.24/30
-// 10.0.0.28/31
-// 10.0.0.30/32
+fmt.Println(network, string(rest)) // 10.0.0.0/8  allow
 ```
 
-**Aggregation beyond CIDR.** Two `/24` networks separated by a gap cannot
-share one CIDR without including extra members. `Aggregate4` can still
-represent their exact union by clearing the differing bit in the mask:
+The remainder aliases the input slice. Networks retain no input, and errors
+own the rejected text. Token parsers do not skip leading whitespace and
+never shorten malformed tokens into valid ones. The IPv4-specific token
+parser treats `:` as a delimiter: `1.2.3.4:80` leaves `:80`. The dual-family
+and IPv6 parsers include `:` in the token alphabet and reject that input.
+
+Prefix lengths contain decimal digits, with no sign and no leading zero
+except `0` itself. Complete network text parsers reject zones. Errors wrap
+sentinels such as `ErrCIDROverflow`, `ErrInvalidMask` and
+`ErrNonContiguousMask` for use with `errors.Is`.
+
+`String`, `AppendTo`, `MarshalText` and `UnmarshalText` use round-trippable
+canonical text. Contiguous networks print as `addr/prefix`, others as
+`addr/mask`. `Compact(network)` renders a host route as a bare address.
+Text decoding allocates no storage on success, leaves the receiver unchanged
+on failure, and rejects empty text instead of silently choosing a universe.
+
+## Traversal and subnets
+
+`Addrs` and `AddrsBackward` return re-iterable `iter.Seq[netip.Addr]`
+streams. `Difference` yields the pairwise-disjoint networks covering the
+source without the exclusion. `DifferenceBackward` yields exactly those
+parts in the opposite order. All streams support early exit without
+materializing their contents, including on guarantee wrappers.
+
+For resumable address traversal, call `AddrIterator()` on a network or
+wrapper. Both ends of the cursor share one remaining range:
 
 ```go
-nets := []xnetip.Network4{
+cursor := xnetip.MustParseNetwork4("192.0.2.0/29").AddrIterator()
+first, _ := cursor.Next()      // 192.0.2.0
+last, _ := cursor.NextBack()   // 192.0.2.7
+fourth, _ := cursor.Nth(2)     // skip .1 and .2, consume .3
+sixth, _ := cursor.NthBack(1)  // skip .6, consume .5
+remaining, exact := cursor.SizeHint() // 1, true: only .4 remains
+fmt.Println(first, last, fourth, sixth, remaining, exact)
+```
+
+`Nth` and `NthBack` take a `uint64` skip count and consume the selected
+address. Skipping past the end exhausts the cursor. Copying a cursor creates
+an independent snapshot; its zero value is exhausted. `SizeHint` returns
+an exact `uint64` count when possible, otherwise `math.MaxUint64, false`.
+`NumHostBits` gives the exact exponent of the address count even for `2^128`.
+
+`Network4` and `Network6` also partition themselves into subnets. `Subnets`
+takes an arbitrary mask that preserves every bit fixed by the parent.
+Each combination of newly fixed bits appears once, in ascending address
+order:
+
+```go
+for part := range (xnetip.Network4{}).Subnets(netip.MustParseAddr("0.0.0.1")) {
+	fmt.Println(part)
+}
+// 0.0.0.0/0.0.0.1 — all even addresses
+// 0.0.0.1/0.0.0.1 — all odd addresses
+```
+
+`SubnetsWithPrefix(prefix)` yields `Contiguous[Network4]` or
+`Contiguous[Network6]` blocks. A non-contiguous parent can split into CIDRs
+once the requested prefix covers all of its fixed bits. Both methods return
+a single sequence, with no separate success flag: invalid masks, foreign
+families, out-of-range prefixes or dropped parent bits yield an empty
+sequence. IPv6 mask zones are dropped, as in checked constructors.
+`SubnetsBackward` and `SubnetsWithPrefixBackward` reverse the corresponding
+subnet sequence. These four methods belong to the concrete network types;
+wrappers expose their underlying network through `Network()`.
+
+## Collection algorithms
+
+`Aggregate4` and `Aggregate6` collapse slices in place through duplicate
+removal, containment and arbitrary-mask merges. `AggregateBiContiguous6`
+keeps every result bi-contiguous. These algorithms preserve the exact union
+and continue until no pair can merge, without promising a globally minimum
+cover for arbitrary masks. `AggregateContiguous` produces the minimal CIDR
+cover and accepts all three `Contiguous` instantiations.
+
+```go
+networks := []xnetip.Network4{
 	xnetip.MustParseNetwork4("10.0.0.0/24"),
 	xnetip.MustParseNetwork4("10.0.2.0/24"),
 }
-nets = xnetip.Aggregate4(nets) // in place, no allocation
-fmt.Println(nets)
-// [10.0.0.0/255.255.253.0]
+networks = xnetip.Aggregate4(networks)
+fmt.Println(networks) // [10.0.0.0/255.255.253.0]
 ```
 
-The result contains `10.0.0.0/24` and `10.0.2.0/24`, but not the
-`10.0.1.0/24` gap.
+`RangeToNetworks4(first, last)` and `RangeToNetworks6(first, last)` lazily
+produce the minimum CIDR cover of an inclusive address interval, in ascending
+order. Invalid families or reversed endpoints produce an empty sequence.
 
-**Exclude a network from the IPv4 universe.** `Difference` splits the
-remainder into pairwise-disjoint CIDRs. Together, they cover the entire IPv4
-space except `10.0.0.0/8`:
+`BinarySplit4` and `BinarySplit6` choose a narrow supernet covering at least
+half a sorted slice, then gather exactly the elements it contains into one
+block. A projection selects the network from any payload type:
 
 ```go
-universe := xnetip.MustParseContiguous4("0.0.0.0/0")
-excluded := xnetip.MustParseContiguous4("10.0.0.0/8")
-for block := range universe.Difference(excluded) {
-	fmt.Println(block)
+type Rule struct {
+	Network xnetip.Network4
+	Action  string
 }
-// 128.0.0.0/1
-// 64.0.0.0/2
-// 32.0.0.0/3
-// 16.0.0.0/4
-// 0.0.0.0/5
-// 12.0.0.0/6
-// 8.0.0.0/7
-// 11.0.0.0/8
+rules := []Rule{
+	{xnetip.MustParseNetwork4("127.0.0.1"), "allow"},
+	{xnetip.MustParseNetwork4("127.0.0.2"), "log"},
+	{xnetip.MustParseNetwork4("127.0.0.3"), "deny"},
+}
+parent, selected, ok := xnetip.BinarySplit4(rules, func(rule Rule) xnetip.Network4 {
+	return rule.Network
+})
+if ok {
+	fmt.Println(parent, selected) // 127.0.0.2/31 {1 3}
+	group := rules[selected.Start:selected.End]
+	fmt.Println(len(group)) // 2
+}
 ```
+
+Inputs must be sorted by the projected network's `Compare` order. Candidates
+are the full-slice supernet followed by every window of `ceil(N/2)` elements;
+the first with the largest numeric mask wins. The result may be
+non-contiguous. `IndexRange` is half-open and starts at the original first
+contained element. Both selected and remaining elements retain their
+relative order and payloads. Fewer than three elements or a nil projection
+return `ok=false` without mutation. Search takes O(N) time; gathering takes
+O(N log N) moves and O(log N) stack space, without scratch allocation.
+
+## MAC addresses
+
+`MacAddr` parses colon, hyphen and Cisco dotted forms, case-insensitively.
+Default output is lowercase with colons. `MacHyphens` and `MacDots` are
+formatting adapters; `%X` selects uppercase. Values support `As6`, `Uint64`,
+checked integer construction, comparisons, text marshaling, and unicast,
+multicast, broadcast and administration-bit predicates.
+
+```go
+mac := xnetip.MustParseMacAddr("00:11:22:33:44:55")
+fmt.Println(xnetip.MacHyphens(mac)) // 00-11-22-33-44-55
+fmt.Println(xnetip.MacDots(mac))    // 0011.2233.4455
+
+identifier := mac.ToModifiedEUI64()
+restored, ok := xnetip.MacAddrFromModifiedEUI64(identifier)
+fmt.Println(ok && restored == mac) // true
+fmt.Println(mac.ToIPv6LinkLocal()) // fe80::211:22ff:fe33:4455
+
+group, ok := xnetip.MacAddrFromIPv4Multicast(netip.MustParseAddr("239.1.2.3"))
+fmt.Println(group, ok) // 01:00:5e:01:02:03 true
+```
+
+`MacAddrFromIPv6Multicast` maps an IPv6 group to `33:33` plus its last
+four octets. Multicast constructors reject invalid or foreign-family inputs.
+IPv4-mapped IPv6 is not treated as native IPv4 or as an IPv6 multicast group.
+`ParseMacAddrASCII` and successful MAC text decoding allocate no storage.
+
+## Go and Rust compatibility
+
+The address-set operations follow Rust `netip` 0.4.0, pinned in
+[`tools/parity/rust-revision`](tools/parity/rust-revision). The port retains
+these deliberate Go contracts:
+
+| Area | Go contract |
+|---|---|
+| Prefix text | Rejects `+8` and `008`; Rust accepts them. String and ASCII parsers agree. |
+| IP representation | Public inputs and outputs are `netip.Addr`; network integer `FromBits`/`ToBits` APIs are intentionally absent. |
+| Address families | IPv4-mapped literals remain IPv6. Mapped conversion and canonicalization are explicit. |
+| Mixed-family difference | `Network.Difference` and its reverse yield the source once. |
+| Mixed-family supernet | `Network.SupernetFor` returns `ok=false`; no network spans both families. |
+| Mixed-family CIDR aggregation | `AggregateContiguous[Network]` keeps both families and aggregates each independently. |
+| Invalid subnet requests | Return an empty sequence instead of Rust's `None`. |
+| Iteration | Go exposes `iter.Seq` streams and an address cursor, not a copy of every Rust iterator type or trait. |
+| Platform guarantees | Rust has `no_std`, `const fn` and Lean proofs; Go uses the Go runtime and does not inherit those guarantees. |
+
+Zero network values remain valid universes. An invalid zero `netip.Addr`
+is still rejected by checked constructors. String parsers reject zones;
+checked IPv6 constructors discard them. Different families do not contain or
+intersect each other, and cannot be merged.
+
+The [parity runner](tools/parity/README.md) compares shared deterministic
+corpora against the pinned Rust source. Exact grammar exceptions are recorded
+in [`contracts.json`](tools/parity/contracts.json). Language-specific error
+messages are not compared. Property tests and fuzz targets additionally check
+set invariants, text round trips and standard-library interoperability.
+
+## Runtime guarantees
+
+- Standard library only, with no unsafe, cgo or reflection in runtime code.
+- Set operations, traversal and successful parsing/text decoding allocate no
+  storage. `AppendTo` reuses caller capacity; `String` and `MarshalText`
+  allocate their results, and errors may allocate owned diagnostics.
+- IPv4 and IPv6 use matching algorithms and case analysis. Hot paths have
+  `testing.AllocsPerRun` checks, with CI tests, race detection and Rust parity.
 
 The full API is documented on
 [pkg.go.dev](https://pkg.go.dev/github.com/yanet-platform/xnetip).
-
-## Guarantees
-
-- Operations do not allocate — the exceptions are `String`/`MarshalText`
-  results and error construction — and hot paths are pinned by
-  `testing.AllocsPerRun` tests.
-- No `unsafe`, no cgo, no reflection.
-- IPv4 and IPv6 take the same algorithm through every operation. Behavior
-  never diverges between families.
-- Tested with property-based checks (differential against `net/netip`
-  where an oracle exists) and fuzzed parsers.
 
 ## License
 

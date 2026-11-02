@@ -1,105 +1,139 @@
 # AGENTS.md
 
-Guidance for AI coding agents working on `xnetip`. Keep it under 8 KB: facts about the code, build and environment. Conventions live in `.agents/conventions/`, the work plan in `.roadmap/`.
+Guidance for coding agents working on `xnetip`. Keep this file under 8 KB.
+Style rules live in `.agents/conventions/{go,comments,tests}.md`.
 
-## Project
+## Project and reference
 
-`xnetip` (`github.com/yanet-platform/xnetip`, Go 1.24, one package) is a
-**stdlib-only runtime** port of Rust `netip` 0.3.9. It models IPv4/IPv6
-networks as `(address, mask)` pairs, including non-contiguous masks, set
-algebra, iteration, range-to-CIDR, aggregation and binary split. Tests use
-`testify` and `rapid`. Read `../netip/src/{net.rs,parser.rs,fmt.rs}` fresh for
-semantics; also see `../netip/CLAUDE.md` and `../netip/.docs/ROADMAP.md`.
+`github.com/yanet-platform/xnetip` is a Go 1.24 library for IPv4/IPv6
+networks with arbitrary masks and immutable EUI-48 MAC addresses. Runtime
+code uses only the standard library. Tests use `testify` and `rapid`.
+Functionality first, performance second.
 
-Priorities: **functionality first, performance second**. Iteration 1 covers
-the network core and its `Contiguous`/`BiContiguous` guarantee wrappers;
-`.roadmap/00-overview.md` owns the remaining backlog.
+The Rust reference is `yanet-platform/netip` 0.4.0. Its exact revision is pinned
+in `tools/parity/rust-revision`. Read matching Rust source fresh from `../netip`
+checkout: `src/net.rs`, `src/net/{contiguous,bicontiguous}.rs`, `src/parser.rs`,
+`src/fmt.rs`, `src/macaddr.rs`. Keep that checkout read-only for Go work.
 
-## Build, test, lint
+## Build, test and lint
 
-```bash
-go build ./... && go vet ./...
-go test ./...                              # all tests (black-box package xnetip_test)
-go test -run 'Test_Network4_Contains' -v ./...
-go test -short ./...                       # rapid checks divided by five
-go test -run 'Test_X' -rapid.checks=1000 -rapid.seed=<n> ./...   # more checks (default 100), replay a failure
-go test -run xxx -bench 'BenchmarkNetwork4_Contains' -benchmem ./...
-go test -run xxx -bench . -count 10 > new.txt && benchstat old.txt new.txt   # A/B, same session
-go test -fuzz 'FuzzParseNetwork4' -fuzztime 30s ./...                     # parsers only
-gofumpt -l -w . ; golangci-lint run ./... ; gocommentlint                    # gate = all clean
-make test | make lint | make bench          # wrappers for the above (added by session 001)
+```sh
+go build ./...
+go vet ./...
+go test ./...
+go test -race ./...                         # make test, also CI
+go test -short ./...                        # make test-short
+go test -run 'Test_X' -rapid.checks=1000 -rapid.seed=12345 ./...
+go test -fuzz FuzzParseNetwork4 -fuzztime 30s ./...
+go test -run xxx -bench . -benchtime 1x ./... # make bench
+python3 tools/parity/run.py --rust-source ../netip --output /tmp/xnetip-parity
 ```
 
-CI (GitHub Actions, `.github/workflows/ci.yml`) runs `go test -race`, vet, gofumpt check, golangci-lint (`modernize`, `staticcheck`, `govet`, `errcheck`, `unused`, `testifylint`) and compiles benchmarks. `gocommentlint` runs as the `pre-commit` hook (`make hooks`). `benchstat`, `gofumpt`, `golangci-lint`, `gocommentlint` are installed in `$GOPATH/bin`.
+Use Go 1.24 for CI-equivalent lint. If a newer installed toolchain is
+incompatible with the pinned linter, use `GOTOOLCHAIN=go1.24.13`.
+CI pins gofumpt v0.9.2 and golangci-lint v2.12.2 in
+`.github/workflows/ci.yml`. Run gofumpt, vet and golangci-lint after Go changes.
+`make lint` and the optional `make hooks` pre-commit hook also call
+`gocommentlint`. If it is unavailable, record that limitation and review
+comments against the conventions manually. Do not invent a replacement tool or claim that gate passed.
+
+The separate parity workflow checks out the pinned Rust revision and compares
+a shared deterministic corpus. Use a clean `src/` at that revision. See
+`tools/parity/README.md` for replay and failure artifacts. Intentional grammar
+differences are exact cases in `tools/parity/contracts.json`.
+Changing the reference pin is an explicit compatibility change.
 
 ## Layout
 
-```
-uint128.go         unexported 128-bit helper {hi, lo uint64}, exported methods, unexported constructors — every IPv6 bit trick goes through it
-addr4.go addr6.go  unexported address kernels addr4{uint32} addr6{uint128} — the public API speaks netip.Addr
-net4.go net6.go net.go               Network4  Network6  Network{network Network6; is4 bool}
-                   a type's whole API lives in its file (constructors, Parse*, formatters, marshalling, set algebra, Addrs, Difference)
-errors.go compact.go                 sentinels, Compact (function over an unexported wrapper)
-contiguous.go bicontiguous.go        Contiguous[T] CIDR wrapper + network[T] F-bound; concrete IPv6 BiContiguous wrapper
-range.go aggregate.go binary_split.go   free range, aggregate (including the bi-contiguous cover), split functions
-*_test.go          mirror of the source file, package xnetip_test; white-box files (package xnetip): uint128_test.go and the kernel suites addr4_test.go, addr6_test.go, errors_test.go
-testutil_test.go   requireNoAllocs + rapid generators gen<Type>, each added by the type's birth session
-.roadmap/          gitignored session plan: 00-overview.md (order, status, backlog) + NNN-slug.md per pending session (deleted once done)
-.agents/conventions/{go,comments,tests}.md   style rules (read the one you touch)
+```text
+net4.go net6.go net.go       Network4, Network6 and dual-family Network
+contiguous.go bicontiguous.go guarantee wrappers and their typed operations
+addr_iterator.go            resumable double-ended address cursor
+parser_ascii.go             complete-byte and leading-token network parsers
+addr4.go addr6.go uint128.go unexported address and 128-bit arithmetic kernels
+aggregate.go range.go       in-place covers and lazy range-to-CIDR decomposition
+binary_split.go             generic payload projection and stable in-place split
+compact.go                  opaque compact network formatting adapter
+macaddr.go macfmt.go         MAC values, conversions and formatting adapters
+errors.go                   sentinels and deferred owned diagnostics
+*_test.go                   API tests, properties, fuzz targets and benchmarks
+testutil_test.go            allocation assertion, shared generators and sinks
+tools/parity/               pinned Rust/Go probes, corpus runner and contracts
+.agents/conventions/        Go, comment and test style rules
 ```
 
-## Types and invariants
+Network methods live with their type. Tests use `package xnetip_test`;
+arithmetic, address kernel and error tests use `package xnetip`.
 
-- Public address inputs, views and iterators use `netip.Addr`; kernels are
-  zone-free host-order integers (`addr4{uint32}`, `addr6{uint128}`). Checked
-  constructors return `(T, error)`, drop zones, and reject a foreign family or
-  invalid zero address with `ErrAddrFamilyMismatch`. Relations are total: a
-  foreign family (4in6 against IPv4 included) is not contained, matching
-  `netip.Prefix.Contains`.
-- Networks are normalized (`addr & mask == addr`). Valid zero values are
-  `Network4{}` = `0.0.0.0/0`, and `Network6{}`/`Network{}` = `::/0`.
-- `Contiguous[T]` proves one global leading-one mask run. Concrete
-  `BiContiguous` over `Network6` proves one run per 64-bit half. Their storage
-  is unexported; equality and ordering match the wrapped network; zero values
-  are valid universe networks. `AggregateBiContiguous6` is an in-place,
-  allocation-free class-closed greedy cover sorted by numeric mask then
-  address; it is deliberately not a minimum rectangle cover.
-- `Network` stores IPv4 mapped: address `::ffff:a.b.c.d`, mask
-  `ffff:ffff:ffff:ffff:ffff:ffff:M`; `is4` implies
-  `network.IsIPv4MappedIPv6()`. Operations delegate to 128 bits and
-  `PrefixLen` subtracts 96. Cross-family relations are false,
-  `Intersection`/`Merge` return `ok=false`, and `Compare` orders IPv4 first.
-- Mask algebra, contiguity, `LastAddr`, adjacency, merge, supernet,
-  `Difference` and iteration order mirror `../netip/src/net.rs`; deliberate
-  differences are in `.roadmap/00-overview.md`. Parsing uses `net/netip` after
-  our own `/` split and strict prefix-length check (digits only, no leading
-  zero or `+`); dotted masks work and `%zone` is an error.
-- Rust `Option<T>` becomes `(T, bool)`, errors wrap exported sentinels with
-  `%w` and echo input, `Ord` becomes `Compare`, and iterators use `iter.Seq`.
-  Formatting uses `String`/`AppendTo` plus text marshaling. `Compact` returns
-  an unexported inferred generic wrapper. Slice functions are verb-first
-  (`Aggregate4`, `BinarySplit6`).
+## Invariants and deliberate port contracts
+
+- Networks are normalized: `addr & mask == addr`. Their zero values are
+  valid universes: `Network4{}` is `0.0.0.0/0`, `Network6{}` and `Network{}`
+  are `::/0`. Wrapper zero values preserve the corresponding universe.
+- Public IP values are `netip.Addr`, not custom integer address types.
+  Network integer `FromBits`/`ToBits` APIs are intentionally absent. Kernels
+  are zone-free host-order `uint32`/`uint128`. Checked constructors drop
+  zones and reject invalid or foreign-family addresses. Complete parsers
+  reject zones. IPv4-mapped IPv6 remains IPv6 unless explicitly converted.
+- `Network` stores native IPv4 as a mapped IPv6 pair plus `is4`. Its mapped
+  mask fixes the upper 96 bits. Views, order, prefix lengths and outputs
+  retain the original family. `Compare` orders IPv4 before IPv6.
+- Mixed-family `Contains`/`Intersects` are false and `Intersection`/`Merge`
+  fail. `Network.Difference` and its reverse yield the source once for a
+  foreign-family exclusion. `Network.SupernetFor` returns false for mixed
+  families. `AggregateContiguous[Network]` accepts mixed families and
+  aggregates each independently. Preserve these Go extensions.
+- Prefix text is unsigned decimal with no leading zero except `0` itself.
+  Rust also accepts `+8` and `008`; Go intentionally rejects both, following
+  `net/netip.ParsePrefix`. String and ASCII entry points share this contract.
+  Successful byte parsing does not retain input. Token remainders borrow
+  the input slice; errors own rejected text.
+- `Contiguous[T]` proves one leading mask run. `BiContiguous` proves one
+  leading run per 64-bit half. Typed operations preserve those guarantees.
+  General and bi-contiguous aggregation reach a merge fixpoint, preserving
+  the exact union, but do not promise a globally minimum arbitrary-mask
+  cover. CIDR aggregation does provide the minimal cover.
+- Address streams use `iter.Seq`; `AddrIterator` provides resumable
+  `Next`, `NextBack`, `Nth`, `NthBack` and a saturating `SizeHint`.
+  Concrete subnet methods return a sequence directly: invalid refinements,
+  prefixes or address families produce an empty re-iterable sequence.
+- Rust `Option` normally becomes comma-ok, ordering becomes `Compare`,
+  and formatting uses `String`, `AppendTo` and text marshaling. Formatting
+  adapters are opaque values returned by functions. Binary split uses an
+  explicit projection to preserve arbitrary payloads and returns a half-open
+  `IndexRange`. `MacAddr{}` is the all-zero MAC, not an invalid sentinel.
+- Rust's `no_std`, `const fn` and Lean proof machinery are Rust guarantees,
+  not Go guarantees. Parity tests compare selected behavior; they do not
+  transfer formal proofs to the Go implementation.
 
 ## Hard constraints
 
-- **Standard library only in runtime code.** Tests: `testing` + `github.com/stretchr/testify` (`require`/`assert`) + `pgregory.net/rapid`, nothing else (Go has no dev-dependency class, they sit in the root `go.mod`).
-- **No `unsafe`, no cgo, no reflection in runtime code.**
-- **Runtime code is allocation-free** except `String()`/`MarshalText` results and error construction. Hot paths carry a `testing.AllocsPerRun` test. Algorithms needing O(N) scratch memory are not implemented silently — stop and report the trade-off.
-- **IPv4/IPv6 parity**: an operation has the same algorithm and case analysis in both families (word width differs, control flow does not). A tweak that helps one family goes to both or neither.
-- Public API that has a `net/netip` analogue mirrors its name, signature and semantics — check the actual std source (`$(go env GOROOT)/src/net/netip/netip.go`) before naming. A deliberate divergence is documented, an accidental one is a bug.
+- Runtime dependencies: standard library only. Tests may use only `testing`,
+  `testify` and `rapid` beyond the standard library. No unsafe, cgo or reflection
+  in runtime code.
+- Set operations, traversal and successful parsing/text decoding allocate no
+  storage. `String`/`MarshalText` allocate their results, diagnostics may
+  allocate, and `AppendTo` needs sufficient caller capacity. Pin new hot paths
+  with `requireNoAllocs`. Never silently introduce O(N) scratch allocation.
+- Keep IPv4/IPv6 algorithms and case analysis aligned. Use `uint128` for IPv6
+  bit operations. Document a justified divergence rather than hiding it.
+- Mirror an existing `net/netip` analogue's name and semantics when applicable.
+  Check the installed standard-library source before introducing such an API.
 
-## Session protocol (TDD, one function of one type per session)
+## Change workflow
 
-1. Read `.roadmap/00-overview.md`, then the session file `.roadmap/NNN-slug.md` and check its dependencies are `done`. Read the referenced Rust lines fresh.
-2. Tests first: write the session's test table (unit, boundary, **non-contiguous masks**, `rapid.Check` properties, differential checks against `net/netip` where an oracle exists) and watch them fail to compile or fail.
-3. Implement the one function, keeping v4/v6 parity, and run `make test` until green.
-4. Benchmarks only where the session file says so (algorithms, parse/format/compare) — `b.Loop()`, `b.ReportAllocs()`. Trivial delegates are waived with the reason recorded.
-5. Gates: `make lint` (gofumpt, vet, golangci-lint, gocommentlint) and `make test` clean. Doc comment on every exported symbol, brief + blank + detailed shape.
-6. Mark the row `done` in `.roadmap/00-overview.md`, commit, then delete the session file — a finished session leaves only its overview row and its commit.
+1. Read the conventions relevant to the files being changed and the matching
+   reference implementation. Honor the user's scope and established contracts.
+2. Write failing behavior tests first: boundary values, arbitrary masks,
+   properties and independent oracles where available.
+3. Keep a coherent implementation, tests and algorithm benchmarks together.
+   Benchmarks use `b.Loop()` and `b.ReportAllocs()`.
+4. Run relevant checks and parity for shared behavior changes. Report results
+   and limitations. Docs need source/example review and `git diff --check`.
+5. Use a feature branch or isolated worktree and a focused PR. Follow the
+   task's authorization for pushing, creating and merging PRs. Never default
+   to committing on `main`, and do not amend or rewrite existing commits.
 
-## Commits
-
-- Commit directly to `main`, one commit per session, only after all gates are green. Do not amend or rewrite existing commits. `gh` writes only when the task asks for them.
-- Subject: `feat|fix|perf|refactor|test|docs|chore(scope): brief` — lowercase brief, no trailing period, scope = file or type (`network4`, `uint128`, `addr6`). Tests and benchmarks of the change go in the same commit.
-- **No AI attribution anywhere**: no `Co-Authored-By`, no "Generated with" footers, in commits or in any file.
-- Never edit `../netip`.
+Commit subjects use `feat|fix|perf|refactor|test|docs|chore(scope): brief`,
+with a lowercase brief and no trailing period. No AI attribution, generated
+footers or co-author trailers in files or commits.
