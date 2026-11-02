@@ -23,6 +23,63 @@ var (
 	_ encoding.TextUnmarshaler = (*xnetip.BiContiguous)(nil)
 )
 
+// verifies that bi-contiguous parents shorten the low run first,
+// then the high run, without losing the wrapper guarantee.
+func Test_BiContiguous_Supernet_MaskShapes(t *testing.T) {
+	cases := []struct {
+		name    string
+		network string
+		want    string
+	}{
+		{name: "full low run shortens first", network: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128", want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe/127"},
+		{name: "empty low run shortens the high run", network: "ffff:ffff:ffff:ffff::/64", want: "ffff:ffff:ffff:fffe::/63"},
+		{name: "two runs shorten at the low boundary", network: "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0", want: "2a02:6b8:c00::1234:abcc:0:0/ffff:ffff:ff00::ffff:fffe:0:0"},
+		{name: "last low bit leaves the high run intact", network: "2001:db8::8000:0:0:0/ffff:ffff:0:0:8000::", want: "2001:db8::/32"},
+		{name: "low-only run can reach the universe", network: "::8000:0:0:0/::8000:0:0:0", want: "::/0"},
+		{name: "high-only run can reach the universe", network: "8000::/1", want: "::/0"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parent, ok := xnetip.MustParseBiContiguous(testCase.network).Supernet()
+			require.True(t, ok)
+			require.Equal(t, xnetip.MustParseBiContiguous(testCase.want), parent)
+		})
+	}
+	parent, ok := (xnetip.BiContiguous{}).Supernet()
+	require.False(t, ok)
+	require.Equal(t, xnetip.BiContiguous{}, parent)
+}
+
+// verifies that arbitrary bi-contiguous parents keep both mask
+// runs valid and shorten exactly one nonempty run by one bit.
+func Test_BiContiguous_Supernet_ParentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block := genBiContiguous.Draw(t, "block")
+		parent, ok := block.Supernet()
+		require.Equal(t, block.HighPrefixLen()+block.LowPrefixLen() > 0, ok)
+		if !ok {
+			require.Equal(t, xnetip.BiContiguous{}, parent)
+			return
+		}
+		require.True(t, parent.Network().IsBicontiguous())
+		require.True(t, parent.Contains(block))
+		require.Equal(t, block.Network().NumHostBits()+1, parent.Network().NumHostBits())
+		if block.LowPrefixLen() > 0 {
+			require.Equal(t, block.LowPrefixLen()-1, parent.LowPrefixLen())
+			require.Equal(t, block.HighPrefixLen(), parent.HighPrefixLen())
+		} else {
+			require.Zero(t, parent.LowPrefixLen())
+			require.Equal(t, block.HighPrefixLen()-1, parent.HighPrefixLen())
+		}
+	})
+}
+
+// verifies that obtaining a bi-contiguous parent does not allocate.
+func Test_BiContiguous_Supernet_NoAllocations(t *testing.T) {
+	block := xnetip.MustParseBiContiguous("2001:db8::/ffff:ffff::ffff:0:0:0")
+	requireNoAllocs(t, func() { biContiguousSink, okSink = block.Supernet() })
+}
+
 // mustBiContiguous wraps a parsed IPv6 network fixture, stopping the
 // test when either its text or its per-half mask shape is invalid.
 func mustBiContiguous(t require.TestingT, text string) xnetip.BiContiguous {

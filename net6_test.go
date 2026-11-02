@@ -58,7 +58,81 @@ func Test_Network6_Hostmask_ComplementProperty(t *testing.T) {
 // verifies that obtaining an IPv6 wildcard does not allocate.
 func Test_Network6_Hostmask_NoAllocations(t *testing.T) {
 	network := xnetip.MustParseNetwork6("2001:db8::/ffff:ffff::ffff:0:0:0")
-	requireNoAllocs(t, func() { _ = network.Hostmask() })
+	requireNoAllocs(t, func() { addrSink = network.Hostmask() })
+}
+
+// verifies that IPv6 parents clear the lowest constrained bit across
+// either 64-bit half and normalize arbitrary mask shapes.
+func Test_Network6_Supernet_MaskShapes(t *testing.T) {
+	cases := []struct {
+		name    string
+		network string
+		want    string
+	}{
+		{name: "CIDR parent clears a set address bit", network: "2001:db8:1::/48", want: "2001:db8::/47"},
+		{name: "CIDR parent keeps an already clear address bit", network: "2001:db8::/48", want: "2001:db8::/47"},
+		{name: "highest host route joins its neighbor", network: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128", want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe/127"},
+		{name: "one-bit prefix reaches the universe", network: "8000::/1", want: "::/0"},
+		{name: "empty low half clears a high-half bit", network: "ffff:ffff:ffff:ffff::/64", want: "ffff:ffff:ffff:fffe::/63"},
+		{name: "two runs shorten the low half first", network: "2a02:6b8:c00::1234:abcd:0:0/ffff:ffff:ff00::ffff:ffff:0:0", want: "2a02:6b8:c00::1234:abcc:0:0/ffff:ffff:ff00::ffff:fffe:0:0"},
+		{name: "single low-half bit reaches the universe", network: "::8000:0:0:0/::8000:0:0:0", want: "::/0"},
+		{name: "single high-half bit reaches the universe", network: "0:0:0:8000::/0:0:0:8000::", want: "::/0"},
+		{name: "alternating bits keep every higher bit", network: "aaaa:5555:aaaa:5555:aaaa:5555:aaaa:5555/aaaa:5555:aaaa:5555:aaaa:5555:aaaa:5555", want: "aaaa:5555:aaaa:5555:aaaa:5555:aaaa:5554/aaaa:5555:aaaa:5555:aaaa:5555:aaaa:5554"},
+		{name: "half-boundary hole is preserved", network: "ffff:ffff:ffff:0:0:ffff:ffff:ffff/ffff:ffff:ffff:0:0:ffff:ffff:ffff", want: "ffff:ffff:ffff:0:0:ffff:ffff:fffe/ffff:ffff:ffff:0:0:ffff:ffff:fffe"},
+		{name: "mapped prefix may widen outside the mapped range", network: "::ffff:192.0.2.0/96", want: "::fffe:0:0/95"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parent, ok := xnetip.MustParseNetwork6(testCase.network).Supernet()
+			require.True(t, ok)
+			require.Equal(t, xnetip.MustParseNetwork6(testCase.want), parent)
+		})
+	}
+	parent, ok := (xnetip.Network6{}).Supernet()
+	require.False(t, ok)
+	require.Equal(t, xnetip.Network6{}, parent)
+}
+
+// verifies that arbitrary IPv6 parents match a bit-scan oracle,
+// contain the original set and have exactly twice as many addresses.
+func Test_Network6_Supernet_ParentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		wantMask, wantOK := supernetMaskOracle(network.Mask())
+		parent, ok := network.Supernet()
+		require.Equal(t, wantOK, ok)
+		if !ok {
+			require.Equal(t, xnetip.Network6{}, parent)
+			return
+		}
+		want, err := xnetip.Network6From(network.Addr(), wantMask)
+		require.NoError(t, err)
+		require.Equal(t, want, parent)
+		require.True(t, parent.Contains(network))
+		require.Equal(t, network.NumHostBits()+1, parent.NumHostBits())
+	})
+}
+
+// verifies that IPv6 parent chains end at the universe after exactly
+// as many steps as the original mask has constrained bits.
+func Test_Network6_Supernet_ChainProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		for range 128 - network.NumHostBits() {
+			parent, ok := network.Supernet()
+			require.True(t, ok)
+			network = parent
+		}
+		require.Equal(t, xnetip.Network6{}, network)
+		_, ok := network.Supernet()
+		require.False(t, ok)
+	})
+}
+
+// verifies that obtaining an IPv6 parent does not allocate.
+func Test_Network6_Supernet_NoAllocations(t *testing.T) {
+	network := xnetip.MustParseNetwork6("2001:db8::1:0:0:0/ffff:ffff::ffff:0:0:0")
+	requireNoAllocs(t, func() { network6Sink, okSink = network.Supernet() })
 }
 
 // verifies that the constructor clears every address bit outside the

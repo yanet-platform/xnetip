@@ -54,7 +54,78 @@ func Test_Network4_Hostmask_ComplementProperty(t *testing.T) {
 // verifies that obtaining an IPv4 wildcard does not allocate.
 func Test_Network4_Hostmask_NoAllocations(t *testing.T) {
 	network := xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255")
-	requireNoAllocs(t, func() { _ = network.Hostmask() })
+	requireNoAllocs(t, func() { addrSink = network.Hostmask() })
+}
+
+// verifies that IPv4 parents clear the lowest constrained bit and
+// normalize the address, even when the remaining mask has holes.
+func Test_Network4_Supernet_MaskShapes(t *testing.T) {
+	cases := []struct {
+		name    string
+		network string
+		want    string
+	}{
+		{name: "CIDR parent clears a set address bit", network: "172.16.1.0/24", want: "172.16.0.0/23"},
+		{name: "CIDR parent keeps an already clear address bit", network: "172.16.0.0/24", want: "172.16.0.0/23"},
+		{name: "highest host route joins its neighbor", network: "255.255.255.255/32", want: "255.255.255.254/31"},
+		{name: "one-bit prefix reaches the universe", network: "128.0.0.0/1", want: "0.0.0.0/0"},
+		{name: "two-run low octet shortens first", network: "10.0.0.1/255.255.0.255", want: "10.0.0.0/255.255.0.254"},
+		{name: "two-run third octet shortens first", network: "10.0.1.0/255.0.255.0", want: "10.0.0.0/255.0.254.0"},
+		{name: "alternating mask keeps every higher bit", network: "170.85.170.85/170.85.170.85", want: "170.85.170.84/170.85.170.84"},
+		{name: "single interior mask bit reaches the universe", network: "0.0.1.0/0.0.1.0", want: "0.0.0.0/0"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parent, ok := xnetip.MustParseNetwork4(testCase.network).Supernet()
+			require.True(t, ok)
+			require.Equal(t, xnetip.MustParseNetwork4(testCase.want), parent)
+		})
+	}
+	parent, ok := (xnetip.Network4{}).Supernet()
+	require.False(t, ok)
+	require.Equal(t, xnetip.Network4{}, parent)
+}
+
+// verifies that arbitrary IPv4 parents match a bit-scan oracle,
+// contain the original set and have exactly twice as many addresses.
+func Test_Network4_Supernet_ParentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		wantMask, wantOK := supernetMaskOracle(network.Mask())
+		parent, ok := network.Supernet()
+		require.Equal(t, wantOK, ok)
+		if !ok {
+			require.Equal(t, xnetip.Network4{}, parent)
+			return
+		}
+		want, err := xnetip.Network4From(network.Addr(), wantMask)
+		require.NoError(t, err)
+		require.Equal(t, want, parent)
+		require.True(t, parent.Contains(network))
+		require.Equal(t, network.NumHostBits()+1, parent.NumHostBits())
+	})
+}
+
+// verifies that IPv4 parent chains end at the universe after exactly
+// as many steps as the original mask has constrained bits.
+func Test_Network4_Supernet_ChainProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		for range 32 - network.NumHostBits() {
+			parent, ok := network.Supernet()
+			require.True(t, ok)
+			network = parent
+		}
+		require.Equal(t, xnetip.Network4{}, network)
+		_, ok := network.Supernet()
+		require.False(t, ok)
+	})
+}
+
+// verifies that obtaining an IPv4 parent does not allocate.
+func Test_Network4_Supernet_NoAllocations(t *testing.T) {
+	network := xnetip.MustParseNetwork4("10.0.0.1/255.255.0.255")
+	requireNoAllocs(t, func() { networkSink, okSink = network.Supernet() })
 }
 
 // verifies that the constructor clears every address bit outside the

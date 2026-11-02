@@ -58,8 +58,74 @@ func Test_Network_Hostmask_NoAllocations(t *testing.T) {
 	network4 := xnetip.MustParseNetwork("10.0.0.0/255.0.255.0")
 	network6 := xnetip.MustParseNetwork("2001:db8::/ffff:ffff::ffff:0:0:0")
 	requireNoAllocs(t, func() {
-		_ = network4.Hostmask()
-		_ = network6.Hostmask()
+		addrSink = network4.Hostmask()
+		addrSink = network6.Hostmask()
+	})
+}
+
+// verifies that parents preserve their family and stop at that
+// family's universe without consuming the mapped storage prefix.
+func Test_Network_Supernet_PreservesFamily(t *testing.T) {
+	cases := []struct {
+		name    string
+		network string
+		want    string
+	}{
+		{name: "IPv4 parent remains IPv4", network: "192.168.1.0/24", want: "192.168.0.0/23"},
+		{name: "IPv4 single bit reaches the IPv4 universe", network: "128.0.0.0/1", want: "0.0.0.0/0"},
+		{name: "IPv6 parent remains IPv6", network: "2001:db8:1::/48", want: "2001:db8::/47"},
+		{name: "mapped IPv6 stays IPv6", network: "::ffff:192.0.2.1/128", want: "::ffff:192.0.2.0/127"},
+		{name: "mapped IPv6 may widen beyond the mapped range", network: "::ffff:0:0/96", want: "::fffe:0:0/95"},
+		{name: "IPv4 holes stay in IPv4", network: "170.85.170.85/170.85.170.85", want: "170.85.170.84/170.85.170.84"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			parent, ok := xnetip.MustParseNetwork(testCase.network).Supernet()
+			require.True(t, ok)
+			require.Equal(t, xnetip.MustParseNetwork(testCase.want), parent)
+		})
+	}
+	for _, universe := range []xnetip.Network{{}, xnetip.MustParseNetwork("0.0.0.0/0")} {
+		parent, ok := universe.Supernet()
+		require.False(t, ok)
+		require.Equal(t, xnetip.Network{}, parent)
+	}
+}
+
+// verifies that mixed-family parents agree with their concrete
+// family while retaining the original family tag.
+func Test_Network_Supernet_FamilyProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork.Draw(t, "network")
+		parent, ok := network.Supernet()
+		if concrete, is4 := network.IPv4(); is4 {
+			want, wantOK := concrete.Supernet()
+			require.Equal(t, wantOK, ok)
+			if ok {
+				require.Equal(t, xnetip.NetworkFrom4(want), parent)
+			}
+		} else {
+			concrete, is6 := network.IPv6()
+			require.True(t, is6)
+			want, wantOK := concrete.Supernet()
+			require.Equal(t, wantOK, ok)
+			if ok {
+				require.Equal(t, xnetip.NetworkFrom6(want), parent)
+			}
+		}
+		if !ok {
+			require.Equal(t, xnetip.Network{}, parent)
+		}
+	})
+}
+
+// verifies that obtaining either family's parent does not allocate.
+func Test_Network_Supernet_NoAllocations(t *testing.T) {
+	network4 := xnetip.MustParseNetwork("10.0.0.1/255.255.0.255")
+	network6 := xnetip.MustParseNetwork("2001:db8::/64")
+	requireNoAllocs(t, func() {
+		ipNetworkSink, okSink = network4.Supernet()
+		ipNetworkSink, okSink = network6.Supernet()
 	})
 }
 

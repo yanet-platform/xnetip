@@ -204,6 +204,20 @@ func (m BiContiguous) MergeByLowestMaskBit(other BiContiguous) (BiContiguous, bo
 	return BiContiguous{network6: merged}, true
 }
 
+// Supernet returns the bi-contiguous network one mask bit wider.
+//
+// The low half's leading run is shortened when nonempty, otherwise
+// the high half's run is shortened. Both halves remain contiguous,
+// so the result keeps the wrapper without validation. The universe
+// returns false with a zero wrapper.
+func (m BiContiguous) Supernet() (BiContiguous, bool) {
+	parent, ok := m.network6.Supernet()
+	if !ok {
+		return BiContiguous{}, false
+	}
+	return BiContiguous{network6: parent}, true
+}
+
 // Difference returns the bi-contiguous networks whose union is m
 // without other.
 //

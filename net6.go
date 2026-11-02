@@ -271,6 +271,68 @@ func (m Network6) NumHostBits() int {
 	return m.mask.bits.Not().OnesCount()
 }
 
+// Subnets partitions the network into networks with the given mask.
+//
+// The mask must preserve every bit fixed by the parent. Each combination
+// of newly fixed bits yields one subnet, in ascending address order.
+// Either mask may be non-contiguous, and equal masks yield the parent.
+// An invalid or non-IPv6 mask, or one dropping a fixed bit, returns an empty
+// sequence. IPv4-mapped masks are IPv6 and zones are dropped. The sequence
+// is re-iterable, allocation-free and stops when its consumer breaks.
+func (m Network6) Subnets(mask netip.Addr) iter.Seq[Network6] {
+	return func(yield func(Network6) bool) {
+		kernel, ok := m.subnetMask(mask)
+		if !ok {
+			return
+		}
+		extra := kernel.bits.AndNot(m.mask.bits)
+		last := m.addr.bits.Or(extra)
+		for cursor := m.addr.bits; ; cursor = cursor.Or(extra.Not()).AddOne().And(extra).Or(m.addr.bits) {
+			if !yield(Network6{addr: addr6{cursor}, mask: kernel}) || cursor == last {
+				return
+			}
+		}
+	}
+}
+
+// subnetMask validates the family and preservation of the parent's fixed bits.
+func (m Network6) subnetMask(mask netip.Addr) (addr6, bool) {
+	kernel, ok := addr6FromNetip(mask)
+	return kernel, ok && kernel.bits.And(m.mask.bits) == m.mask.bits
+}
+
+// SubnetsWithPrefix partitions the network into typed CIDR blocks.
+//
+// The prefix must be in 0 through 128 and cover every fixed bit of the
+// parent, which may have a non-contiguous mask. Otherwise the result is
+// an empty sequence. Blocks follow ascending address order and partition the
+// parent's addresses exactly. The sequence is re-iterable, allocation-free
+// and stops when its consumer breaks.
+func (m Network6) SubnetsWithPrefix(prefix int) iter.Seq[Contiguous[Network6]] {
+	return func(yield func(Contiguous[Network6]) bool) {
+		mask, ok := m.subnetPrefixMask(prefix)
+		if !ok {
+			return
+		}
+		extra := mask.bits.AndNot(m.mask.bits)
+		last := m.addr.bits.Or(extra)
+		for cursor := m.addr.bits; ; cursor = cursor.Or(extra.Not()).AddOne().And(extra).Or(m.addr.bits) {
+			if !yield(Contiguous[Network6]{network: Network6{addr: addr6{cursor}, mask: mask}}) || cursor == last {
+				return
+			}
+		}
+	}
+}
+
+// subnetPrefixMask validates the prefix and preservation of the fixed bits.
+func (m Network6) subnetPrefixMask(prefix int) (addr6, bool) {
+	if prefix < 0 || prefix > 128 {
+		return addr6{}, false
+	}
+	mask := addr6{uint128MaskFromPrefix(prefix)}
+	return mask, mask.bits.And(m.mask.bits) == m.mask.bits
+}
+
 // AddrIterator returns an independent cursor over every network address.
 //
 // The cursor supports both ends, constant-time stepping and indexed skipping
@@ -702,6 +764,21 @@ func (m Network6) MergeByLowestMaskBit(other Network6) (Network6, bool) {
 		return other, true
 	}
 	return Network6{}, false
+}
+
+// Supernet returns the network one mask bit wider, or false for /0.
+//
+// The lowest constrained bit is cleared and the address is normalized
+// under the wider mask. The result contains this network and its sibling
+// across that bit, with twice as many addresses. For a CIDR block its
+// prefix is one bit shorter. A zero network is returned on false.
+func (m Network6) Supernet() (Network6, bool) {
+	mask := m.mask.bits
+	if mask.IsZero() {
+		return Network6{}, false
+	}
+	mask = mask.ClearLowestSetBit()
+	return fromBits6(m.addr, addr6{mask}), true
 }
 
 // SupernetFor returns the smallest network containing this network
