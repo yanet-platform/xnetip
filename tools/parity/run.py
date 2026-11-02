@@ -107,6 +107,123 @@ def corpus(seed):
     return records
 
 
+
+def extension_corpus(seed):
+    """Exercise additive APIs without changing the established core corpus."""
+    randomizer = random.Random(seed ^ 0xE0148)
+    records = []
+
+    def emit(operation, *values):
+        records.append(operation + " " + " ".join(f"{value:x}" for value in values))
+
+    def text(operation, value):
+        records.append(operation + " " + (value.hex() or "-"))
+
+    for width, family in [(32, "4"), (128, "6")]:
+        full = (1 << width) - 1
+        for idx in range(1000):
+            mask = prefix_mask(width, randomizer.randrange(width + 1)) if idx % 2 else randomizer.getrandbits(width)
+            address = randomizer.getrandbits(width) & mask
+            child = mask
+            for position in randomizer.sample(range(width), randomizer.randrange(5)):
+                child |= 1 << position
+            if idx % 3 == 0:
+                child = randomizer.getrandbits(width)
+            prefix = randomizer.randrange(width + 2)
+            # Prefixes are decimal in the line protocol, unlike the bit words.
+            records.append(f"s{family} {address:x} {mask:x} {child:x} {prefix}")
+        for idx in range(750):
+            host_bits = randomizer.choice([0, 1, 2, min(32, width), min(63, width), min(64, width), min(65, width), width])
+            positions = randomizer.sample(range(width), host_bits)
+            mask = full
+            for position in positions:
+                mask ^= 1 << position
+            if idx % 3 == 0:
+                mask = prefix_mask(width, width-host_bits)
+            address = randomizer.getrandbits(width) & mask
+            if width == 128 and idx % 11 == 0:
+                mask |= prefix_mask(128, 96)
+                address = (0xffff << 32) | (address & 0xffffffff)
+            script = []
+            for step in range(16):
+                skip = randomizer.choice([0, 1, 2, 7, 63, (1 << 64)-1, randomizer.getrandbits(64)])
+                if step < 4:
+                    skip = randomizer.randrange(3)
+                script.extend([randomizer.choice(["f", "b"]), f"{skip:x}"])
+            records.append(f"i{family} {address:x} {mask:x} " + " ".join(script))
+        # Pin maximum skips from a fresh cursor on both sides of 64-bit count
+        # overflow, including scattered host positions and nonzero base bits.
+        for host_bits in sorted({0, 1, min(32, width), min(63, width), min(64, width), min(65, width), width}):
+            for scattered in [False, True]:
+                mask = prefix_mask(width, width-host_bits)
+                if scattered:
+                    mask = full
+                    for position in [(idx*(width//2+1)) % width for idx in range(host_bits)]:
+                        mask ^= 1 << position
+                address = int("a5"*(width//8), 16) & mask
+                for direction, opposite in [("f", "b"), ("b", "f")]:
+                    records.append(f"i{family} {address:x} {mask:x} {direction} ffffffffffffffff {opposite} 0 {direction} 1 {opposite} ffffffffffffffff {direction} 0")
+        for idx in range(500):
+            count = [0, 1, 2, 3, 4, 15, 16, 31, 32, 63, 64, 128, 256][idx % 13]
+            networks = []
+            for position in range(count):
+                mask = full ^ randomizer.getrandbits(8) if idx % 3 else randomizer.getrandbits(width)
+                address = randomizer.randrange(1 << min(width, 16)) & mask
+                if networks and position % 5 == 0:
+                    address, mask = randomizer.choice(networks)
+                networks.append((address, mask))
+            randomizer.shuffle(networks)
+            values = [value for network in networks for value in network]
+            emit("j"+family, *values)
+    for idx in range(1000):
+        value = randomizer.getrandbits(64 if idx % 5 == 0 else 48)
+        emit("m", value)
+        identifier = randomizer.getrandbits(64)
+        if idx % 2:
+            identifier = (identifier & ~(0xffff << 24)) | (0xfffe << 24)
+        emit("e", identifier)
+        group4 = randomizer.getrandbits(32)
+        group6 = randomizer.getrandbits(128)
+        if idx % 2:
+            group4 = (group4 & 0x0fffffff) | 0xe0000000
+            group6 |= 0xff << 120
+        emit("v4", group4)
+        emit("v6", group6)
+        digits = f"{randomizer.getrandbits(48):012x}"
+        if idx % 3 == 0:
+            mac = ":".join(digits[position:position+2] for position in range(0, 12, 2))
+        elif idx % 3 == 1:
+            mac = "-".join(digits[position:position+2] for position in range(0, 12, 2))
+        else:
+            mac = ".".join(digits[position:position+4] for position in range(0, 12, 4))
+        if idx % 2:
+            mac = mac.upper()
+        encoded = mac.encode()
+        if idx % 5 == 0:
+            position = randomizer.randrange(len(encoded))
+            encoded = encoded[:position] + bytes([randomizer.randrange(256)]) + encoded[position+1:]
+        text("mt", encoded)
+    for value in [0, 1, (1 << 48)-1, 1 << 48, (1 << 64)-1]:
+        emit("m", value)
+    for value in [0, 0xffffffff, 0xdfffffff, 0xe0000000, 0xefffffff, 0xf0000000]:
+        emit("v4", value)
+    for value in [0, (0xff << 120)-1, 0xff << 120, (1 << 128)-1, (0xffff << 32) | 0xe0000001]:
+        emit("v6", value)
+    for value in [b"", b"aabbccddeeff", b"AA-BB-CC-DD-EE-FF", b"aabb.ccdd.eeff", b"aa:bb:cc:dd:ee:ff:00:11", b"aa:bb-cc:dd:ee:ff", b"aa:bb:cc:dd:ee:gg"]:
+        text("mt", value)
+    for idx in range(1000):
+        width = randomizer.choice([32, 128])
+        address = ipaddress.IPv4Address(randomizer.getrandbits(32)) if width == 32 else ipaddress.IPv6Address(randomizer.getrandbits(128))
+        network = f"{address}/{randomizer.randrange(width+1)}".encode()
+        text("ta", network)
+        for tail in randomizer.sample([b" allow", b" deny", b"%eth0", b"\xfftail", b",next", b":8080", b"/8", b"allow", b"\n"], 2):
+            text("tn", network+tail)
+    for value in [b"", b" ", b"::/256", b"1.2.3.4/24.1", b"::1\x00tail", b"fe80::1%eth0", b"1.2.3.4:8080", b"1.2.3.4abcd", b"::ffff:192.0.2.1/120 allow"]:
+        text("ta", value)
+        text("tn", value)
+    return records
+
+
 def command(arguments, **kwargs):
     return subprocess.run([str(argument) for argument in arguments], check=True, text=True, **kwargs)
 
@@ -123,10 +240,10 @@ def main():
     if revision != expected_revision:
         parser.error(f"reference is {revision}, expected {expected_revision}")
     command(["git", "diff", "--exit-code", "HEAD", "--", "src"], cwd=reference)
-    records = corpus(arguments.seed)
+    records = corpus(arguments.seed) + extension_corpus(arguments.seed)
     contracts = json.loads((TOOLS / "contracts.json").read_text())
     contract_start = len(records)
-    records += ["t " + case["input"].encode().hex() for case in contracts]
+    records += [case.get("operation", "t") + " " + (case["input"].encode().hex() or "-") for case in contracts]
     inputs = "\n".join(records) + "\n"
     outputs = {}
     with tempfile.TemporaryDirectory(prefix="xnetip-parity-") as temporary:

@@ -10,5 +10,9 @@
   {"input":"fe80::1%eth0/64","rust":"ERR","go":"ERR"},
   {"input":"10.0.0.1:8080","rust":"ERR","go":"ERR"},
   {"input":" 10.0.0.0/8","rust":"ERR","go":"ERR"},
-  {"input":"10.0.0.0/8 ","rust":"ERR","go":"ERR"}
+  {"input":"10.0.0.0/8 ","rust":"ERR","go":"ERR"},
+  {"operation":"ta","input":"10.1.2.3/+8","rust":"OK|10.0.0.0/8;ERR;OK|10.0.0.0/8","go":"ERR;ERR;ERR"},
+  {"operation":"ta","input":"2001:db8::1/0032","rust":"ERR;OK|2001:db8::/32;OK|2001:db8::/32","go":"ERR;ERR;ERR"},
+  {"operation":"tn","input":"10.1.2.3/+8 allow","rust":"OK|10.0.0.0/8|20616c6c6f77;ERR;OK|10.0.0.0/8|20616c6c6f77","go":"ERR;ERR;ERR"},
+  {"operation":"tn","input":"::/064 allow","rust":"ERR;OK|::/64|20616c6c6f77;OK|::/64|20616c6c6f77","go":"ERR;ERR;ERR"}
 ]
