@@ -174,15 +174,17 @@ func ParseNetwork(s string) (Network, error) {
 	return NetworkFrom6(network), nil
 }
 
-// parseText parses CIDR-block text for the generic contiguous
+// parseTextASCII parses CIDR-block bytes for the generic contiguous
 // wrapper, exactly as [ParseContiguous] does, its error labels included.
 //
 // The receiver is a zero-value dispatch token: a generic method
 // cannot name a per-family function, so the constraint carries this
 // route instead.
-func (Network) parseText(s string) (Network, error) {
-	block, err := ParseContiguous(s)
-	return block.Network(), err
+func (Network) parseTextASCII(text []byte) (Network, error) {
+	if network, ok := networkASCII(text); ok && network.IsContiguous() {
+		return network, nil
+	}
+	return Network{}, asciiParseError(text, "ParseContiguous", ParseContiguous)
 }
 
 // MustParseNetwork calls [ParseNetwork] and panics on error.
@@ -823,7 +825,7 @@ func (m *Network) UnmarshalText(text []byte) error {
 	if len(text) == 0 {
 		return wrapParseError("Network.UnmarshalText", "", ErrEmptyInput, nil)
 	}
-	network, err := ParseNetwork(string(text))
+	network, err := parseNetworkASCII(text, "ParseNetwork")
 	if err != nil {
 		return err
 	}

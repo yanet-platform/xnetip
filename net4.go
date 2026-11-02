@@ -208,15 +208,17 @@ func parsePrefixLenText(text string, limit int) (bits int, isPrefixForm, ok bool
 	return value, true, true
 }
 
-// parseText parses CIDR-block text for the generic contiguous
+// parseTextASCII parses CIDR-block bytes for the generic contiguous
 // wrapper, exactly as [ParseContiguous4] does, its error labels included.
 //
 // The receiver is a zero-value dispatch token: a generic method
 // cannot name a per-family function, so the constraint carries this
 // route instead.
-func (Network4) parseText(s string) (Network4, error) {
-	block, err := ParseContiguous4(s)
-	return block.Network(), err
+func (Network4) parseTextASCII(text []byte) (Network4, error) {
+	if network, ok := network4ASCII(text); ok && network.IsContiguous() {
+		return network, nil
+	}
+	return Network4{}, asciiParseError(text, "ParseContiguous4", ParseContiguous4)
 }
 
 // MustParseNetwork4 calls [ParseNetwork4] and panics on error.
@@ -933,7 +935,7 @@ func (m *Network4) UnmarshalText(text []byte) error {
 	if len(text) == 0 {
 		return wrapParseError("Network4.UnmarshalText", "", ErrEmptyInput, nil)
 	}
-	network, err := ParseNetwork4(string(text))
+	network, err := parseNetwork4ASCII(text, "ParseNetwork4")
 	if err != nil {
 		return err
 	}

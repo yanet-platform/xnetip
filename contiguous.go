@@ -580,7 +580,7 @@ func (m *Contiguous[T]) UnmarshalText(text []byte) error {
 	if len(text) == 0 {
 		return wrapParseError("Contiguous.UnmarshalText", "", ErrEmptyInput, nil)
 	}
-	network, err := m.network.parseText(string(text))
+	network, err := m.network.parseTextASCII(text)
 	if err != nil {
 		return err
 	}
@@ -614,9 +614,9 @@ type network[T any] interface {
 	// Prefix is the concrete type's own comma-ok [netip.Prefix] view.
 	Prefix() (netip.Prefix, bool)
 
-	// parseText is the concrete type's route to its family-specific
+	// parseTextASCII is the concrete type's route to its family-specific
 	// contiguous parser, called on a zero value as a dispatch token.
-	parseText(string) (T, error)
+	parseTextASCII([]byte) (T, error)
 
 	// containsContiguous is the concrete type's containment kernel
 	// for two CIDR operands.
