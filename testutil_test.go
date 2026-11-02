@@ -15,6 +15,7 @@ import (
 	"iter"
 	"math"
 	"net/netip"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,6 +35,22 @@ func requireNoAllocs(t require.TestingT, run func()) {
 	}
 	allocs := int(testing.AllocsPerRun(100, run))
 	require.Zero(t, allocs, "allocations per call")
+}
+
+// supernetMaskOracle clears the first constrained bit found by a
+// least-significant-first scan, preserving the address family.
+func supernetMaskOracle(mask netip.Addr) (netip.Addr, bool) {
+	octets := mask.AsSlice()
+	for idx, octet := range slices.Backward(octets) {
+		for bitOffset := range 8 {
+			bit := byte(1 << bitOffset)
+			if octet&bit != 0 {
+				octets[idx] &^= bit
+				return netip.AddrFromSlice(octets)
+			}
+		}
+	}
+	return netip.Addr{}, false
 }
 
 // verifies that an allocation-free closure passes the helper.

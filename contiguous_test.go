@@ -14,6 +14,97 @@ import (
 	"pgregory.net/rapid"
 )
 
+// verifies that every IPv4 CIDR parent shortens the prefix while
+// matching the standard library's normalized parent block.
+func Test_Contiguous_Supernet_IPv4Prefixes(t *testing.T) {
+	addr := netip.MustParseAddr("255.255.255.255")
+	for prefix := 1; prefix <= 32; prefix++ {
+		block, err := xnetip.ContiguousFromCIDR4(addr, prefix)
+		require.NoError(t, err)
+		parent, ok := block.Supernet()
+		require.True(t, ok)
+		require.Equal(t, netip.PrefixFrom(addr, prefix-1).Masked(), parent.Prefix())
+	}
+	parent, ok := (xnetip.Contiguous[xnetip.Network4]{}).Supernet()
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network4]{}, parent)
+}
+
+// verifies that every IPv6 CIDR parent shortens the prefix across
+// the half boundary and matches a normalized standard library block.
+func Test_Contiguous_Supernet_IPv6Prefixes(t *testing.T) {
+	addr := netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+	for prefix := 1; prefix <= 128; prefix++ {
+		block, err := xnetip.ContiguousFromCIDR6(addr, prefix)
+		require.NoError(t, err)
+		parent, ok := block.Supernet()
+		require.True(t, ok)
+		require.Equal(t, netip.PrefixFrom(addr, prefix-1).Masked(), parent.Prefix())
+	}
+	parent, ok := (xnetip.Contiguous[xnetip.Network6]{}).Supernet()
+	require.False(t, ok)
+	require.Equal(t, xnetip.Contiguous[xnetip.Network6]{}, parent)
+}
+
+// verifies that mixed-family CIDR parents preserve their family and
+// that both universe blocks return the zero wrapper on failure.
+func Test_Contiguous_Supernet_MixedFamilies(t *testing.T) {
+	for _, text := range []string{"192.168.1.0/24", "2001:db8:1::/48", "::ffff:0:0/96"} {
+		block := xnetip.MustParseContiguous(text)
+		parent, ok := block.Supernet()
+		require.True(t, ok)
+		require.Equal(t, block.Network().Is4(), parent.Network().Is4())
+		require.Equal(t, netip.PrefixFrom(block.Prefix().Addr(), block.PrefixLen()-1).Masked(), parent.Prefix())
+	}
+	for _, block := range []xnetip.Contiguous[xnetip.Network]{
+		{}, xnetip.MustParseContiguous("0.0.0.0/0"),
+	} {
+		parent, ok := block.Supernet()
+		require.False(t, ok)
+		require.Equal(t, xnetip.Contiguous[xnetip.Network]{}, parent)
+	}
+}
+
+// verifies that arbitrary typed CIDR parents remain contiguous,
+// preserve families and double the original address count.
+func Test_Contiguous_Supernet_ParentProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		block4 := genContiguous4.Draw(t, "block4")
+		parent4, ok4 := block4.Supernet()
+		require.Equal(t, block4.PrefixLen() > 0, ok4)
+		if ok4 {
+			require.Equal(t, netip.PrefixFrom(block4.Prefix().Addr(), block4.PrefixLen()-1).Masked(), parent4.Prefix())
+			require.True(t, parent4.Contains(block4))
+		}
+		block6 := genContiguous6.Draw(t, "block6")
+		parent6, ok6 := block6.Supernet()
+		require.Equal(t, block6.PrefixLen() > 0, ok6)
+		if ok6 {
+			require.Equal(t, netip.PrefixFrom(block6.Prefix().Addr(), block6.PrefixLen()-1).Masked(), parent6.Prefix())
+			require.True(t, parent6.Contains(block6))
+		}
+		block := genContiguous.Draw(t, "block")
+		parent, ok := block.Supernet()
+		require.Equal(t, block.PrefixLen() > 0, ok)
+		if ok {
+			require.Equal(t, netip.PrefixFrom(block.Prefix().Addr(), block.PrefixLen()-1).Masked(), parent.Prefix())
+			require.True(t, parent.Contains(block))
+		}
+	})
+}
+
+// verifies that typed CIDR parents do not allocate in any instantiation.
+func Test_Contiguous_Supernet_NoAllocations(t *testing.T) {
+	block4 := xnetip.MustParseContiguous4("192.168.1.0/24")
+	block6 := xnetip.MustParseContiguous6("2001:db8::/64")
+	block := xnetip.MustParseContiguous("::ffff:0:0/96")
+	requireNoAllocs(t, func() {
+		contiguous4Sink, okSink = block4.Supernet()
+		contiguous6Sink, okSink = block6.Supernet()
+		contiguousSink, okSink = block.Supernet()
+	})
+}
+
 // mustContiguous4 wraps a parsed IPv4 network fixture, stopping the
 // test when its mask is not contiguous.
 func mustContiguous4(t require.TestingT, text string) xnetip.Contiguous[xnetip.Network4] {

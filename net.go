@@ -622,6 +622,28 @@ func (m Network) MergeByLowestMaskBit(other Network) (Network, bool) {
 	return Network{network: network, is4: m.is4}, true
 }
 
+// Supernet returns the network one mask bit wider in the same family.
+//
+// The lowest constrained bit is cleared and the address is normalized
+// under the wider mask. The result has twice as many addresses. Both
+// families' /0 networks return false with a zero network. An IPv4-mapped
+// IPv6 network remains IPv6, including when its parent extends outside
+// the mapped range.
+func (m Network) Supernet() (Network, bool) {
+	if m.is4 {
+		parent, ok := m.unwrap4().Supernet()
+		if !ok {
+			return Network{}, false
+		}
+		return NetworkFrom4(parent), true
+	}
+	parent, ok := m.network.Supernet()
+	if !ok {
+		return Network{}, false
+	}
+	return NetworkFrom6(parent), true
+}
+
 // SupernetFor returns the smallest network containing this network
 // and every network in nets.
 //
