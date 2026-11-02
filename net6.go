@@ -696,6 +696,21 @@ func (m Network6) MergeByLowestMaskBit(other Network6) (Network6, bool) {
 	return Network6{}, false
 }
 
+// Supernet returns the network one mask bit wider, or false for /0.
+//
+// The lowest constrained bit is cleared and the address is normalized
+// under the wider mask. The result contains this network and its sibling
+// across that bit, with twice as many addresses. For a CIDR block its
+// prefix is one bit shorter. A zero network is returned on false.
+func (m Network6) Supernet() (Network6, bool) {
+	mask := m.mask.bits
+	if mask.IsZero() {
+		return Network6{}, false
+	}
+	mask = mask.ClearLowestSetBit()
+	return fromBits6(m.addr, addr6{mask}), true
+}
+
 // SupernetFor returns the smallest network containing this network
 // and every network in nets.
 //

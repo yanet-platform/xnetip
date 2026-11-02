@@ -422,6 +422,19 @@ func (m Contiguous[T]) MergeByLowestMaskBit(other Contiguous[T]) (Contiguous[T],
 	return Contiguous[T]{network: merged}, true
 }
 
+// Supernet returns the block one prefix bit shorter, or false for /0.
+//
+// Clearing the leading run's lowest bit preserves contiguity, so the
+// result keeps the wrapper without validation. The address family is
+// unchanged, and a zero wrapper is returned on false.
+func (m Contiguous[T]) Supernet() (Contiguous[T], bool) {
+	parent, ok := m.network.Supernet()
+	if !ok {
+		return Contiguous[T]{}, false
+	}
+	return Contiguous[T]{network: parent}, true
+}
+
 // Difference returns the blocks whose union is the set difference
 // m \ other: every address of m that is not in other.
 //
@@ -593,6 +606,9 @@ type network[T any] interface {
 	// MergeByLowestMaskBit is the concrete type's own comma-ok merge
 	// at containment or the mask's lowest set bit.
 	MergeByLowestMaskBit(T) (T, bool)
+
+	// Supernet is the concrete type's same-family parent operation.
+	Supernet() (T, bool)
 
 	// contiguousLadderPart is the concrete type's kernel for one part
 	// of the CIDR difference ladder, built over the nested subtrahend.
