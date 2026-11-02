@@ -90,9 +90,9 @@ arithmetic, address kernel and error tests use `package xnetip`.
   the input slice; errors own rejected text.
 - `Contiguous[T]` proves one leading mask run. `BiContiguous` proves one
   leading run per 64-bit half. Typed operations preserve those guarantees.
-  General and bi-contiguous aggregation reach a merge fixpoint, preserving
-  the exact union, but do not promise a globally minimum arbitrary-mask
-  cover. CIDR aggregation does provide the minimal cover.
+  General and bi-contiguous aggregation reach a merge fixpoint within their
+  permitted mask class, preserving the exact union without promising a
+  globally minimum arbitrary-mask cover. CIDR aggregation is minimal.
 - Address streams use `iter.Seq`; `AddrIterator` provides resumable
   `Next`, `NextBack`, `Nth`, `NthBack` and a saturating `SizeHint`.
   Concrete subnet methods return a sequence directly: invalid refinements,

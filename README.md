@@ -145,11 +145,12 @@ wrappers expose their underlying network through `Network()`.
 ## Collection algorithms
 
 `Aggregate4` and `Aggregate6` collapse slices in place through duplicate
-removal, containment and arbitrary-mask merges. `AggregateBiContiguous6`
-keeps every result bi-contiguous. These algorithms preserve the exact union
-and continue until no pair can merge, without promising a globally minimum
-cover for arbitrary masks. `AggregateContiguous` produces the minimal CIDR
-cover and accepts all three `Contiguous` instantiations.
+removal, containment and arbitrary-mask merges until no pair can merge.
+`AggregateBiContiguous6` keeps every result bi-contiguous and continues until
+no permitted class-preserving merge remains. These algorithms preserve the
+exact union without promising a globally minimum cover for arbitrary masks.
+`AggregateContiguous` produces the minimal CIDR cover and accepts all three
+`Contiguous` instantiations.
 
 ```go
 networks := []xnetip.Network4{
