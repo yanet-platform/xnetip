@@ -477,6 +477,32 @@ func (m Contiguous[T]) Difference(other Contiguous[T]) iter.Seq[Contiguous[T]] {
 	}
 }
 
+// DifferenceBackward yields [Contiguous.Difference] in the opposite order.
+//
+// Each part retains its CIDR guarantee. A nested exclusion produces the
+// prefix ladder from the exclusion's length down to the source's length
+// plus one. Disjoint operands, including different families, yield the
+// source once. A containing exclusion yields nothing. The sequence is
+// allocation-free, re-iterable and stops on early exit.
+func (m Contiguous[T]) DifferenceBackward(other Contiguous[T]) iter.Seq[Contiguous[T]] {
+	return func(yield func(Contiguous[T]) bool) {
+		if other.network.containsContiguous(m.network) {
+			return
+		}
+		if !m.network.containsContiguous(other.network) {
+			yield(m)
+			return
+		}
+		first, _ := m.network.PrefixLen()
+		prefix, _ := other.network.PrefixLen()
+		for ; prefix > first; prefix-- {
+			if !yield(Contiguous[T]{network: other.network.contiguousLadderPart(prefix)}) {
+				return
+			}
+		}
+	}
+}
+
 // PrefixLen returns the prefix length of the block, total by the
 // contiguity invariant.
 //

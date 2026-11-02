@@ -515,6 +515,34 @@ func (m Network) Difference(other Network) iter.Seq[Network] {
 	}
 }
 
+// DifferenceBackward yields [Network.Difference] in the opposite order.
+//
+// Every part retains the source's family. Different families are disjoint
+// and yield the source once. Same-family operands use the concrete reverse
+// peel, including non-contiguous masks. The sequence is allocation-free,
+// re-iterable and stops when its consumer breaks.
+func (m Network) DifferenceBackward(other Network) iter.Seq[Network] {
+	return func(yield func(Network) bool) {
+		if m.is4 != other.is4 {
+			yield(m)
+			return
+		}
+		if m.is4 {
+			for part := range m.unwrap4().DifferenceBackward(other.unwrap4()) {
+				if !yield(NetworkFrom4(part)) {
+					return
+				}
+			}
+			return
+		}
+		for part := range m.network.DifferenceBackward(other.network) {
+			if !yield(NetworkFrom6(part)) {
+				return
+			}
+		}
+	}
+}
+
 // contiguousLadderPart returns one part of the CIDR difference
 // ladder built over this network as the nested subtrahend.
 //

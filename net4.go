@@ -594,6 +594,37 @@ func (m Network4) Difference(other Network4) iter.Seq[Network4] {
 	}
 }
 
+// DifferenceBackward yields [Network4.Difference] in the opposite order.
+//
+// The same pairwise-disjoint parts cover the source without the excluded
+// network. Disjoint operands yield the source once and a containing
+// exclusion yields nothing. Masks may be non-contiguous. Each step peels
+// the lowest remaining bit in constant time without buffering earlier parts.
+// The sequence is allocation-free, re-iterable and stops on early exit.
+func (m Network4) DifferenceBackward(other Network4) iter.Seq[Network4] {
+	return func(yield func(Network4) bool) {
+		intersected, ok := m.Intersection(other)
+		if !ok {
+			yield(m)
+			return
+		}
+		address := intersected.addr.bits
+		baseMask := m.mask.bits
+		remaining := intersected.mask.bits &^ baseMask
+		for remaining != 0 {
+			bit := remaining & -remaining
+			// Every still-pending bit lies at or above the current one.
+			// The base mask must not accumulate bits already peeled below it.
+			mask := baseMask | remaining
+			part := Network4{addr: addr4FromBits((address ^ bit) & mask), mask: addr4FromBits(mask)}
+			if !yield(part) {
+				return
+			}
+			remaining ^= bit
+		}
+	}
+}
+
 // contiguousLadderPart returns one part of the CIDR difference
 // ladder built over this network as the nested subtrahend.
 //
