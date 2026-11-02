@@ -303,6 +303,27 @@ func (m Network6) subnetMask(mask netip.Addr) (addr6, bool) {
 	return kernel, ok && kernel.bits.And(m.mask.bits) == m.mask.bits
 }
 
+// SubnetsBackward partitions the network in descending address order.
+//
+// It is the exact reverse of [Network6.Subnets] with the same mask and
+// family validation. Invalid masks produce an empty sequence, IPv4-mapped
+// masks stay IPv6 and zones are dropped. The sequence is re-iterable,
+// allocation-free and stops when its consumer breaks.
+func (m Network6) SubnetsBackward(mask netip.Addr) iter.Seq[Network6] {
+	return func(yield func(Network6) bool) {
+		kernel, ok := m.subnetMask(mask)
+		if !ok {
+			return
+		}
+		extra := kernel.bits.AndNot(m.mask.bits)
+		for offset := extra; ; offset = offset.SubOne().And(extra) {
+			if !yield(Network6{addr: addr6{m.addr.bits.Or(offset)}, mask: kernel}) || offset.IsZero() {
+				return
+			}
+		}
+	}
+}
+
 // SubnetsWithPrefix partitions the network into typed CIDR blocks.
 //
 // The prefix must be in 0 through 128 and cover every fixed bit of the
@@ -333,6 +354,27 @@ func (m Network6) subnetPrefixMask(prefix int) (addr6, bool) {
 	}
 	mask := addr6{uint128MaskFromPrefix(prefix)}
 	return mask, mask.bits.And(m.mask.bits) == m.mask.bits
+}
+
+// SubnetsWithPrefixBackward partitions the network into descending CIDRs.
+//
+// It is the exact reverse of [Network6.SubnetsWithPrefix]. A prefix outside
+// 0 through 128 or leaving any parent constraint uncovered yields an empty
+// sequence. The sequence is re-iterable, allocation-free and stops when
+// its consumer breaks.
+func (m Network6) SubnetsWithPrefixBackward(prefix int) iter.Seq[Contiguous[Network6]] {
+	return func(yield func(Contiguous[Network6]) bool) {
+		mask, ok := m.subnetPrefixMask(prefix)
+		if !ok {
+			return
+		}
+		extra := mask.bits.AndNot(m.mask.bits)
+		for offset := extra; ; offset = offset.SubOne().And(extra) {
+			if !yield(Contiguous[Network6]{network: Network6{addr: addr6{m.addr.bits.Or(offset)}, mask: mask}}) || offset.IsZero() {
+				return
+			}
+		}
+	}
 }
 
 // Addrs returns every address of the network in host-index order.
