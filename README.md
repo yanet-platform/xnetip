@@ -34,7 +34,9 @@ your build.
   `MacAddr` is an immutable, comparable EUI-48 value. Parse colon, hyphen
   or Cisco dotted text, format lowercase or uppercase, and use the address
   directly as a map key. `MacHyphens` and `MacDots` provide alternate text
-  forms. Parsing from bytes, text decoding and append formatting do not
+  forms. Convert modified EUI-64 interface identifiers, derive IPv6
+  link-local addresses, and map IPv4 or IPv6 multicast groups to Ethernet
+  addresses. Parsing from bytes, text decoding and append formatting do not
   allocate when output capacity is available.
 
 - **Three network types**
@@ -94,6 +96,17 @@ your build.
   networks print as `addr/prefix`, while non-contiguous networks print as
   `addr/mask`. `Compact` renders host routes as a bare `addr`. Strict parsing
   rejects leading zeros in the prefix length and zones at the input boundary.
+
+- **Byte parsing**
+
+  `ParseNetworkASCII` and its `4`/`6` variants parse byte buffers without
+  allocations. `ParseNextNetworkASCII` extracts the leading network token
+  and returns the remaining bytes without copying them. Tokens are maximal,
+  malformed tokens are rejected, and leading whitespace is never skipped.
+  The IPv4-only variant treats `:` as a delimiter, while the mixed and IPv6
+  variants include it in the token. All parsers keep the same strict prefix
+  grammar. `UnmarshalText` uses these byte kernels for every network type
+  and guarantee wrapper.
 
 - **`net/netip` interop**
 

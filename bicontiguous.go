@@ -240,6 +240,21 @@ func (m BiContiguous) Difference(other BiContiguous) iter.Seq[BiContiguous] {
 	}
 }
 
+// DifferenceBackward yields [BiContiguous.Difference] in the opposite order.
+//
+// The low-half extension is peeled before the high-half extension, each
+// from its lowest pending mask bit. Every part stays bi-contiguous. The
+// sequence is allocation-free, re-iterable and stops on early exit.
+func (m BiContiguous) DifferenceBackward(other BiContiguous) iter.Seq[BiContiguous] {
+	return func(yield func(BiContiguous) bool) {
+		for part := range m.network6.DifferenceBackward(other.network6) {
+			if !yield(BiContiguous{network6: part}) {
+				return
+			}
+		}
+	}
+}
+
 // AddrIterator returns an independent cursor over the rectangle's addresses.
 //
 // Both ends and indexed skipping preserve the IPv6 address family and the
@@ -385,10 +400,9 @@ func (m *BiContiguous) UnmarshalText(text []byte) error {
 	if len(text) == 0 {
 		return wrapParseError("BiContiguous.UnmarshalText", "", ErrEmptyInput, nil)
 	}
-	wrapper, err := ParseBiContiguous(string(text))
-	if err != nil {
-		return err
+	if network, ok := network6ASCII(text); ok && network.IsBicontiguous() {
+		*m = BiContiguous{network6: network}
+		return nil
 	}
-	*m = wrapper
-	return nil
+	return asciiParseError(text, "", ParseBiContiguous)
 }

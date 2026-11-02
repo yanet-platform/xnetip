@@ -477,6 +477,32 @@ func (m Contiguous[T]) Difference(other Contiguous[T]) iter.Seq[Contiguous[T]] {
 	}
 }
 
+// DifferenceBackward yields [Contiguous.Difference] in the opposite order.
+//
+// Each part retains its CIDR guarantee. A nested exclusion produces the
+// prefix ladder from the exclusion's length down to the source's length
+// plus one. Disjoint operands, including different families, yield the
+// source once. A containing exclusion yields nothing. The sequence is
+// allocation-free, re-iterable and stops on early exit.
+func (m Contiguous[T]) DifferenceBackward(other Contiguous[T]) iter.Seq[Contiguous[T]] {
+	return func(yield func(Contiguous[T]) bool) {
+		if other.network.containsContiguous(m.network) {
+			return
+		}
+		if !m.network.containsContiguous(other.network) {
+			yield(m)
+			return
+		}
+		first, _ := m.network.PrefixLen()
+		prefix, _ := other.network.PrefixLen()
+		for ; prefix > first; prefix-- {
+			if !yield(Contiguous[T]{network: other.network.contiguousLadderPart(prefix)}) {
+				return
+			}
+		}
+	}
+}
+
 // AddrIterator returns an independent cursor over the block's addresses.
 //
 // The contiguous mask enables constant-time indexed skipping in either
@@ -618,7 +644,7 @@ func (m *Contiguous[T]) UnmarshalText(text []byte) error {
 	if len(text) == 0 {
 		return wrapParseError("Contiguous.UnmarshalText", "", ErrEmptyInput, nil)
 	}
-	network, err := m.network.parseText(string(text))
+	network, err := m.network.parseTextASCII(text)
 	if err != nil {
 		return err
 	}
@@ -655,9 +681,9 @@ type network[T any] interface {
 	// Prefix is the concrete type's own comma-ok [netip.Prefix] view.
 	Prefix() (netip.Prefix, bool)
 
-	// parseText is the concrete type's route to its family-specific
+	// parseTextASCII is the concrete type's route to its family-specific
 	// contiguous parser, called on a zero value as a dispatch token.
-	parseText(string) (T, error)
+	parseTextASCII([]byte) (T, error)
 
 	// containsContiguous is the concrete type's containment kernel
 	// for two CIDR operands.
