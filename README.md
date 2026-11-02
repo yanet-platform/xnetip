@@ -5,7 +5,8 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 IPv4 and IPv6 network types for Go: `(addr, mask)` pairs with
-first-class non-contiguous masks and full set algebra.
+first-class non-contiguous masks and full set algebra, plus immutable
+EUI-48 Ethernet addresses.
 
 ```go
 // A mask net/netip cannot express — and every operation stays correct on it.
@@ -27,6 +28,14 @@ the test dependencies in `go.mod` (testify, rapid) are never pulled into
 your build.
 
 ## Overview
+
+- **MAC addresses**
+
+  `MacAddr` is an immutable, comparable EUI-48 value. Parse colon, hyphen
+  or Cisco dotted text, format lowercase or uppercase, and use the address
+  directly as a map key. `MacHyphens` and `MacDots` provide alternate text
+  forms. Parsing from bytes, text decoding and append formatting do not
+  allocate when output capacity is available.
 
 - **Three network types**
 

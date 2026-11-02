@@ -1,5 +1,5 @@
-// Package xnetip provides IPv4 and IPv6 network types with first-class
-// support for non-contiguous subnet masks.
+// Package xnetip provides IPv4 and IPv6 network types with arbitrary subnet
+// masks, and immutable EUI-48 Ethernet addresses.
 //
 // A network is an (address, mask) pair where the mask may be any bit
 // pattern, not only a run of leading ones. All operations — containment,

@@ -612,3 +612,12 @@ var (
 	biContiguousSink xnetip.BiContiguous
 	errSink          error
 )
+
+// genMacAddr draws every possible EUI-48 value without changing its high bits.
+var genMacAddr = rapid.Custom(func(t *rapid.T) xnetip.MacAddr {
+	return xnetip.MacAddrFrom6([6]byte{
+		rapid.Byte().Draw(t, "first octet"), rapid.Byte().Draw(t, "second octet"),
+		rapid.Byte().Draw(t, "third octet"), rapid.Byte().Draw(t, "fourth octet"),
+		rapid.Byte().Draw(t, "fifth octet"), rapid.Byte().Draw(t, "sixth octet"),
+	})
+})
