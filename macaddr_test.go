@@ -2,9 +2,11 @@ package xnetip_test
 
 import (
 	"encoding"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"slices"
 	"strings"
 	"testing"
@@ -14,7 +16,10 @@ import (
 	"pgregory.net/rapid"
 )
 
-var macAddrSink xnetip.MacAddr
+var (
+	macAddrSink       xnetip.MacAddr
+	macIdentifierSink uint64
+)
 
 var (
 	_ encoding.TextMarshaler   = xnetip.MacAddr{}
@@ -407,4 +412,221 @@ func ExampleMacAddr() {
 	// Output:
 	// 3a:ac:26:9b:5b:f9
 	// 3A:AC:26:9B:5B:F9
+}
+
+// verifies modified EUI-64 construction flips the administration bit, inserts
+// the marker octets and reverses exactly for zero, broadcast and host values.
+func Test_MacAddr_ModifiedEUI64(t *testing.T) {
+	cases := []struct {
+		address    string
+		identifier uint64
+	}{
+		{"00:11:22:33:44:55", 0x021122fffe334455},
+		{"3a:ac:26:9b:5b:f9", 0x38ac26fffe9b5bf9},
+		{"00:00:00:00:00:00", 0x020000fffe000000},
+		{"ff:ff:ff:ff:ff:ff", 0xfdfffffffeffffff},
+	}
+	for _, testCase := range cases {
+		address := xnetip.MustParseMacAddr(testCase.address)
+		require.Equal(t, testCase.identifier, address.ToModifiedEUI64())
+		converted, ok := xnetip.MacAddrFromModifiedEUI64(testCase.identifier)
+		require.True(t, ok)
+		require.Equal(t, address, converted)
+	}
+	for _, identifier := range []uint64{0, ^uint64(0), 0x021122feff334455, 0x021122ffff334455} {
+		address, ok := xnetip.MacAddrFromModifiedEUI64(identifier)
+		require.False(t, ok)
+		require.Equal(t, xnetip.MacAddr{}, address)
+	}
+	for position := 24; position < 40; position++ {
+		address, ok := xnetip.MacAddrFromModifiedEUI64(0x021122fffe334455 ^ uint64(1)<<position)
+		require.False(t, ok)
+		require.Equal(t, xnetip.MacAddr{}, address)
+	}
+}
+
+// verifies every octet contributes to the identifier in its specified byte
+// position, and arbitrary identifiers decode exactly when the marker matches.
+func Test_MacAddr_ModifiedEUI64Property(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		address := genMacAddr.Draw(t, "address")
+		octets := address.As6()
+		expected := binary.BigEndian.Uint64([]byte{
+			octets[0] ^ 2, octets[1], octets[2], 0xff, 0xfe, octets[3], octets[4], octets[5],
+		})
+		require.Equal(t, expected, address.ToModifiedEUI64())
+		converted, ok := xnetip.MacAddrFromModifiedEUI64(expected)
+		require.True(t, ok)
+		require.Equal(t, address, converted)
+		identifier := rapid.Uint64().Draw(t, "identifier")
+		if rapid.Bool().Draw(t, "valid marker") {
+			identifier = identifier&^(uint64(0xffff)<<24) | uint64(0xfffe)<<24
+		}
+		var identifierBytes [8]byte
+		binary.BigEndian.PutUint64(identifierBytes[:], identifier)
+		converted, ok = xnetip.MacAddrFromModifiedEUI64(identifier)
+		require.Equal(t, identifierBytes[3] == 0xff && identifierBytes[4] == 0xfe, ok)
+		if ok {
+			require.Equal(t, identifier, converted.ToModifiedEUI64())
+		}
+	})
+}
+
+// verifies link-local conversion places the modified identifier below the
+// exact link-local prefix and never attaches a scope zone.
+func Test_MacAddr_ToIPv6LinkLocal(t *testing.T) {
+	cases := []struct{ address, expected string }{
+		{"00:11:22:33:44:55", "fe80::211:22ff:fe33:4455"},
+		{"00:00:00:00:00:00", "fe80::200:ff:fe00:0"},
+		{"ff:ff:ff:ff:ff:ff", "fe80::fdff:ffff:feff:ffff"},
+	}
+	for _, testCase := range cases {
+		require.Equal(t, netip.MustParseAddr(testCase.expected), xnetip.MustParseMacAddr(testCase.address).ToIPv6LinkLocal())
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		address := genMacAddr.Draw(t, "address")
+		converted := address.ToIPv6LinkLocal()
+		octets := converted.As16()
+		require.Equal(t, [8]byte{0xfe, 0x80}, [8]byte(octets[:8]))
+		require.Equal(t, address.ToModifiedEUI64(), binary.BigEndian.Uint64(octets[8:]))
+		require.True(t, converted.Is6())
+		require.True(t, converted.IsLinkLocalUnicast())
+		require.Empty(t, converted.Zone())
+	})
+}
+
+// verifies IPv4 multicast groups map their low 23 bits and all foreign,
+// invalid, broadcast and immediately adjacent non-group addresses fail.
+func Test_MacAddrFromIPv4Multicast(t *testing.T) {
+	cases := []struct{ group, expected string }{
+		{"224.0.0.1", "01:00:5e:00:00:01"},
+		{"224.0.0.251", "01:00:5e:00:00:fb"},
+		{"239.255.255.250", "01:00:5e:7f:ff:fa"},
+		{"224.0.0.0", "01:00:5e:00:00:00"},
+		{"239.255.255.255", "01:00:5e:7f:ff:ff"},
+		{"224.1.1.1", "01:00:5e:01:01:01"},
+		{"239.129.1.1", "01:00:5e:01:01:01"},
+		{"223.255.255.255", ""},
+		{"240.0.0.0", ""},
+		{"0.0.0.0", ""},
+		{"255.255.255.255", ""},
+		{"::ffff:224.0.0.1", ""},
+		{"ff02::1", ""},
+		{"ff02::1%eth0", ""},
+		{"", ""},
+	}
+	for _, testCase := range cases {
+		group := netip.Addr{}
+		if testCase.group != "" {
+			group = netip.MustParseAddr(testCase.group)
+		}
+		address, ok := xnetip.MacAddrFromIPv4Multicast(group)
+		require.Equal(t, testCase.expected != "", ok, testCase.group)
+		if ok {
+			require.Equal(t, testCase.expected, address.String())
+		} else {
+			require.Equal(t, xnetip.MacAddr{}, address)
+		}
+	}
+}
+
+// verifies IPv6 groups map their last four octets, scoped group input drops
+// its zone, and mapped IPv4 multicast never passes the IPv6 family boundary.
+func Test_MacAddrFromIPv6Multicast(t *testing.T) {
+	cases := []struct{ group, expected string }{
+		{"ff02::1", "33:33:00:00:00:01"},
+		{"ff02::fb", "33:33:00:00:00:fb"},
+		{"ff02::1:ff33:4455", "33:33:ff:33:44:55"},
+		{"ff00::", "33:33:00:00:00:00"},
+		{"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "33:33:ff:ff:ff:ff"},
+		{"ff02::1%eth0", "33:33:00:00:00:01"},
+		{"feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", ""},
+		{"::", ""},
+		{"2001:db8::1", ""},
+		{"::ffff:224.0.0.1", ""},
+		{"::ffff:224.0.0.1%eth0", ""},
+		{"224.0.0.1", ""},
+		{"", ""},
+	}
+	for _, testCase := range cases {
+		group := netip.Addr{}
+		if testCase.group != "" {
+			group = netip.MustParseAddr(testCase.group)
+		}
+		address, ok := xnetip.MacAddrFromIPv6Multicast(group)
+		require.Equal(t, testCase.expected != "", ok, testCase.group)
+		if ok {
+			require.Equal(t, testCase.expected, address.String())
+		} else {
+			require.Equal(t, xnetip.MacAddr{}, address)
+		}
+	}
+}
+
+// verifies group classification agrees with the standard address predicates
+// and mapping agrees with independent octet definitions on biased inputs.
+func Test_MacAddr_MulticastMappingProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		first := rapid.Byte().Draw(t, "IPv4 first octet")
+		if rapid.Bool().Draw(t, "IPv4 group") {
+			first = first&15 | 224
+		}
+		four := [4]byte{first, rapid.Byte().Draw(t, "IPv4 second octet"), rapid.Byte().Draw(t, "IPv4 third octet"), rapid.Byte().Draw(t, "IPv4 fourth octet")}
+		group4 := netip.AddrFrom4(four)
+		address, ok := xnetip.MacAddrFromIPv4Multicast(group4)
+		require.Equal(t, group4.IsMulticast(), ok)
+		if ok {
+			require.Equal(t, [6]byte{1, 0, 0x5e, four[1] & 0x7f, four[2], four[3]}, address.As6())
+			require.True(t, address.IsMulticast())
+		}
+		group6 := genNetwork6.Draw(t, "IPv6 network").Addr()
+		sixteen := group6.As16()
+		if rapid.Bool().Draw(t, "IPv6 group") {
+			sixteen[0] = 255
+		}
+		group6 = netip.AddrFrom16(sixteen)
+		address, ok = xnetip.MacAddrFromIPv6Multicast(group6)
+		require.Equal(t, sixteen[0] == 255, ok)
+		if ok {
+			require.Equal(t, [6]byte{0x33, 0x33, sixteen[12], sixteen[13], sixteen[14], sixteen[15]}, address.As6())
+			require.True(t, address.IsMulticast())
+		}
+	})
+}
+
+// verifies identifier, link-local and successful or rejected multicast
+// conversions allocate no memory, including foreign-family and scoped input.
+func Test_MacAddr_IPConversionsAllocationFree(t *testing.T) {
+	address := xnetip.MustParseMacAddr("00:11:22:33:44:55")
+	identifier := address.ToModifiedEUI64()
+	group4 := netip.MustParseAddr("224.0.0.251")
+	group6 := netip.MustParseAddr("ff02::fb%eth0")
+	mapped := netip.MustParseAddr("::ffff:224.0.0.251")
+	requireNoAllocs(t, func() {
+		macIdentifierSink = address.ToModifiedEUI64()
+		macAddrSink, okSink = xnetip.MacAddrFromModifiedEUI64(identifier)
+		macAddrSink, okSink = xnetip.MacAddrFromModifiedEUI64(0)
+		addrSink = address.ToIPv6LinkLocal()
+		macAddrSink, okSink = xnetip.MacAddrFromIPv4Multicast(group4)
+		macAddrSink, okSink = xnetip.MacAddrFromIPv4Multicast(group6)
+		macAddrSink, okSink = xnetip.MacAddrFromIPv4Multicast(mapped)
+		macAddrSink, okSink = xnetip.MacAddrFromIPv6Multicast(group6)
+		macAddrSink, okSink = xnetip.MacAddrFromIPv6Multicast(group4)
+		macAddrSink, okSink = xnetip.MacAddrFromIPv6Multicast(mapped)
+	})
+}
+
+func BenchmarkMacAddr_IPConversions(b *testing.B) {
+	address := xnetip.MustParseMacAddr("00:11:22:33:44:55")
+	identifier := address.ToModifiedEUI64()
+	group4 := netip.MustParseAddr("224.0.0.251")
+	group6 := netip.MustParseAddr("ff02::fb")
+	b.ReportAllocs()
+	for b.Loop() {
+		macIdentifierSink = address.ToModifiedEUI64()
+		macAddrSink, okSink = xnetip.MacAddrFromModifiedEUI64(identifier)
+		addrSink = address.ToIPv6LinkLocal()
+		macAddrSink, okSink = xnetip.MacAddrFromIPv4Multicast(group4)
+		macAddrSink, okSink = xnetip.MacAddrFromIPv6Multicast(group6)
+	}
 }

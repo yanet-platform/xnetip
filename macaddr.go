@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"net/netip"
 )
 
 // ErrInvalidMacAddr reports malformed EUI-48 address text.
@@ -171,6 +172,68 @@ func (m MacAddr) IsLocallyAdministered() bool {
 // It is the complement of [MacAddr.IsLocallyAdministered].
 func (m MacAddr) IsUniversallyAdministered() bool {
 	return !m.IsLocallyAdministered()
+}
+
+// ToModifiedEUI64 returns the modified EUI-64 interface identifier.
+//
+// The middle ff:fe octets are inserted after the third address octet, and
+// the first octet's U/L bit is inverted as defined in RFC 4291 appendix A.
+// The first octet is highest in the integer. [MacAddrFromModifiedEUI64]
+// converts the identifier back.
+func (m MacAddr) ToModifiedEUI64() uint64 {
+	prefix := m.bits >> 24
+	suffix := m.bits & 0xffffff
+	return (prefix<<40 | uint64(0xfffe)<<24 | suffix) ^ (uint64(2) << 56)
+}
+
+// MacAddrFromModifiedEUI64 reverses a MAC-derived modified interface identifier.
+//
+// Only identifiers with ff:fe in their middle octets qualify. The octets
+// are removed and the U/L bit inverted, reversing [MacAddr.ToModifiedEUI64].
+// An identifier without the marker returns the zero address and false.
+func MacAddrFromModifiedEUI64(identifier uint64) (MacAddr, bool) {
+	if identifier>>24&0xffff != 0xfffe {
+		return MacAddr{}, false
+	}
+	prefix := identifier>>40 ^ uint64(2)<<16
+	suffix := identifier & 0xffffff
+	return MacAddr{bits: prefix<<24 | suffix}, true
+}
+
+// ToIPv6LinkLocal returns fe80::/64 with the modified EUI-64 identifier.
+//
+// The returned [netip.Addr] is IPv6 without a zone, using the interface
+// identifier from [MacAddr.ToModifiedEUI64] as in RFC 4862 section 5.3.
+func (m MacAddr) ToIPv6LinkLocal() netip.Addr {
+	return addr6FromBits(0xfe80000000000000, m.ToModifiedEUI64()).Netip()
+}
+
+// MacAddrFromIPv4Multicast returns the Ethernet address of an IPv4 group.
+//
+// RFC 1112 section 6.4 places the low 23 group bits after 01:00:5e, so
+// 32 groups share each MAC address. Only native IPv4 addresses in 224.0.0.0/4
+// qualify. Invalid, IPv6 and IPv4-mapped inputs return the zero address and
+// false, preserving the address-family boundary.
+func MacAddrFromIPv4Multicast(group netip.Addr) (MacAddr, bool) {
+	if !group.Is4() || !group.IsMulticast() {
+		return MacAddr{}, false
+	}
+	bits := addr4From4(group.As4()).Bits()
+	return MacAddr{bits: 0x01005e000000 | uint64(bits&0x7fffff)}, true
+}
+
+// MacAddrFromIPv6Multicast returns the Ethernet address of an IPv6 group.
+//
+// RFC 2464 section 7 places the group's last four octets after 33:33.
+// Only IPv6 addresses in ff00::/8 qualify, and an input zone is ignored.
+// Invalid, IPv4 and IPv4-mapped inputs return the zero address and false.
+// In particular, a mapped IPv4 multicast group is not an IPv6 group.
+func MacAddrFromIPv6Multicast(group netip.Addr) (MacAddr, bool) {
+	if !group.Is6() || group.Is4In6() || !group.IsMulticast() {
+		return MacAddr{}, false
+	}
+	bits := addr6From16(group.As16()).bits
+	return MacAddr{bits: 0x333300000000 | uint64(uint32(bits.lo))}, true
 }
 
 // Compare returns -1, 0 or +1 as m sorts before, equal to or after other.

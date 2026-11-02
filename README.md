@@ -34,7 +34,9 @@ your build.
   `MacAddr` is an immutable, comparable EUI-48 value. Parse colon, hyphen
   or Cisco dotted text, format lowercase or uppercase, and use the address
   directly as a map key. `MacHyphens` and `MacDots` provide alternate text
-  forms. Parsing from bytes, text decoding and append formatting do not
+  forms. Convert modified EUI-64 interface identifiers, derive IPv6
+  link-local addresses, and map IPv4 or IPv6 multicast groups to Ethernet
+  addresses. Parsing from bytes, text decoding and append formatting do not
   allocate when output capacity is available.
 
 - **Three network types**
