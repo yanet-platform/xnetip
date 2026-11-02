@@ -1633,6 +1633,45 @@ func Test_AggregateBiContiguous6_ExactFixtures(t *testing.T) {
 			expected: []string{"2001:dead::/32", "2001:db8::/46"},
 		},
 		{
+			name: "containment removal unlocks high buddies at the zero boundary",
+			input: []string{
+				"::/128",
+				"0:0:0:1::/128",
+				"0:0:0:1::2/128",
+				"::2/ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff",
+			},
+			expected: []string{
+				"::/ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff",
+				"::2/ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff",
+			},
+		},
+		{
+			name: "containment removal unlocks high buddies with a nonzero base",
+			input: []string{
+				"2001:db8::1/128",
+				"2001:db8::2/128",
+				"2001:db8:0:1::1/128",
+				"2001:db8::2/ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff",
+			},
+			expected: []string{
+				"2001:db8::1/ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff",
+				"2001:db8::2/ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff",
+			},
+		},
+		{
+			name: "containment removal unlocks coarser high rows",
+			input: []string{
+				"::/ffff:ffff:ffff:fff0:ffff:ffff:ffff:fff8",
+				"::/ffff:ffff:ffff:fffc:ffff:ffff:ffff:fff8",
+				"::c/ffff:ffff:ffff:fffc:ffff:ffff:ffff:fffc",
+				"0:0:0:4::c/ffff:ffff:ffff:fffc:ffff:ffff:ffff:fffc",
+			},
+			expected: []string{
+				"::/ffff:ffff:ffff:fff0:ffff:ffff:ffff:fff8",
+				"::c/ffff:ffff:ffff:fff8:ffff:ffff:ffff:fffc",
+			},
+		},
+		{
 			name: "non-adjacent containment crosses sort interference",
 			input: []string{
 				"2001:db8::/32",
@@ -1775,13 +1814,13 @@ var genBiContiguousAggregateWindow = rapid.SliceOfN(rapid.Custom(
 		highPrefix := rapid.IntRange(60, 64).Draw(t, "high prefix")
 		lowPrefix := rapid.IntRange(60, 64).Draw(t, "low prefix")
 		return mustBiContiguousFromHalves(
-			rapid.Uint64().Draw(t, "high address"),
+			rapid.Uint64Range(0, 15).Draw(t, "high address"),
 			highPrefix,
-			rapid.Uint64().Draw(t, "low address"),
+			rapid.Uint64Range(0, 15).Draw(t, "low address"),
 			lowPrefix,
 		)
 	},
-), 0, 15)
+), 0, 31)
 
 // verifies on brute-forceable rectangles that the exact address union is
 // preserved and both production and independent greedy covers reach closure.
@@ -1822,6 +1861,19 @@ func Test_AggregateBiContiguous6_IdempotentAsSetProperty(t *testing.T) {
 		slices.SortFunc(first, xnetip.BiContiguous.Compare)
 		slices.SortFunc(second, xnetip.BiContiguous.Compare)
 		require.Equal(t, first, second)
+	})
+}
+
+// verifies dense overlapping rectangles reach closure in one call and a
+// repeated call preserves the exact sorted cover.
+func Test_AggregateBiContiguous6_GriddedFixpointProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		input := genBiContiguousAggregateWindow.Draw(t, "rectangles")
+		work := slices.Clone(input)
+		first := slices.Clone(xnetip.AggregateBiContiguous6(work))
+		requireBiContiguousAggregateFixpoint(t, first)
+		secondWork := slices.Clone(first)
+		require.Equal(t, first, xnetip.AggregateBiContiguous6(secondWork))
 	})
 }
 
@@ -2035,6 +2087,12 @@ func Test_AggregateBiContiguous6_AllocationFree(t *testing.T) {
 		aggregateBiContiguousMergeableGrid(256),
 		aggregateBiContiguousGeo(256),
 		aggregateBiContiguousReparentCascade(256),
+		parseBiContiguousBlocks([]string{
+			"::/128",
+			"0:0:0:1::/128",
+			"0:0:0:1::2/128",
+			"::2/ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff",
+		}),
 	}
 	for _, template := range fixtures {
 		work := make([]xnetip.BiContiguous, len(template))
@@ -2122,4 +2180,13 @@ func BenchmarkAggregateBiContiguous6_ReparentCascade_1024(b *testing.B) {
 
 func BenchmarkAggregateBiContiguous6_ReparentCascade_4096(b *testing.B) {
 	benchmarkAggregateBiContiguous6(b, aggregateBiContiguousReparentCascade(4096))
+}
+
+func BenchmarkAggregateBiContiguous6_ContainmentUnlocksMerge(b *testing.B) {
+	benchmarkAggregateBiContiguous6(b, parseBiContiguousBlocks([]string{
+		"::/128",
+		"0:0:0:1::/128",
+		"0:0:0:1::2/128",
+		"::2/ffff:ffff:ffff:fffe:ffff:ffff:ffff:ffff",
+	}))
 }

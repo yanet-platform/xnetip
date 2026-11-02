@@ -204,15 +204,28 @@ func Aggregate6(nets []Network6) []Network6 {
 // The input is reordered. Only the returned prefix is meaningful. Results
 // sort by numeric (mask, address), not [BiContiguous.Compare]. The cover is not
 // minimum: three rectangles can tile a parent with no accepted pair. For N
-// inputs and S present shapes, it is O(N*S*log N) amortized plus bounded
-// 65-level work, uses fixed stack state and allocates no heap memory.
+// inputs, S present shapes and R rounds, it is O(R*N*S*log N) amortized plus
+// bounded 65-level work per round. A round repeats when containment removal
+// can expose new high-half buddy merges, so R is at most N and is one when
+// the first containment sweep removes nothing. Fixed stack state suffices
+// and no heap memory is allocated.
 func AggregateBiContiguous6(nets []BiContiguous) []BiContiguous {
 	if len(nets) <= 1 {
 		return nets
 	}
-	live := sweepBiContiguous6(nets)
-	kept := removeBiContiguous6Containment(nets[:live])
-	return nets[:kept]
+	live := len(nets)
+	for {
+		swept := sweepBiContiguous6(nets[:live])
+		kept := removeBiContiguous6Containment(nets[:swept])
+		if kept == swept {
+			return nets[:kept]
+		}
+		// Containment can equalize previously swept high-buddy rows.
+		//
+		// Repeating from a strictly shorter prefix reaches closure without
+		// requiring callers to aggregate the result a second time.
+		live = kept
+	}
 }
 
 // sweepBiContiguous6 canonicalizes low rows and merges equal high buddy rows
