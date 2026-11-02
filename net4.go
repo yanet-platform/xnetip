@@ -308,6 +308,26 @@ func (m Network4) subnetMask(mask netip.Addr) (addr4, bool) {
 	return kernel, ok && kernel.bits&m.mask.bits == m.mask.bits
 }
 
+// SubnetsBackward partitions the network in descending address order.
+//
+// It is the exact reverse of [Network4.Subnets] with the same mask and
+// family validation. Invalid masks produce an empty sequence. The sequence
+// is re-iterable, allocation-free and stops when its consumer breaks.
+func (m Network4) SubnetsBackward(mask netip.Addr) iter.Seq[Network4] {
+	return func(yield func(Network4) bool) {
+		kernel, ok := m.subnetMask(mask)
+		if !ok {
+			return
+		}
+		extra := kernel.bits &^ m.mask.bits
+		for offset := extra; ; offset = (offset - 1) & extra {
+			if !yield(Network4{addr: addr4FromBits(m.addr.bits | offset), mask: kernel}) || offset == 0 {
+				return
+			}
+		}
+	}
+}
+
 // SubnetsWithPrefix partitions the network into typed CIDR blocks.
 //
 // The prefix must be in 0 through 32 and cover every fixed bit of the
@@ -338,6 +358,27 @@ func (m Network4) subnetPrefixMask(prefix int) (addr4, bool) {
 	}
 	mask := ipv4MaskFromPrefix(prefix)
 	return mask, mask.bits&m.mask.bits == m.mask.bits
+}
+
+// SubnetsWithPrefixBackward partitions the network into descending CIDRs.
+//
+// It is the exact reverse of [Network4.SubnetsWithPrefix]. A prefix outside
+// 0 through 32 or leaving any parent constraint uncovered yields an empty
+// sequence. The sequence is re-iterable, allocation-free and stops when
+// its consumer breaks.
+func (m Network4) SubnetsWithPrefixBackward(prefix int) iter.Seq[Contiguous[Network4]] {
+	return func(yield func(Contiguous[Network4]) bool) {
+		mask, ok := m.subnetPrefixMask(prefix)
+		if !ok {
+			return
+		}
+		extra := mask.bits &^ m.mask.bits
+		for offset := extra; ; offset = (offset - 1) & extra {
+			if !yield(Contiguous[Network4]{network: Network4{addr: addr4FromBits(m.addr.bits | offset), mask: mask}}) || offset == 0 {
+				return
+			}
+		}
+	}
 }
 
 // AddrIterator returns an independent cursor over every network address.
