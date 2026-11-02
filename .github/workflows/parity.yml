@@ -1,0 +1,37 @@
+name: Rust parity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    name: Compare with Rust reference
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Read reference revision
+        id: reference
+        run: echo "revision=$(cat tools/parity/rust-revision)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          repository: yanet-platform/netip
+          ref: ${{ steps.reference.outputs.revision }}
+          path: .parity-reference
+      - name: Compare generated corpora
+        run: python3 tools/parity/run.py --rust-source .parity-reference --output /tmp/parity-results
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: parity-results
+          path: /tmp/parity-results
