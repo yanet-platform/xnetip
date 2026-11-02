@@ -271,6 +271,14 @@ func (m Network6) NumHostBits() int {
 	return m.mask.bits.Not().OnesCount()
 }
 
+// AddrIterator returns an independent cursor over every network address.
+//
+// The cursor supports both ends, constant-time stepping and indexed skipping
+// without materializing addresses. IPv4-mapped networks remain IPv6.
+func (m Network6) AddrIterator() AddrIterator {
+	return newAddrIterator(m, false)
+}
+
 // Addrs returns every address of the network in host-index order.
 //
 // The k host positions take successive values 0 through 2^k-1, with

@@ -464,6 +464,70 @@ func (m Contiguous[T]) Difference(other Contiguous[T]) iter.Seq[Contiguous[T]] {
 	}
 }
 
+// AddrIterator returns an independent cursor over the block's addresses.
+//
+// The contiguous mask enables constant-time indexed skipping in either
+// direction. The original address family is preserved.
+func (m Contiguous[T]) AddrIterator() AddrIterator {
+	return m.network.AddrIterator()
+}
+
+// Addrs returns the block's addresses in ascending order.
+//
+// The sequence is allocation-free, re-iterable and stops when the consumer
+// breaks. Its contiguous cursor steps without scattered host-bit arithmetic.
+func (m Contiguous[T]) Addrs() iter.Seq[netip.Addr] {
+	return func(yield func(netip.Addr) bool) {
+		prefix := m.Prefix()
+		if prefix.Addr().Is4() {
+			cursor := addr4From4(prefix.Addr().As4()).Bits()
+			last := cursor | ^ipv4MaskFromPrefix(prefix.Bits()).Bits()
+			for {
+				if !yield(addr4FromBits(cursor).Netip()) || cursor == last {
+					return
+				}
+				cursor++
+			}
+		}
+		cursor := addr6From16(prefix.Addr().As16()).bits
+		last := cursor.Or(uint128MaskFromPrefix(prefix.Bits()).Not())
+		for {
+			if !yield(addr6{cursor}.Netip()) || cursor == last {
+				return
+			}
+			cursor = cursor.AddOne()
+		}
+	}
+}
+
+// AddrsBackward returns the block's addresses in descending order.
+//
+// The sequence is allocation-free, re-iterable and stops when the consumer
+// breaks. It yields exactly the reverse of Addrs.
+func (m Contiguous[T]) AddrsBackward() iter.Seq[netip.Addr] {
+	return func(yield func(netip.Addr) bool) {
+		prefix := m.Prefix()
+		if prefix.Addr().Is4() {
+			base := addr4From4(prefix.Addr().As4()).Bits()
+			cursor := base | ^ipv4MaskFromPrefix(prefix.Bits()).Bits()
+			for {
+				if !yield(addr4FromBits(cursor).Netip()) || cursor == base {
+					return
+				}
+				cursor--
+			}
+		}
+		base := addr6From16(prefix.Addr().As16()).bits
+		cursor := base.Or(uint128MaskFromPrefix(prefix.Bits()).Not())
+		for {
+			if !yield(addr6{cursor}.Netip()) || cursor == base {
+				return
+			}
+			cursor = cursor.SubOne()
+		}
+	}
+}
+
 // PrefixLen returns the prefix length of the block, total by the
 // contiguity invariant.
 //
@@ -558,6 +622,9 @@ func (m *Contiguous[T]) UnmarshalText(text []byte) error {
 // It is a constraint for type parameters, not an interface for values.
 // Methods are added by the wrapper session that first needs them.
 type network[T any] interface {
+	// AddrIterator returns an independent address cursor.
+	AddrIterator() AddrIterator
+
 	Network4 | Network6 | Network
 
 	// Compare is the concrete type's own three-way comparison.

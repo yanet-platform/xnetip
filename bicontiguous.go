@@ -226,6 +226,14 @@ func (m BiContiguous) Difference(other BiContiguous) iter.Seq[BiContiguous] {
 	}
 }
 
+// AddrIterator returns an independent cursor over the rectangle's addresses.
+//
+// Both ends and indexed skipping preserve the IPv6 address family and the
+// same host-index order as Addrs.
+func (m BiContiguous) AddrIterator() AddrIterator {
+	return m.network6.AddrIterator()
+}
+
 // Addrs returns every address in row-major host-index order.
 //
 // The low half's host counter cycles fastest and carries into the high

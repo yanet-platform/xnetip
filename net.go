@@ -306,6 +306,14 @@ func (m Network) NumHostBits() int {
 	return m.network.NumHostBits()
 }
 
+// AddrIterator returns an independent cursor over every network address.
+//
+// The cursor supports both ends and indexed skipping without materializing
+// addresses. Its values keep this network's address family.
+func (m Network) AddrIterator() AddrIterator {
+	return newAddrIterator(m.network, m.is4)
+}
+
 // Addrs returns every address of the network in host-index order,
 // each carrying the network's address family.
 //
