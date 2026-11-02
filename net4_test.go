@@ -16,6 +16,47 @@ import (
 	"pgregory.net/rapid"
 )
 
+// verifies that IPv4 wildcards invert every mask bit, including holes.
+func Test_Network4_Hostmask_MaskShapes(t *testing.T) {
+	cases := []struct {
+		name    string
+		network string
+		want    string
+	}{
+		{name: "universe frees every bit", network: "0.0.0.0/0", want: "255.255.255.255"},
+		{name: "host route frees no bits", network: "255.255.255.255/32", want: "0.0.0.0"},
+		{name: "CIDR wildcard has trailing ones", network: "192.168.0.0/24", want: "0.0.0.255"},
+		{name: "two runs leave the third octet free", network: "10.1.0.1/255.255.0.255", want: "0.0.255.0"},
+		{name: "alternating mask inverts every position", network: "170.85.170.85/170.85.170.85", want: "85.170.85.170"},
+		{name: "lowest bit stays constrained", network: "0.0.0.1/0.0.0.1", want: "255.255.255.254"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseNetwork4(testCase.network)
+			require.Equal(t, netip.MustParseAddr(testCase.want), network.Hostmask())
+		})
+	}
+	require.Equal(t, netip.MustParseAddr("255.255.255.255"), xnetip.Network4{}.Hostmask())
+}
+
+// verifies that arbitrary IPv4 wildcards are the bytewise mask complement.
+func Test_Network4_Hostmask_ComplementProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork4.Draw(t, "network")
+		want := network.Mask().As4()
+		for idx := range want {
+			want[idx] = ^want[idx]
+		}
+		require.Equal(t, netip.AddrFrom4(want), network.Hostmask())
+	})
+}
+
+// verifies that obtaining an IPv4 wildcard does not allocate.
+func Test_Network4_Hostmask_NoAllocations(t *testing.T) {
+	network := xnetip.MustParseNetwork4("10.1.0.1/255.255.0.255")
+	requireNoAllocs(t, func() { _ = network.Hostmask() })
+}
+
 // verifies that the constructor clears every address bit outside the
 // mask and keeps the mask unchanged, whatever the mask's shape.
 func Test_Network4From_NormalizesAddressByMask(t *testing.T) {

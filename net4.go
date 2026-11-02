@@ -243,6 +243,14 @@ func (m Network4) Mask() netip.Addr {
 	return m.mask.Netip()
 }
 
+// Hostmask returns the inverse of the network mask as an IPv4 address.
+//
+// Every host bit is one and every constrained bit is zero, including
+// non-contiguous masks. This is the wildcard mask used in Cisco ACLs.
+func (m Network4) Hostmask() netip.Addr {
+	return addr4FromBits(^m.mask.Bits()).Netip()
+}
+
 // LastAddr returns the greatest address in this network.
 //
 // For a contiguous network this is the broadcast address. For a
