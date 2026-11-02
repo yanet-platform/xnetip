@@ -18,6 +18,49 @@ import (
 	"pgregory.net/rapid"
 )
 
+// verifies that IPv6 wildcards invert both mask halves, including holes.
+func Test_Network6_Hostmask_MaskShapes(t *testing.T) {
+	cases := []struct {
+		name    string
+		network string
+		want    string
+	}{
+		{name: "universe frees every bit", network: "::/0", want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+		{name: "host route frees no bits", network: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128", want: "::"},
+		{name: "CIDR wildcard covers the lower half", network: "2001:db8::/64", want: "::ffff:ffff:ffff:ffff"},
+		{name: "two runs leave two independent gaps", network: "2001:db8::/ffff:ffff::ffff:0:0:0", want: "::ffff:ffff:0:ffff:ffff:ffff"},
+		{name: "alternating groups invert independently", network: "::/ffff:0:ffff:0:ffff:0:ffff:0", want: "0:ffff:0:ffff:0:ffff:0:ffff"},
+		{name: "hole straddles the half boundary", network: "::/ffff:ffff:ffff:0:0:ffff:ffff:ffff", want: "0:0:0:ffff:ffff::"},
+		{name: "lowest bit stays constrained", network: "::1/::1", want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe"},
+		{name: "mapped network keeps an IPv6 wildcard", network: "::ffff:192.0.2.0/120", want: "::ff"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseNetwork6(testCase.network)
+			require.Equal(t, netip.MustParseAddr(testCase.want), network.Hostmask())
+		})
+	}
+	require.Equal(t, netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), xnetip.Network6{}.Hostmask())
+}
+
+// verifies that arbitrary IPv6 wildcards are the bytewise mask complement.
+func Test_Network6_Hostmask_ComplementProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork6.Draw(t, "network")
+		want := network.Mask().As16()
+		for idx := range want {
+			want[idx] = ^want[idx]
+		}
+		require.Equal(t, netip.AddrFrom16(want), network.Hostmask())
+	})
+}
+
+// verifies that obtaining an IPv6 wildcard does not allocate.
+func Test_Network6_Hostmask_NoAllocations(t *testing.T) {
+	network := xnetip.MustParseNetwork6("2001:db8::/ffff:ffff::ffff:0:0:0")
+	requireNoAllocs(t, func() { _ = network.Hostmask() })
+}
+
 // verifies that the constructor clears every address bit outside the
 // mask and keeps the mask unchanged, whatever the mask's shape.
 //

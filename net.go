@@ -261,6 +261,19 @@ func (m Network) Mask() netip.Addr {
 	return m.network.mask.Netip()
 }
 
+// Hostmask returns the inverse of the mask in the network's own family.
+//
+// Every host bit is one and every constrained bit is zero, including
+// non-contiguous masks. An IPv4 result has exactly 32 bits, and an
+// IPv4-mapped IPv6 network keeps an IPv6 result. The result is zone-free.
+func (m Network) Hostmask() netip.Addr {
+	hostMask := m.network.mask.bits.Not()
+	if m.is4 {
+		return addr4FromBits(uint32(hostMask.lo)).Netip()
+	}
+	return addr6{hostMask}.Netip()
+}
+
 // LastAddr returns the greatest address in this network, in the
 // network's address family.
 //

@@ -237,6 +237,15 @@ func (m Network6) Mask() netip.Addr {
 	return m.mask.Netip()
 }
 
+// Hostmask returns the inverse of the network mask as an IPv6 address.
+//
+// Every host bit is one and every constrained bit is zero, including
+// non-contiguous masks. The result is zone-free and stays IPv6 even
+// for an IPv4-mapped network.
+func (m Network6) Hostmask() netip.Addr {
+	return addr6{m.mask.bits.Not()}.Netip()
+}
+
 // LastAddr returns the greatest address in this network.
 //
 // For a contiguous network this is the last address of the CIDR

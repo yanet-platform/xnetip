@@ -16,6 +16,53 @@ import (
 	"pgregory.net/rapid"
 )
 
+// verifies that wildcards preserve the network family, including mapped IPv6.
+func Test_Network_Hostmask_PreservesFamily(t *testing.T) {
+	cases := []struct {
+		name    string
+		network string
+		want    string
+	}{
+		{name: "IPv4 universe excludes the storage prefix", network: "0.0.0.0/0", want: "255.255.255.255"},
+		{name: "IPv4 host has a zero IPv4 wildcard", network: "255.255.255.255/32", want: "0.0.0.0"},
+		{name: "IPv4 holes stay in IPv4", network: "10.0.0.0/255.0.255.0", want: "0.255.0.255"},
+		{name: "IPv6 universe frees all 128 bits", network: "::/0", want: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+		{name: "IPv6 host has a zero IPv6 wildcard", network: "::1/128", want: "::"},
+		{name: "mapped IPv6 stays IPv6", network: "::ffff:192.0.2.0/120", want: "::ff"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			network := xnetip.MustParseNetwork(testCase.network)
+			require.Equal(t, netip.MustParseAddr(testCase.want), network.Hostmask())
+		})
+	}
+	require.Equal(t, netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"), xnetip.Network{}.Hostmask())
+}
+
+// verifies that the wildcard agrees with the concrete family's view.
+func Test_Network_Hostmask_FamilyProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		network := genNetwork.Draw(t, "network")
+		if concrete, ok := network.IPv4(); ok {
+			require.Equal(t, concrete.Hostmask(), network.Hostmask())
+		} else {
+			concrete, ok := network.IPv6()
+			require.True(t, ok)
+			require.Equal(t, concrete.Hostmask(), network.Hostmask())
+		}
+	})
+}
+
+// verifies that obtaining either family's wildcard does not allocate.
+func Test_Network_Hostmask_NoAllocations(t *testing.T) {
+	network4 := xnetip.MustParseNetwork("10.0.0.0/255.0.255.0")
+	network6 := xnetip.MustParseNetwork("2001:db8::/ffff:ffff::ffff:0:0:0")
+	requireNoAllocs(t, func() {
+		_ = network4.Hostmask()
+		_ = network6.Hostmask()
+	})
+}
+
 // verifies that wrapping an IPv4 network reports the IPv4 family,
 // round-trips through the IPv4 extractor and declines the IPv6 one.
 func Test_NetworkFrom4_RoundTripsThroughIPv4(t *testing.T) {
