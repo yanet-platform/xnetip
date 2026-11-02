@@ -11,11 +11,13 @@
 package xnetip_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"iter"
 	"math"
 	"net/netip"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -51,6 +53,51 @@ func supernetMaskOracle(mask netip.Addr) (netip.Addr, bool) {
 		}
 	}
 	return netip.Addr{}, false
+}
+
+// requireASCIIParseParity compares byte parsing with its string
+// reference, including zero results and owned error diagnostics.
+func requireASCIIParseParity[T comparable](
+	t require.TestingT,
+	input []byte,
+	parseASCII func([]byte) (T, error),
+	parseString func(string) (T, error),
+) {
+	want, wantError := parseString(string(input))
+	actual, actualError := parseASCII(input)
+	require.Equal(t, wantError == nil, actualError == nil, "input %q", input)
+	require.Equal(t, want, actual)
+	if wantError != nil {
+		require.Equal(t, wantError.Error(), strings.Replace(actualError.Error(), "ASCII(", "(", 1))
+	}
+}
+
+// requireNextASCIIParseParity compares maximal-token parsing with
+// independently splitting the alphabet and using the string parser.
+func requireNextASCIIParseParity[T comparable](
+	t require.TestingT,
+	input []byte,
+	alphabet string,
+	parseNext func([]byte) (T, []byte, error),
+	parseString func(string) (T, error),
+) {
+	end := bytes.IndexFunc(input, func(character rune) bool {
+		return !strings.ContainsRune(alphabet, character)
+	})
+	if end < 0 {
+		end = len(input)
+	}
+	want, wantError := parseString(string(input[:end]))
+	actual, rest, actualError := parseNext(input)
+	require.Equal(t, wantError == nil, actualError == nil, "input %q", input)
+	require.Equal(t, want, actual)
+	if wantError != nil {
+		require.Nil(t, rest)
+		diagnostic := strings.Replace(actualError.Error(), "ParseNext", "Parse", 1)
+		require.Equal(t, wantError.Error(), strings.Replace(diagnostic, "ASCII(", "(", 1))
+	} else {
+		require.Equal(t, input[end:], rest)
+	}
 }
 
 // verifies that an allocation-free closure passes the helper.

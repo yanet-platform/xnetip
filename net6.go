@@ -202,15 +202,17 @@ func ipv6ParsedKernel(addr netip.Addr) (addr6, error) {
 	return kernel, nil
 }
 
-// parseText parses CIDR-block text for the generic contiguous
+// parseTextASCII parses CIDR-block bytes for the generic contiguous
 // wrapper, exactly as [ParseContiguous6] does, its error labels included.
 //
 // The receiver is a zero-value dispatch token: a generic method
 // cannot name a per-family function, so the constraint carries this
 // route instead.
-func (Network6) parseText(s string) (Network6, error) {
-	block, err := ParseContiguous6(s)
-	return block.Network(), err
+func (Network6) parseTextASCII(text []byte) (Network6, error) {
+	if network, ok := network6ASCII(text); ok && network.IsContiguous() {
+		return network, nil
+	}
+	return Network6{}, asciiParseError(text, "ParseContiguous6", ParseContiguous6)
 }
 
 // MustParseNetwork6 calls [ParseNetwork6] and panics on error.
@@ -936,7 +938,7 @@ func (m *Network6) UnmarshalText(text []byte) error {
 	if len(text) == 0 {
 		return wrapParseError("Network6.UnmarshalText", "", ErrEmptyInput, nil)
 	}
-	network, err := ParseNetwork6(string(text))
+	network, err := parseNetwork6ASCII(text, "ParseNetwork6")
 	if err != nil {
 		return err
 	}

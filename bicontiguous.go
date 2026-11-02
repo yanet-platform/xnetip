@@ -377,10 +377,9 @@ func (m *BiContiguous) UnmarshalText(text []byte) error {
 	if len(text) == 0 {
 		return wrapParseError("BiContiguous.UnmarshalText", "", ErrEmptyInput, nil)
 	}
-	wrapper, err := ParseBiContiguous(string(text))
-	if err != nil {
-		return err
+	if network, ok := network6ASCII(text); ok && network.IsBicontiguous() {
+		*m = BiContiguous{network6: network}
+		return nil
 	}
-	*m = wrapper
-	return nil
+	return asciiParseError(text, "", ParseBiContiguous)
 }
