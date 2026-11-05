@@ -4,9 +4,10 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/yanet-platform/xnetip.svg)](https://pkg.go.dev/github.com/yanet-platform/xnetip)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-IPv4 and IPv6 networks for Go with arbitrary subnet masks, exact set algebra,
+IPv4 and IPv6 networks for Go with arbitrary masks, exact set algebra,
 lazy traversal and immutable EUI-48 MAC addresses. The implementation follows
-Rust `netip` 0.4.0, with explicit Go API contracts described below.
+[Rust `netip`](https://github.com/yanet-platform/netip) 0.4.0, with explicit Go
+API contracts described below.
 
 ```go
 network := xnetip.MustParseNetwork4("10.0.0.0/255.0.255.0")
